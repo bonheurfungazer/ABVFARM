@@ -1,0 +1,6 @@
+{
+  "name": "ABV Farm",
+  "description": "App de gestion d'élevage de lapins",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

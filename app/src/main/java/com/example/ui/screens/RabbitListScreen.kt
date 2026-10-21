@@ -42,6 +42,7 @@ import androidx.compose.ui.platform.LocalContext
 import com.example.ui.navigation.Screen
 import com.example.ui.theme.*
 import com.example.viewmodels.FarmViewModel
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -50,6 +51,7 @@ fun RabbitListScreen(navController: NavController, viewModel: FarmViewModel) {
     val matingRecords by viewModel.matingRecords.collectAsState()
     val treatmentRecords by viewModel.treatmentRecords.collectAsState()
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
     var searchQuery by remember { mutableStateOf("") }
     var selectedFilterChip by remember { mutableStateOf("Tous") } // "Tous", "Males", "Femelles", "Adultes", "Gestation", "Allaitante", "Jeunes", "Lapereaux"
@@ -166,25 +168,27 @@ fun RabbitListScreen(navController: NavController, viewModel: FarmViewModel) {
                         }
                     },
                     actions = {
-                        IconButton(
-                            onClick = {
-                                val csvUri = viewModel.exportRabbitsCsv(context)
-                                if (csvUri != null) {
-                                    val sendIntent = android.content.Intent().apply {
-                                        action = android.content.Intent.ACTION_SEND
-                                        putExtra(android.content.Intent.EXTRA_STREAM, csvUri)
-                                        type = "text/csv"
-                                        addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                    }
-                                    val shareIntent = android.content.Intent.createChooser(sendIntent, "Export Tableur Lapins (CSV)")
-                                    context.startActivity(shareIntent)
-                                } else {
-                                    android.widget.Toast.makeText(context, "Échec de l'exportation CSV", android.widget.Toast.LENGTH_SHORT).show()
-                                }
-                            }
-                        ) {
-                            Icon(Icons.Rounded.TableChart, contentDescription = "Exporter en CSV / Tableur", tint = MaterialTheme.colorScheme.primary)
+        IconButton(
+            onClick = {
+                scope.launch {
+                    val csvUri = viewModel.exportRabbitsCsv(context)
+                    if (csvUri != null) {
+                        val sendIntent = android.content.Intent().apply {
+                            action = android.content.Intent.ACTION_SEND
+                            putExtra(android.content.Intent.EXTRA_STREAM, csvUri)
+                            type = "text/csv"
+                            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
                         }
+                        val shareIntent = android.content.Intent.createChooser(sendIntent, "Export Tableur Lapins (CSV)")
+                        context.startActivity(shareIntent)
+                    } else {
+                        android.widget.Toast.makeText(context, "Échec de l'exportation CSV", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        ) {
+            Icon(Icons.Rounded.TableChart, contentDescription = "Exporter en CSV / Tableur", tint = MaterialTheme.colorScheme.primary)
+        }
 
                         if (searchQuery.isNotEmpty() || selectedFilterChip != "Tous" || selectedSexFilter != "Tous" || selectedAgeFilter != "Tous") {
                             IconButton(onClick = {

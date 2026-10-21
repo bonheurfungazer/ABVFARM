@@ -9,8 +9,14 @@ interface FarmDao {
     @Query("SELECT * FROM rabbits ORDER BY name ASC")
     fun getAllRabbitsFlow(): Flow<List<Rabbit>>
 
+    @Query("SELECT * FROM rabbits ORDER BY name ASC")
+    suspend fun getAllRabbits(): List<Rabbit>
+
     @Query("SELECT * FROM rabbits WHERE id = :id LIMIT 1")
     suspend fun getRabbitById(id: Int): Rabbit?
+
+    @Query("SELECT MAX(id) FROM rabbits")
+    suspend fun getMaxRabbitId(): Int?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertRabbit(rabbit: Rabbit): Long
@@ -25,6 +31,9 @@ interface FarmDao {
     @Query("SELECT * FROM mating_records ORDER BY matingDate DESC")
     fun getAllMatingRecordsFlow(): Flow<List<MatingRecord>>
 
+    @Query("SELECT * FROM mating_records ORDER BY matingDate DESC")
+    suspend fun getAllMatingRecords(): List<MatingRecord>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMatingRecord(record: MatingRecord): Long
 
@@ -37,6 +46,9 @@ interface FarmDao {
     // ---- Inventory ----
     @Query("SELECT * FROM inventory_items ORDER BY purchaseDate DESC")
     fun getAllInventoryItemsFlow(): Flow<List<InventoryItem>>
+
+    @Query("SELECT * FROM inventory_items ORDER BY purchaseDate DESC")
+    suspend fun getAllInventoryItems(): List<InventoryItem>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertInventoryItem(item: InventoryItem): Long
@@ -51,6 +63,9 @@ interface FarmDao {
     @Query("SELECT * FROM reminders ORDER BY dueDate ASC")
     fun getAllRemindersFlow(): Flow<List<Reminder>>
 
+    @Query("SELECT * FROM reminders ORDER BY dueDate ASC")
+    suspend fun getAllReminders(): List<Reminder>
+
     @Query("SELECT * FROM reminders WHERE isCompleted = 0")
     suspend fun getAllPendingReminders(): List<Reminder>
 
@@ -63,7 +78,7 @@ interface FarmDao {
     @Delete
     suspend fun deleteReminder(reminder: Reminder)
 
-    @Query("DELETE FROM reminders WHERE dueDate < :threshold AND isCompleted = 0")
+    @Query("DELETE FROM reminders WHERE dueDate < :threshold AND isCompleted = 1")
     suspend fun deleteRemindersBefore(threshold: Long)
 
     // ---- Weight Records ----
@@ -92,9 +107,12 @@ interface FarmDao {
     @Delete
     suspend fun deletePhotoRecord(photoRecord: PhotoRecord)
 
-    // ---- Treatment Records (Option 2) ----
+    // ---- Treatment Records ----
     @Query("SELECT * FROM treatment_records ORDER BY date DESC")
     fun getAllTreatmentRecordsFlow(): Flow<List<TreatmentRecord>>
+
+    @Query("SELECT * FROM treatment_records ORDER BY date DESC")
+    suspend fun getAllTreatmentRecords(): List<TreatmentRecord>
 
     @Query("SELECT * FROM treatment_records WHERE rabbitId = :rabbitId ORDER BY date DESC")
     fun getTreatmentsForRabbitFlow(rabbitId: Int): Flow<List<TreatmentRecord>>
@@ -105,9 +123,12 @@ interface FarmDao {
     @Delete
     suspend fun deleteTreatmentRecord(record: TreatmentRecord)
 
-    // ---- Daily Feed Logs (Option 3) ----
+    // ---- Daily Feed Logs ----
     @Query("SELECT * FROM daily_feed_logs ORDER BY feedDate DESC")
     fun getAllDailyFeedLogsFlow(): Flow<List<DailyFeedLog>>
+
+    @Query("SELECT * FROM daily_feed_logs ORDER BY feedDate DESC")
+    suspend fun getAllDailyFeedLogs(): List<DailyFeedLog>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertDailyFeedLog(log: DailyFeedLog): Long
@@ -118,6 +139,9 @@ interface FarmDao {
     // ---- Fattening Batches ----
     @Query("SELECT * FROM fattening_batches ORDER BY weaningDate DESC")
     fun getAllFatteningBatchesFlow(): Flow<List<FatteningBatch>>
+
+    @Query("SELECT * FROM fattening_batches ORDER BY weaningDate DESC")
+    suspend fun getAllFatteningBatches(): List<FatteningBatch>
 
     @Query("SELECT * FROM fattening_batches WHERE id = :id LIMIT 1")
     suspend fun getFatteningBatchById(id: Long): FatteningBatch?
@@ -134,6 +158,9 @@ interface FarmDao {
     // ---- Financial Transactions ----
     @Query("SELECT * FROM financial_transactions ORDER BY date DESC")
     fun getAllFinancialTransactionsFlow(): Flow<List<FinancialTransaction>>
+
+    @Query("SELECT * FROM financial_transactions ORDER BY date DESC")
+    suspend fun getAllFinancialTransactions(): List<FinancialTransaction>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertFinancialTransaction(tx: FinancialTransaction): Long

@@ -480,4 +480,131 @@ class FirestoreFarmRepository(private val db: FirebaseFirestore) {
             throw e
         }
     }
+
+    // ---------------- FATTENING BATCHES ----------------
+    fun observeFatteningBatches(): Flow<List<FirestoreFatteningBatch>> = flow {
+        val uid = requireUserId()
+        val path = "users/$uid/fattening_batches"
+        emitAll(
+            db.collection("users").document(uid).collection("fattening_batches")
+                .snapshots()
+                .map { snapshot -> snapshot.toObjects(FirestoreFatteningBatch::class.java) }
+                .catch { error ->
+                    if (error is Exception) handleFirestoreError(error, OperationType.LIST, path)
+                    throw error
+                }
+        )
+    }
+
+    suspend fun saveFatteningBatch(batch: FirestoreFatteningBatch, docId: String? = null): String {
+        val uid = requireUserId()
+        val col = db.collection("users").document(uid).collection("fattening_batches")
+        val targetId = if (!docId.isNullOrBlank()) docId else if (batch.id.isNotBlank()) batch.id else "batch_${System.currentTimeMillis()}"
+        val docRef = col.document(targetId)
+
+        val payload = mutableMapOf<String, Any?>(
+            "userId" to uid,
+            "localId" to batch.localId,
+            "batchCode" to batch.batchCode,
+            "weaningDate" to batch.weaningDate,
+            "initialCount" to batch.initialCount,
+            "currentCount" to batch.currentCount,
+            "mortalityCount" to batch.mortalityCount,
+            "cageLocation" to batch.cageLocation,
+            "averageWeightGrams" to batch.averageWeightGrams,
+            "targetSaleDate" to batch.targetSaleDate,
+            "status" to batch.status,
+            "updatedAt" to FieldValue.serverTimestamp()
+        )
+        if (batch.matingRecordId != null) payload["matingRecordId"] = batch.matingRecordId
+
+        try {
+            val exists = try { docRef.get().await().exists() } catch (e: Exception) { false }
+            if (!exists) {
+                payload["createdAt"] = FieldValue.serverTimestamp()
+            }
+            docRef.set(payload, SetOptions.merge()).await()
+            return targetId
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, docRef.path)
+            throw e
+        }
+    }
+
+    suspend fun deleteFatteningBatch(docId: String) {
+        val uid = requireUserId()
+        val docRef = db.collection("users").document(uid).collection("fattening_batches").document(docId)
+        try {
+            docRef.delete().await()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.DELETE, docRef.path)
+            throw e
+        }
+    }
+
+    // ---------------- FINANCIAL TRANSACTIONS ----------------
+    fun observeFinancialTransactions(): Flow<List<FirestoreFinancialTransaction>> = flow {
+        val uid = requireUserId()
+        val path = "users/$uid/financial_transactions"
+        emitAll(
+            db.collection("users").document(uid).collection("financial_transactions")
+                .snapshots()
+                .map { snapshot -> snapshot.toObjects(FirestoreFinancialTransaction::class.java) }
+                .catch { error ->
+                    if (error is Exception) handleFirestoreError(error, OperationType.LIST, path)
+                    throw error
+                }
+        )
+    }
+
+    suspend fun saveFinancialTransaction(tx: FirestoreFinancialTransaction, docId: String? = null): String {
+        val uid = requireUserId()
+        val col = db.collection("users").document(uid).collection("financial_transactions")
+        val targetId = if (!docId.isNullOrBlank()) docId else if (tx.id.isNotBlank()) tx.id else "tx_${System.currentTimeMillis()}"
+        val docRef = col.document(targetId)
+
+        val payload = mutableMapOf<String, Any?>(
+            "userId" to uid,
+            "localId" to tx.localId,
+            "date" to tx.date,
+            "type" to tx.type,
+            "category" to tx.category,
+            "amountFcfa" to tx.amountFcfa,
+            "description" to tx.description,
+            "updatedAt" to FieldValue.serverTimestamp()
+        )
+        if (tx.relatedBatchId != null) payload["relatedBatchId"] = tx.relatedBatchId
+        if (tx.relatedRabbitId != null) payload["relatedRabbitId"] = tx.relatedRabbitId
+
+        try {
+            val exists = try { docRef.get().await().exists() } catch (e: Exception) { false }
+            if (!exists) {
+                payload["createdAt"] = FieldValue.serverTimestamp()
+            }
+            docRef.set(payload, SetOptions.merge()).await()
+            return targetId
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, docRef.path)
+            throw e
+        }
+    }
+
+    suspend fun deleteFinancialTransaction(docId: String) {
+        val uid = requireUserId()
+        val docRef = db.collection("users").document(uid).collection("financial_transactions").document(docId)
+        try {
+            docRef.delete().await()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.DELETE, docRef.path)
+            throw e
+        }
+    }
 }

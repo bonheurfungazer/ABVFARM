@@ -3023,11 +3023,13 @@ fun ParentShortcutCard(
 
 private fun saveBitmapToCache(context: android.content.Context, bitmap: android.graphics.Bitmap): android.net.Uri? {
     return try {
-        val cachePath = java.io.File(context.cacheDir, "images")
-        cachePath.mkdirs()
-        val file = java.io.File(cachePath, "rabbit_photo_${System.currentTimeMillis()}.jpg")
+        val imagesPath = java.io.File(context.filesDir, "images")
+        if (!imagesPath.exists()) {
+            imagesPath.mkdirs()
+        }
+        val file = java.io.File(imagesPath, "rabbit_photo_${System.currentTimeMillis()}.jpg")
         val stream = java.io.FileOutputStream(file)
-        bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 100, stream)
+        bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 95, stream)
         stream.close()
         android.net.Uri.fromFile(file)
     } catch (e: Exception) {

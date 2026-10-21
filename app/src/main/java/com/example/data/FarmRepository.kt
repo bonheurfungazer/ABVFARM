@@ -9,20 +9,25 @@ class FarmRepository(private val farmDao: FarmDao) {
     val inventoryItems: Flow<List<InventoryItem>> = farmDao.getAllInventoryItemsFlow()
     val reminders: Flow<List<Reminder>> = farmDao.getAllRemindersFlow()
 
+    suspend fun getAllRabbits(): List<Rabbit> = farmDao.getAllRabbits()
     suspend fun getRabbitById(id: Int): Rabbit? = farmDao.getRabbitById(id)
+    suspend fun getMaxRabbitId(): Int? = farmDao.getMaxRabbitId()
 
     suspend fun insertRabbit(rabbit: Rabbit): Long = farmDao.insertRabbit(rabbit)
     suspend fun updateRabbit(rabbit: Rabbit) = farmDao.updateRabbit(rabbit)
     suspend fun deleteRabbit(rabbit: Rabbit) = farmDao.deleteRabbit(rabbit)
 
+    suspend fun getAllMatingRecords(): List<MatingRecord> = farmDao.getAllMatingRecords()
     suspend fun insertMatingRecord(record: MatingRecord): Long = farmDao.insertMatingRecord(record)
     suspend fun updateMatingRecord(record: MatingRecord) = farmDao.updateMatingRecord(record)
     suspend fun deleteMatingRecord(record: MatingRecord) = farmDao.deleteMatingRecord(record)
 
+    suspend fun getAllInventoryItems(): List<InventoryItem> = farmDao.getAllInventoryItems()
     suspend fun insertInventoryItem(item: InventoryItem): Long = farmDao.insertInventoryItem(item)
     suspend fun updateInventoryItem(item: InventoryItem) = farmDao.updateInventoryItem(item)
     suspend fun deleteInventoryItem(item: InventoryItem) = farmDao.deleteInventoryItem(item)
 
+    suspend fun getAllReminders(): List<Reminder> = farmDao.getAllReminders()
     suspend fun insertReminder(reminder: Reminder): Long = farmDao.insertReminder(reminder)
     suspend fun updateReminder(reminder: Reminder) = farmDao.updateReminder(reminder)
     suspend fun deleteReminder(reminder: Reminder) = farmDao.deleteReminder(reminder)
@@ -53,6 +58,9 @@ class FarmRepository(private val farmDao: FarmDao) {
     // ---- Treatment Records ----
     val treatmentRecords: Flow<List<TreatmentRecord>> = farmDao.getAllTreatmentRecordsFlow()
 
+    suspend fun getAllTreatmentRecords(): List<TreatmentRecord> =
+        farmDao.getAllTreatmentRecords()
+
     fun getTreatmentsForRabbit(rabbitId: Int): Flow<List<TreatmentRecord>> =
         farmDao.getTreatmentsForRabbitFlow(rabbitId)
 
@@ -65,6 +73,9 @@ class FarmRepository(private val farmDao: FarmDao) {
     // ---- Daily Feed Logs ----
     val dailyFeedLogs: Flow<List<DailyFeedLog>> = farmDao.getAllDailyFeedLogsFlow()
 
+    suspend fun getAllDailyFeedLogs(): List<DailyFeedLog> =
+        farmDao.getAllDailyFeedLogs()
+
     suspend fun insertDailyFeedLog(log: DailyFeedLog): Long =
         farmDao.insertDailyFeedLog(log)
 
@@ -73,6 +84,9 @@ class FarmRepository(private val farmDao: FarmDao) {
 
     // ---- Fattening Batches ----
     val fatteningBatches: Flow<List<FatteningBatch>> = farmDao.getAllFatteningBatchesFlow()
+
+    suspend fun getAllFatteningBatches(): List<FatteningBatch> =
+        farmDao.getAllFatteningBatches()
 
     suspend fun getFatteningBatchById(id: Long): FatteningBatch? =
         farmDao.getFatteningBatchById(id)
@@ -88,6 +102,9 @@ class FarmRepository(private val farmDao: FarmDao) {
 
     // ---- Financial Transactions ----
     val financialTransactions: Flow<List<FinancialTransaction>> = farmDao.getAllFinancialTransactionsFlow()
+
+    suspend fun getAllFinancialTransactions(): List<FinancialTransaction> =
+        farmDao.getAllFinancialTransactions()
 
     suspend fun insertFinancialTransaction(tx: FinancialTransaction): Long =
         farmDao.insertFinancialTransaction(tx)

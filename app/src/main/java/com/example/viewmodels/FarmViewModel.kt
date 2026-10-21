@@ -5,10 +5,13 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.*
 import com.example.ReminderScheduler
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.Calendar
 
 class FarmViewModel(application: Application) : AndroidViewModel(application) {
@@ -119,30 +122,39 @@ class FarmViewModel(application: Application) : AndroidViewModel(application) {
             initialValue = emptyList()
         )
 
+    private val authListener = com.google.firebase.auth.FirebaseAuth.AuthStateListener { auth ->
+        val user = auth.currentUser
+        _isCloudConnected.value = user != null
+        _currentUserEmail.value = user?.email
+        if (user != null) {
+            startCloudSync(user.uid, user.displayName, user.email)
+        } else {
+            stopCloudSync()
+        }
+    }
+
     init {
-        // App starts with clean reminders maintenance and automatic alarm scheduling
+        // App starts with clean reminders maintenance and one-time initial alarm scheduling
         cleanExpiredReminders()
         viewModelScope.launch {
-            repository.reminders.collect { list ->
+            try {
+                val list = repository.reminders.first()
                 val now = System.currentTimeMillis()
                 list.filter { !it.isCompleted && it.dueDate > now }.forEach { rem ->
                     ReminderScheduler.scheduleReminder(getApplication(), rem)
                 }
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
         }
 
-        // Firebase Auth listener for cloud sync
-        val authListener = com.google.firebase.auth.FirebaseAuth.AuthStateListener { auth ->
-            val user = auth.currentUser
-            _isCloudConnected.value = user != null
-            _currentUserEmail.value = user?.email
-            if (user != null) {
-                startCloudSync(user.uid, user.displayName, user.email)
-            } else {
-                stopCloudSync()
-            }
-        }
         firebaseAuth.addAuthStateListener(authListener)
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        firebaseAuth.removeAuthStateListener(authListener)
+        cloudJob?.cancel()
     }
 
     fun startCloudSync(uid: String, displayName: String?, email: String?) {
@@ -317,6 +329,56 @@ class FarmViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
             }
+
+            // Launch listener for fattening batches
+            launch {
+                firestoreRepo.observeFatteningBatches().collect { cloudBatches ->
+                    if (cloudBatches.isNotEmpty()) {
+                        isSyncingFromCloud = true
+                        try {
+                            val localList = repository.getAllFatteningBatches()
+                            for (cb in cloudBatches) {
+                                val roomBatch = cb.toRoom()
+                                val existing = localList.find { it.id == roomBatch.id || it.batchCode == roomBatch.batchCode }
+                                if (existing != null) {
+                                    if (existing != roomBatch) {
+                                        repository.updateFatteningBatch(roomBatch.copy(id = existing.id))
+                                    }
+                                } else {
+                                    repository.insertFatteningBatch(roomBatch)
+                                }
+                            }
+                        } finally {
+                            isSyncingFromCloud = false
+                        }
+                    }
+                }
+            }
+
+            // Launch listener for financial transactions
+            launch {
+                firestoreRepo.observeFinancialTransactions().collect { cloudTxs ->
+                    if (cloudTxs.isNotEmpty()) {
+                        isSyncingFromCloud = true
+                        try {
+                            val localList = repository.getAllFinancialTransactions()
+                            for (ctx in cloudTxs) {
+                                val roomTx = ctx.toRoom()
+                                val existing = localList.find { it.id == roomTx.id || (it.date == roomTx.date && it.amountFcfa == roomTx.amountFcfa && it.description == roomTx.description) }
+                                if (existing != null) {
+                                    if (existing != roomTx) {
+                                        repository.updateFinancialTransaction(roomTx.copy(id = existing.id))
+                                    }
+                                } else {
+                                    repository.insertFinancialTransaction(roomTx)
+                                }
+                            }
+                        } finally {
+                            isSyncingFromCloud = false
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -340,23 +402,23 @@ class FarmViewModel(application: Application) : AndroidViewModel(application) {
                 firestoreRepo.recordUserSync(user.displayName, user.email)
 
                 // Sync Rabbits
-                rabbits.value.forEach { r ->
+                repository.getAllRabbits().forEach { r ->
                     firestoreRepo.saveRabbit(r.toFirestore(uid))
                 }
                 // Sync Mating
-                matingRecords.value.forEach { m ->
+                repository.getAllMatingRecords().forEach { m ->
                     firestoreRepo.saveMatingRecord(m.toFirestore(uid))
                 }
                 // Sync Inventory
-                inventoryItems.value.forEach { i ->
+                repository.getAllInventoryItems().forEach { i ->
                     firestoreRepo.saveInventoryItem(i.toFirestore(uid))
                 }
                 // Sync Reminders
-                reminders.value.forEach { rem ->
+                repository.getAllReminders().forEach { rem ->
                     firestoreRepo.saveReminder(rem.toFirestore(uid))
                 }
                 // Sync Treatments
-                treatmentRecords.value.forEach { t ->
+                repository.getAllTreatmentRecords().forEach { t ->
                     firestoreRepo.saveTreatment(t.toFirestore(uid))
                 }
                 // Sync Weights
@@ -364,8 +426,16 @@ class FarmViewModel(application: Application) : AndroidViewModel(application) {
                     firestoreRepo.saveWeight(w.toFirestore(uid))
                 }
                 // Sync Feed logs
-                dailyFeedLogs.value.forEach { f ->
+                repository.getAllDailyFeedLogs().forEach { f ->
                     firestoreRepo.saveFeedLog(f.toFirestore(uid))
+                }
+                // Sync Fattening Batches
+                repository.getAllFatteningBatches().forEach { b ->
+                    firestoreRepo.saveFatteningBatch(b.toFirestore(uid))
+                }
+                // Sync Financial Transactions
+                repository.getAllFinancialTransactions().forEach { tx ->
+                    firestoreRepo.saveFinancialTransaction(tx.toFirestore(uid))
                 }
 
                 _syncMessage.value = "Sauvegarde Cloud réussie et synchronisée en temps réel !"
@@ -581,13 +651,14 @@ class FarmViewModel(application: Application) : AndroidViewModel(application) {
         val birthCalendar = java.util.Calendar.getInstance().apply { timeInMillis = birthDate }
         val birthYear = birthCalendar.get(java.util.Calendar.YEAR) % 100
         
-        val currentSize = rabbits.value.size
+        val maxId = repository.getMaxRabbitId() ?: 0
         
         // 3. Insert kits
         for (i in 1..offspringCount) {
-            val code = String.format("ABV-%02d-%03d", birthYear, currentSize + i)
+            val sequentialNumber = maxId + i
+            val code = String.format(java.util.Locale.US, "ABV-%02d-%03d", birthYear, sequentialNumber)
             val baby = Rabbit(
-                name = String.format("Lapereau n°%d (Portée ABV-%s)", i, code),
+                name = String.format(java.util.Locale.US, "Lapereau n°%d (Portée %s)", i, code),
                 sex = "Indéterminé",
                 dateOfBirth = birthDate,
                 breed = breedToUse,
@@ -687,28 +758,76 @@ class FarmViewModel(application: Application) : AndroidViewModel(application) {
 
     // ---- Fattening Batches Operations ----
     fun addFatteningBatch(batch: FatteningBatch) = viewModelScope.launch {
-        repository.insertFatteningBatch(batch)
+        val newId = repository.insertFatteningBatch(batch)
+        val user = firebaseAuth.currentUser
+        if (user != null && !isSyncingFromCloud) {
+            try {
+                firestoreRepo.saveFatteningBatch(batch.copy(id = newId).toFirestore(user.uid))
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
     fun updateFatteningBatch(batch: FatteningBatch) = viewModelScope.launch {
         repository.updateFatteningBatch(batch)
+        val user = firebaseAuth.currentUser
+        if (user != null && !isSyncingFromCloud) {
+            try {
+                firestoreRepo.saveFatteningBatch(batch.toFirestore(user.uid))
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
     fun deleteFatteningBatch(batch: FatteningBatch) = viewModelScope.launch {
         repository.deleteFatteningBatch(batch)
+        val user = firebaseAuth.currentUser
+        if (user != null && !isSyncingFromCloud) {
+            try {
+                firestoreRepo.deleteFatteningBatch("batch_${batch.id}")
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
     // ---- Financial Transactions Operations ----
     fun addFinancialTransaction(tx: FinancialTransaction) = viewModelScope.launch {
-        repository.insertFinancialTransaction(tx)
+        val newId = repository.insertFinancialTransaction(tx)
+        val user = firebaseAuth.currentUser
+        if (user != null && !isSyncingFromCloud) {
+            try {
+                firestoreRepo.saveFinancialTransaction(tx.copy(id = newId).toFirestore(user.uid))
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
     fun updateFinancialTransaction(tx: FinancialTransaction) = viewModelScope.launch {
         repository.updateFinancialTransaction(tx)
+        val user = firebaseAuth.currentUser
+        if (user != null && !isSyncingFromCloud) {
+            try {
+                firestoreRepo.saveFinancialTransaction(tx.toFirestore(user.uid))
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
     fun deleteFinancialTransaction(tx: FinancialTransaction) = viewModelScope.launch {
         repository.deleteFinancialTransaction(tx)
+        val user = firebaseAuth.currentUser
+        if (user != null && !isSyncingFromCloud) {
+            try {
+                firestoreRepo.deleteFinancialTransaction("tx_${tx.id}")
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
     // ---- Sanitary Withdrawal Helpers ----
@@ -808,6 +927,19 @@ class FarmViewModel(application: Application) : AndroidViewModel(application) {
 
     fun addWeightRecord(weightRecord: WeightRecord) = viewModelScope.launch {
         val newId = repository.insertWeightRecord(weightRecord)
+        val rabbit = repository.getRabbitById(weightRecord.rabbitId)
+        if (rabbit != null) {
+            val updatedRabbit = rabbit.copy(weight = weightRecord.weight)
+            repository.updateRabbit(updatedRabbit)
+            val user = firebaseAuth.currentUser
+            if (user != null && !isSyncingFromCloud) {
+                try {
+                    firestoreRepo.saveRabbit(updatedRabbit.toFirestore(user.uid))
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        }
         val user = firebaseAuth.currentUser
         if (user != null && !isSyncingFromCloud) {
             try {
@@ -835,12 +967,12 @@ class FarmViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // ---- Backup and Restore operations ----
-    fun exportBackupJson(): String = kotlinx.coroutines.runBlocking {
+    suspend fun exportBackupJson(): String = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         val root = org.json.JSONObject()
         
         // 1. Rabbits
         val rabbitsArr = org.json.JSONArray()
-        rabbits.value.forEach { r ->
+        repository.getAllRabbits().forEach { r ->
             val obj = org.json.JSONObject().apply {
                 put("id", r.id)
                 put("name", r.name)
@@ -862,7 +994,7 @@ class FarmViewModel(application: Application) : AndroidViewModel(application) {
 
         // 2. Mating records
         val matingArr = org.json.JSONArray()
-        matingRecords.value.forEach { m ->
+        repository.getAllMatingRecords().forEach { m ->
             val obj = org.json.JSONObject().apply {
                 put("id", m.id)
                 put("maleId", m.maleId)
@@ -878,7 +1010,7 @@ class FarmViewModel(application: Application) : AndroidViewModel(application) {
 
         // 3. Inventory items
         val invArr = org.json.JSONArray()
-        inventoryItems.value.forEach { i ->
+        repository.getAllInventoryItems().forEach { i ->
             val obj = org.json.JSONObject().apply {
                 put("id", i.id)
                 put("name", i.name)
@@ -896,7 +1028,7 @@ class FarmViewModel(application: Application) : AndroidViewModel(application) {
 
         // 4. Reminders
         val remArr = org.json.JSONArray()
-        reminders.value.forEach { r ->
+        repository.getAllReminders().forEach { r ->
             val obj = org.json.JSONObject().apply {
                 put("id", r.id)
                 put("title", r.title)
@@ -911,7 +1043,7 @@ class FarmViewModel(application: Application) : AndroidViewModel(application) {
 
         // 5. Treatment Records
         val treatArr = org.json.JSONArray()
-        treatmentRecords.value.forEach { t ->
+        repository.getAllTreatmentRecords().forEach { t ->
             val obj = org.json.JSONObject().apply {
                 put("id", t.id)
                 put("rabbitId", t.rabbitId)
@@ -921,6 +1053,8 @@ class FarmViewModel(application: Application) : AndroidViewModel(application) {
                 put("dosage", t.dosage)
                 put("notes", t.notes)
                 put("nextDueDate", t.nextDueDate ?: org.json.JSONObject.NULL)
+                put("withdrawalDays", t.withdrawalDays)
+                put("withdrawalEndDate", t.withdrawalEndDate ?: org.json.JSONObject.NULL)
             }
             treatArr.put(obj)
         }
@@ -928,7 +1062,7 @@ class FarmViewModel(application: Application) : AndroidViewModel(application) {
 
         // 6. Daily Feed Logs
         val feedArr = org.json.JSONArray()
-        dailyFeedLogs.value.forEach { f ->
+        repository.getAllDailyFeedLogs().forEach { f ->
             val obj = org.json.JSONObject().apply {
                 put("id", f.id)
                 put("quantityGrams", f.quantityGrams)
@@ -941,8 +1075,7 @@ class FarmViewModel(application: Application) : AndroidViewModel(application) {
 
         // 7. Weight Records
         val weightArr = org.json.JSONArray()
-        val allWeights = repository.getAllWeightRecords()
-        allWeights.forEach { w ->
+        repository.getAllWeightRecords().forEach { w ->
             val obj = org.json.JSONObject().apply {
                 put("id", w.id)
                 put("rabbitId", w.rabbitId)
@@ -956,8 +1089,7 @@ class FarmViewModel(application: Application) : AndroidViewModel(application) {
 
         // 8. Photo Records
         val photoArr = org.json.JSONArray()
-        val allPhotos = repository.getAllPhotoRecords()
-        allPhotos.forEach { p ->
+        repository.getAllPhotoRecords().forEach { p ->
             val obj = org.json.JSONObject().apply {
                 put("id", p.id)
                 put("rabbitId", p.rabbitId)
@@ -969,15 +1101,66 @@ class FarmViewModel(application: Application) : AndroidViewModel(application) {
         }
         root.put("photoRecords", photoArr)
 
+        // 9. Fattening Batches
+        val batchArr = org.json.JSONArray()
+        repository.getAllFatteningBatches().forEach { b ->
+            val obj = org.json.JSONObject().apply {
+                put("id", b.id)
+                put("batchCode", b.batchCode)
+                put("matingRecordId", b.matingRecordId ?: org.json.JSONObject.NULL)
+                put("weaningDate", b.weaningDate)
+                put("initialCount", b.initialCount)
+                put("currentCount", b.currentCount)
+                put("mortalityCount", b.mortalityCount)
+                put("cageLocation", b.cageLocation)
+                put("averageWeightGrams", b.averageWeightGrams)
+                put("targetSaleDate", b.targetSaleDate)
+                put("status", b.status)
+            }
+            batchArr.put(obj)
+        }
+        root.put("fatteningBatches", batchArr)
+
+        // 10. Financial Transactions
+        val txArr = org.json.JSONArray()
+        repository.getAllFinancialTransactions().forEach { tx ->
+            val obj = org.json.JSONObject().apply {
+                put("id", tx.id)
+                put("date", tx.date)
+                put("type", tx.type)
+                put("category", tx.category)
+                put("amountFcfa", tx.amountFcfa)
+                put("description", tx.description)
+                put("relatedBatchId", tx.relatedBatchId ?: org.json.JSONObject.NULL)
+                put("relatedRabbitId", tx.relatedRabbitId ?: org.json.JSONObject.NULL)
+            }
+            txArr.put(obj)
+        }
+        root.put("financialTransactions", txArr)
+
         root.toString(2)
     }
 
     fun rewriteUriPath(context: android.content.Context, uriString: String?): String? {
         if (uriString == null || uriString.isEmpty()) return null
-        if (uriString.contains("/cache/images/")) {
+        if (uriString.contains("/cache/images/") || uriString.contains("/files/images/")) {
             val fileName = uriString.substringAfterLast("/")
-            val currentImagesDir = java.io.File(context.cacheDir, "images")
+            val currentImagesDir = java.io.File(context.filesDir, "images")
+            if (!currentImagesDir.exists()) {
+                currentImagesDir.mkdirs()
+            }
             val currentFile = java.io.File(currentImagesDir, fileName)
+            // Migrate from legacy cacheDir if needed
+            if (!currentFile.exists()) {
+                val legacyFile = java.io.File(java.io.File(context.cacheDir, "images"), fileName)
+                if (legacyFile.exists()) {
+                    try {
+                        legacyFile.copyTo(currentFile, overwrite = true)
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+            }
             return android.net.Uri.fromFile(currentFile).toString()
         }
         return uriString
@@ -1084,7 +1267,9 @@ class FarmViewModel(application: Application) : AndroidViewModel(application) {
                             date = obj.optLong("date", System.currentTimeMillis()),
                             dosage = obj.optString("dosage", ""),
                             notes = obj.optString("notes", ""),
-                            nextDueDate = if (obj.has("nextDueDate") && !obj.isNull("nextDueDate")) obj.optLong("nextDueDate") else null
+                            nextDueDate = if (obj.has("nextDueDate") && !obj.isNull("nextDueDate")) obj.optLong("nextDueDate") else null,
+                            withdrawalDays = obj.optInt("withdrawalDays", 0),
+                            withdrawalEndDate = if (obj.has("withdrawalEndDate") && !obj.isNull("withdrawalEndDate")) obj.optLong("withdrawalEndDate") else null
                         ))
                     }
                 }
@@ -1134,6 +1319,45 @@ class FarmViewModel(application: Application) : AndroidViewModel(application) {
                         ))
                     }
                 }
+
+                // 9. Fattening Batches
+                if (root.has("fatteningBatches")) {
+                    val arr = root.getJSONArray("fatteningBatches")
+                    for (i in 0 until arr.length()) {
+                        val obj = arr.getJSONObject(i)
+                        repository.insertFatteningBatch(FatteningBatch(
+                            id = obj.optLong("id", 0L),
+                            batchCode = obj.optString("batchCode", ""),
+                            matingRecordId = if (obj.has("matingRecordId") && !obj.isNull("matingRecordId")) obj.optInt("matingRecordId") else null,
+                            weaningDate = obj.optLong("weaningDate", System.currentTimeMillis()),
+                            initialCount = obj.optInt("initialCount", 0),
+                            currentCount = obj.optInt("currentCount", 0),
+                            mortalityCount = obj.optInt("mortalityCount", 0),
+                            cageLocation = obj.optString("cageLocation", ""),
+                            averageWeightGrams = obj.optInt("averageWeightGrams", 0),
+                            targetSaleDate = obj.optLong("targetSaleDate", System.currentTimeMillis()),
+                            status = obj.optString("status", "ACTIVE")
+                        ))
+                    }
+                }
+
+                // 10. Financial Transactions
+                if (root.has("financialTransactions")) {
+                    val arr = root.getJSONArray("financialTransactions")
+                    for (i in 0 until arr.length()) {
+                        val obj = arr.getJSONObject(i)
+                        repository.insertFinancialTransaction(FinancialTransaction(
+                            id = obj.optLong("id", 0L),
+                            date = obj.optLong("date", System.currentTimeMillis()),
+                            type = obj.optString("type", "EXPENSE"),
+                            category = obj.optString("category", "ALIMENT"),
+                            amountFcfa = obj.optDouble("amountFcfa", 0.0),
+                            description = obj.optString("description", ""),
+                            relatedBatchId = if (obj.has("relatedBatchId") && !obj.isNull("relatedBatchId")) obj.optLong("relatedBatchId") else null,
+                            relatedRabbitId = if (obj.has("relatedRabbitId") && !obj.isNull("relatedRabbitId")) obj.optInt("relatedRabbitId") else null
+                        ))
+                    }
+                }
             }
             true
         } catch (e: Exception) {
@@ -1146,18 +1370,23 @@ class FarmViewModel(application: Application) : AndroidViewModel(application) {
      * Exports a ZIP file containing the full database JSON and all rabbit photos.
      * Returns the Uri of the exported ZIP file.
      */
-    fun exportBackupZip(context: android.content.Context): android.net.Uri? {
-        return try {
+    suspend fun exportBackupZip(context: android.content.Context): android.net.Uri? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        try {
             val jsonString = exportBackupJson()
             
-            val imagesDir = java.io.File(context.cacheDir, "images")
+            val imagesDir = java.io.File(context.filesDir, "images")
             val imageFiles = if (imagesDir.exists() && imagesDir.isDirectory) {
                 imagesDir.listFiles() ?: emptyArray()
             } else {
-                emptyArray()
+                val legacyImagesDir = java.io.File(context.cacheDir, "images")
+                if (legacyImagesDir.exists() && legacyImagesDir.isDirectory) {
+                    legacyImagesDir.listFiles() ?: emptyArray()
+                } else {
+                    emptyArray()
+                }
             }
             
-            val zipFile = java.io.File(context.cacheDir, "ABVFarm_Sauvegarde_${System.currentTimeMillis()}.zip")
+            val zipFile = java.io.File(context.filesDir, "ABVFarm_Sauvegarde_${System.currentTimeMillis()}.zip")
             if (zipFile.exists()) {
                 zipFile.delete()
             }
@@ -1192,15 +1421,15 @@ class FarmViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * Exports a clean CSV spreadsheet of all rabbits formatted with UTF-8 BOM for Excel/Sheets.
      */
-    fun exportRabbitsCsv(context: android.content.Context): android.net.Uri? {
-        return try {
+    suspend fun exportRabbitsCsv(context: android.content.Context): android.net.Uri? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        try {
             val sdf = java.text.SimpleDateFormat("dd/MM/yyyy", java.util.Locale.getDefault())
             val csvBuilder = StringBuilder()
             // UTF-8 BOM for seamless opening in Microsoft Excel
             csvBuilder.append("\uFEFF")
             csvBuilder.append("ID;Nom;Sexe;Race;Cage;Poids (kg);Date Naissance;Pere;Mere;Statut;Notes\n")
 
-            val rabbitList = rabbits.value
+            val rabbitList = repository.getAllRabbits()
             rabbitList.forEach { r ->
                 val fatherName = rabbitList.find { it.id == r.fatherId }?.name ?: ""
                 val motherName = rabbitList.find { it.id == r.motherId }?.name ?: ""
@@ -1215,7 +1444,7 @@ class FarmViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             val fileName = "ABVFarm_Lapins_${java.text.SimpleDateFormat("yyyyMMdd_HHmm", java.util.Locale.getDefault()).format(java.util.Date())}.csv"
-            val csvFile = java.io.File(context.cacheDir, fileName)
+            val csvFile = java.io.File(context.filesDir, fileName)
             csvFile.writeText(csvBuilder.toString(), Charsets.UTF_8)
 
             val authority = "${context.packageName}.fileprovider"
@@ -1232,7 +1461,7 @@ class FarmViewModel(application: Application) : AndroidViewModel(application) {
     suspend fun restoreBackupZip(context: android.content.Context, zipUri: android.net.Uri): Boolean {
         return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             var jsonString: String? = null
-            val imagesDir = java.io.File(context.cacheDir, "images")
+            val imagesDir = java.io.File(context.filesDir, "images")
             if (!imagesDir.exists()) {
                 imagesDir.mkdirs()
             }

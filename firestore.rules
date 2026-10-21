@@ -108,6 +108,8 @@ service cloud.firestore {
              (!('dosage' in data) || (data.dosage is string && data.dosage.size() <= 100)) &&
              (!('notes' in data) || (data.notes is string && data.notes.size() <= 1000)) &&
              (!('nextDueDate' in data) || data.nextDueDate == null || data.nextDueDate is int) &&
+             (!('withdrawalDays' in data) || data.withdrawalDays is int) &&
+             (!('withdrawalEndDate' in data) || data.withdrawalEndDate == null || data.withdrawalEndDate is int) &&
              (!('updatedAt' in data) || data.updatedAt == null || (data.updatedAt is timestamp && data.updatedAt <= request.time));
     }
 
@@ -129,6 +131,37 @@ service cloud.firestore {
              data.quantityGrams is number &&
              (!('localId' in data) || data.localId is int) &&
              (!('notes' in data) || (data.notes is string && data.notes.size() <= 1000)) &&
+             (!('updatedAt' in data) || data.updatedAt == null || (data.updatedAt is timestamp && data.updatedAt <= request.time));
+    }
+
+    // Validation helper for fattening batches
+    function isValidFatteningBatch(data) {
+      return data.userId is string && data.userId == request.auth.uid &&
+             data.batchCode is string && data.batchCode.size() > 0 && data.batchCode.size() <= 100 &&
+             (!('localId' in data) || data.localId is int) &&
+             (!('matingRecordId' in data) || data.matingRecordId == null || data.matingRecordId is int) &&
+             (!('weaningDate' in data) || data.weaningDate is int) &&
+             (!('initialCount' in data) || data.initialCount is int) &&
+             (!('currentCount' in data) || data.currentCount is int) &&
+             (!('mortalityCount' in data) || data.mortalityCount is int) &&
+             (!('cageLocation' in data) || (data.cageLocation is string && data.cageLocation.size() <= 100)) &&
+             (!('averageWeightGrams' in data) || data.averageWeightGrams is int) &&
+             (!('targetSaleDate' in data) || data.targetSaleDate is int) &&
+             (!('status' in data) || (data.status is string && data.status.size() <= 50)) &&
+             (!('updatedAt' in data) || data.updatedAt == null || (data.updatedAt is timestamp && data.updatedAt <= request.time));
+    }
+
+    // Validation helper for financial transactions
+    function isValidFinancialTransaction(data) {
+      return data.userId is string && data.userId == request.auth.uid &&
+             (!('localId' in data) || data.localId is int) &&
+             (!('date' in data) || data.date is int) &&
+             (!('type' in data) || (data.type is string && data.type.size() <= 50)) &&
+             (!('category' in data) || (data.category is string && data.category.size() <= 100)) &&
+             (!('amountFcfa' in data) || data.amountFcfa is number) &&
+             (!('description' in data) || (data.description is string && data.description.size() <= 1000)) &&
+             (!('relatedBatchId' in data) || data.relatedBatchId == null || data.relatedBatchId is int) &&
+             (!('relatedRabbitId' in data) || data.relatedRabbitId == null || data.relatedRabbitId is int) &&
              (!('updatedAt' in data) || data.updatedAt == null || (data.updatedAt is timestamp && data.updatedAt <= request.time));
     }
 
@@ -223,7 +256,7 @@ service cloud.firestore {
                          isValidTreatment(incoming()) &&
                          incoming().userId == existing().userId &&
                          incoming().createdAt == existing().createdAt &&
-                         incoming().diff(existing()).affectedKeys().hasOnly(['localId', 'rabbitId', 'type', 'designation', 'date', 'dosage', 'notes', 'nextDueDate', 'updatedAt']);
+                         incoming().diff(existing()).affectedKeys().hasOnly(['localId', 'rabbitId', 'type', 'designation', 'date', 'dosage', 'notes', 'nextDueDate', 'withdrawalDays', 'withdrawalEndDate', 'updatedAt']);
         allow delete: if isOwner(userId);
       }
 
@@ -256,6 +289,38 @@ service cloud.firestore {
                          incoming().userId == existing().userId &&
                          incoming().createdAt == existing().createdAt &&
                          incoming().diff(existing()).affectedKeys().hasOnly(['localId', 'feedDate', 'quantityGrams', 'notes', 'updatedAt']);
+        allow delete: if isOwner(userId);
+      }
+
+      // Fattening batches subcollection
+      match /fattening_batches/{batchId} {
+        allow get, list: if isOwner(userId);
+        allow create: if isOwner(userId) &&
+                         isValidId(batchId) &&
+                         isValidFatteningBatch(incoming()) &&
+                         incoming().createdAt is timestamp &&
+                         incoming().createdAt <= request.time;
+        allow update: if isOwner(userId) &&
+                         isValidFatteningBatch(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['localId', 'batchCode', 'matingRecordId', 'weaningDate', 'initialCount', 'currentCount', 'mortalityCount', 'cageLocation', 'averageWeightGrams', 'targetSaleDate', 'status', 'updatedAt']);
+        allow delete: if isOwner(userId);
+      }
+
+      // Financial transactions subcollection
+      match /financial_transactions/{txId} {
+        allow get, list: if isOwner(userId);
+        allow create: if isOwner(userId) &&
+                         isValidId(txId) &&
+                         isValidFinancialTransaction(incoming()) &&
+                         incoming().createdAt is timestamp &&
+                         incoming().createdAt <= request.time;
+        allow update: if isOwner(userId) &&
+                         isValidFinancialTransaction(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['localId', 'date', 'type', 'category', 'amountFcfa', 'description', 'relatedBatchId', 'relatedRabbitId', 'updatedAt']);
         allow delete: if isOwner(userId);
       }
     }

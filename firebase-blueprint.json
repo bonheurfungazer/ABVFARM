@@ -70,7 +70,9 @@
         "category": { "type": "string" },
         "quantity": { "type": "number" },
         "unit": { "type": "string" },
-        "lowStockThreshold": { "type": "number" },
+        "pricePerUnit": { "type": "number" },
+        "totalPrice": { "type": "number" },
+        "purchaseDate": { "type": "number" },
         "notes": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
@@ -88,8 +90,7 @@
         "title": { "type": "string" },
         "description": { "type": "string" },
         "dueDate": { "type": "number" },
-        "rabbitId": { "type": "number" },
-        "category": { "type": "string" },
+        "priority": { "type": "string" },
         "isCompleted": { "type": "boolean" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
@@ -105,14 +106,18 @@
         "userId": { "type": "string" },
         "localId": { "type": "number" },
         "rabbitId": { "type": "number" },
-        "treatmentName": { "type": "string" },
+        "type": { "type": "string" },
+        "designation": { "type": "string" },
         "date": { "type": "number" },
         "dosage": { "type": "string" },
         "notes": { "type": "string" },
+        "nextDueDate": { "type": "number" },
+        "withdrawalDays": { "type": "number" },
+        "withdrawalEndDate": { "type": "number" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["userId", "rabbitId", "treatmentName", "date", "createdAt"]
+      "required": ["userId", "rabbitId", "date", "createdAt"]
     },
     "WeightDoc": {
       "title": "WeightDoc",
@@ -124,28 +129,71 @@
         "localId": { "type": "number" },
         "rabbitId": { "type": "number" },
         "weight": { "type": "number" },
-        "date": { "type": "number" },
+        "recordDate": { "type": "number" },
+        "notes": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["userId", "rabbitId", "weight", "date", "createdAt"]
+      "required": ["userId", "rabbitId", "weight", "recordDate", "createdAt"]
     },
     "FeedLogDoc": {
       "title": "FeedLogDoc",
-      "description": "Daily feed consumption record for the herd",
+      "description": "Daily feed distribution logs for the rabbit farm",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "localId": { "type": "number" },
+        "feedDate": { "type": "number" },
+        "quantityGrams": { "type": "number" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "feedDate", "quantityGrams", "createdAt"]
+    },
+    "FatteningBatchDoc": {
+      "title": "FatteningBatchDoc",
+      "description": "A post-weaning fattening rabbit batch",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "localId": { "type": "number" },
+        "batchCode": { "type": "string" },
+        "matingRecordId": { "type": "number" },
+        "weaningDate": { "type": "number" },
+        "initialCount": { "type": "number" },
+        "currentCount": { "type": "number" },
+        "mortalityCount": { "type": "number" },
+        "cageLocation": { "type": "string" },
+        "averageWeightGrams": { "type": "number" },
+        "targetSaleDate": { "type": "number" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "batchCode", "createdAt"]
+    },
+    "FinancialTransactionDoc": {
+      "title": "FinancialTransactionDoc",
+      "description": "An income or expense transaction for the rabbitry",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
         "userId": { "type": "string" },
         "localId": { "type": "number" },
         "date": { "type": "number" },
-        "feedType": { "type": "string" },
-        "quantityKg": { "type": "number" },
-        "notes": { "type": "string" },
+        "type": { "type": "string" },
+        "category": { "type": "string" },
+        "amountFcfa": { "type": "number" },
+        "description": { "type": "string" },
+        "relatedBatchId": { "type": "number" },
+        "relatedRabbitId": { "type": "number" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["userId", "date", "feedType", "quantityKg", "createdAt"]
+      "required": ["userId", "createdAt"]
     }
   },
   "firestore": {
@@ -180,6 +228,14 @@
     "/users/{userId}/feed_logs/{feedLogId}": {
       "schema": { "$ref": "#/entities/FeedLogDoc" },
       "description": "Daily feed distribution logs"
+    },
+    "/users/{userId}/fattening_batches/{batchId}": {
+      "schema": { "$ref": "#/entities/FatteningBatchDoc" },
+      "description": "Fattening rabbit batches"
+    },
+    "/users/{userId}/financial_transactions/{txId}": {
+      "schema": { "$ref": "#/entities/FinancialTransactionDoc" },
+      "description": "Financial accounting records"
     }
   }
 }

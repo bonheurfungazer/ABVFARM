@@ -928,21 +928,18 @@ class FarmViewModel(application: Application) : AndroidViewModel(application) {
     fun addWeightRecord(weightRecord: WeightRecord) = viewModelScope.launch {
         val newId = repository.insertWeightRecord(weightRecord)
         val rabbit = repository.getRabbitById(weightRecord.rabbitId)
-        if (rabbit != null) {
-            val updatedRabbit = rabbit.copy(weight = weightRecord.weight)
-            repository.updateRabbit(updatedRabbit)
-            val user = firebaseAuth.currentUser
-            if (user != null && !isSyncingFromCloud) {
-                try {
-                    firestoreRepo.saveRabbit(updatedRabbit.toFirestore(user.uid))
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-            }
-        }
+        val updatedRabbit = if (rabbit != null) {
+            val updated = rabbit.copy(weight = weightRecord.weight)
+            repository.updateRabbit(updated)
+            updated
+        } else null
+
         val user = firebaseAuth.currentUser
         if (user != null && !isSyncingFromCloud) {
             try {
+                if (updatedRabbit != null) {
+                    firestoreRepo.saveRabbit(updatedRabbit.toFirestore(user.uid))
+                }
                 firestoreRepo.saveWeight(weightRecord.copy(id = newId.toInt()).toFirestore(user.uid))
             } catch (e: Exception) {
                 e.printStackTrace()

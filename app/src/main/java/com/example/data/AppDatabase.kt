@@ -14,9 +14,11 @@ import androidx.room.RoomDatabase
         WeightRecord::class,
         PhotoRecord::class,
         TreatmentRecord::class,
-        DailyFeedLog::class
+        DailyFeedLog::class,
+        FatteningBatch::class,
+        FinancialTransaction::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

@@ -717,46 +717,95 @@ fun MatingScreen(navController: NavController, viewModel: FarmViewModel) {
                         }
                     }
 
-                    // Consanguinity alert check
+                    // Consanguinity & Compatibility evaluation with Henderson A-matrix
                     val buck = eligibleBucks.find { it.id == selectedMaleId }
                     val doe = eligibleDoes.find { it.id == selectedFemaleId }
-                    val consanguinityRate = if (buck != null && doe != null) {
-                        com.example.data.GenealogyHelper.calculateConsanguinity(buck.id, doe.id, rabbits)
-                    } else 0.0
+                    var compatibilityResult by remember(buck, doe) { mutableStateOf<com.example.data.GenealogyHelper.CompatibilityResult?>(null) }
+
+                    LaunchedEffect(buck, doe) {
+                        if (buck != null && doe != null) {
+                            val results = com.example.data.GenealogyHelper.evaluateMatingCompatibility(
+                                female = doe,
+                                candidateMales = listOf(buck),
+                                allRabbitsInFarm = rabbits
+                            )
+                            compatibilityResult = results.firstOrNull()
+                        } else {
+                            compatibilityResult = null
+                        }
+                    }
 
                     if (buck != null && doe != null) {
-                        val isHighRisk = consanguinityRate >= 10.0
-                        val cardBg = if (isHighRisk) MaterialTheme.colorScheme.errorContainer else if (consanguinityRate > 0.0) Color(0xFFFEF3C7) else Color(0xFFDCFCE7)
-                        val textColor = if (isHighRisk) MaterialTheme.colorScheme.onErrorContainer else if (consanguinityRate > 0.0) Color(0xFF92400E) else Color(0xFF166534)
-                        val iconColor = if (isHighRisk) MaterialTheme.colorScheme.error else if (consanguinityRate > 0.0) Color(0xFFB45309) else Color(0xFF15803D)
-                        
+                        val compat = compatibilityResult
+                        val offspringF = compat?.offspringInbreeding ?: 0.0
+                        val riskLevel = compat?.riskLevel ?: com.example.data.GenealogyHelper.RiskLevel.SAFE
+                        val ancestors = compat?.commonAncestorsNames ?: emptyList()
+
+                        val isHighRisk = riskLevel == com.example.data.GenealogyHelper.RiskLevel.HIGH || riskLevel == com.example.data.GenealogyHelper.RiskLevel.CRITICAL
+                        val cardBg = when (riskLevel) {
+                            com.example.data.GenealogyHelper.RiskLevel.SAFE -> Color(0xFFDCFCE7)
+                            com.example.data.GenealogyHelper.RiskLevel.MODERATE -> Color(0xFFFEF3C7)
+                            com.example.data.GenealogyHelper.RiskLevel.HIGH -> Color(0xFFFFEDD5)
+                            com.example.data.GenealogyHelper.RiskLevel.CRITICAL -> MaterialTheme.colorScheme.errorContainer
+                        }
+                        val textColor = when (riskLevel) {
+                            com.example.data.GenealogyHelper.RiskLevel.SAFE -> Color(0xFF166534)
+                            com.example.data.GenealogyHelper.RiskLevel.MODERATE -> Color(0xFF92400E)
+                            com.example.data.GenealogyHelper.RiskLevel.HIGH -> Color(0xFF9A3412)
+                            com.example.data.GenealogyHelper.RiskLevel.CRITICAL -> MaterialTheme.colorScheme.onErrorContainer
+                        }
+                        val iconColor = when (riskLevel) {
+                            com.example.data.GenealogyHelper.RiskLevel.SAFE -> Color(0xFF15803D)
+                            com.example.data.GenealogyHelper.RiskLevel.MODERATE -> Color(0xFFB45309)
+                            com.example.data.GenealogyHelper.RiskLevel.HIGH -> Color(0xFFC2410C)
+                            com.example.data.GenealogyHelper.RiskLevel.CRITICAL -> MaterialTheme.colorScheme.error
+                        }
+
                         Card(
                             colors = CardDefaults.cardColors(containerColor = cardBg, contentColor = textColor),
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Row(
-                                modifier = Modifier.padding(10.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Info,
-                                    contentDescription = "Consanguinité",
-                                    tint = iconColor,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Text(
-                                    text = if (isHighRisk) {
-                                        String.format(Locale.getDefault(), "🚨 ATTENTION : Risque de consanguinité élevé de %,.1f%% ! Ce croisement est contre-indiqué.", consanguinityRate)
-                                    } else if (consanguinityRate > 0.0) {
-                                        String.format(Locale.getDefault(), "⚠️ Consanguinité faible de %,.1f%%. À surveiller.", consanguinityRate)
-                                    } else {
-                                        "✅ Aucun risque de consanguinité (0.0%). Reproducteurs non apparentés."
-                                    },
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = if (isHighRisk) Icons.Rounded.HeartBroken else Icons.Rounded.Info,
+                                        contentDescription = "Compatibilité génétique",
+                                        tint = iconColor,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Column {
+                                        Text(
+                                            text = "Consanguinité : ${String.format(Locale.getDefault(), "%,.1f%%", offspringF)} — ${riskLevel.label}",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = textColor
+                                        )
+                                        Text(
+                                            text = when (riskLevel) {
+                                                com.example.data.GenealogyHelper.RiskLevel.SAFE -> "✅ Reproducteurs non apparentés. Accouplement idéal pour maintenir la vigueur hybride."
+                                                com.example.data.GenealogyHelper.RiskLevel.MODERATE -> "⚠️ Liens de parenté faibles. Croisement acceptable."
+                                                com.example.data.GenealogyHelper.RiskLevel.HIGH -> "⛔ Parenté notable (demi-frère ou grands-parents partagés). Croisement déconseillé."
+                                                com.example.data.GenealogyHelper.RiskLevel.CRITICAL -> "🚨 ALERTE CRITIQUE : Fort risque de consanguinité (frère/sœur ou parent/enfant). Risque élevé de mortalité au nid et anomalies !"
+                                            },
+                                            fontSize = 11.sp,
+                                            lineHeight = 14.sp,
+                                            color = textColor.copy(alpha = 0.9f)
+                                        )
+                                    }
+                                }
+                                if (ancestors.isNotEmpty()) {
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = "Ancêtres communs : ${ancestors.joinToString(", ")}",
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = textColor.copy(alpha = 0.85f)
+                                    )
+                                }
                             }
                         }
                     }

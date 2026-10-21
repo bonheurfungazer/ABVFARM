@@ -28,6 +28,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.credentials.CredentialManager
+import com.example.utils.GoogleAuthHelper
+import com.example.utils.GoogleSignInButton
 import com.example.viewmodels.FarmViewModel
 import kotlinx.coroutines.launch
 
@@ -162,6 +165,168 @@ fun DataBackupBottomSheet(
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onPrimaryContainer,
                             modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+            }
+
+            val isCloudConnected by viewModel.isCloudConnected.collectAsState()
+            val currentUserEmail by viewModel.currentUserEmail.collectAsState()
+            val syncMessage by viewModel.syncMessage.collectAsState()
+            val isSyncing by viewModel.isSyncing.collectAsState()
+
+            // ACTION CARD 0: Google Cloud Real-Time Sync (Drive/Firestore)
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    if (isCloudConnected) Color(0xFF43A047) else MaterialTheme.colorScheme.outlineVariant
+                ),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (isCloudConnected) Color(0xFFE8F5E9) else MaterialTheme.colorScheme.primaryContainer
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = if (isCloudConnected) Icons.Rounded.CloudDone else Icons.Rounded.CloudSync,
+                                    contentDescription = null,
+                                    tint = if (isCloudConnected) Color(0xFF2E7D32) else MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                            Column {
+                                Text(
+                                    text = "Cloud Google & Temps Réel",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = if (isCloudConnected) "Connecté • Sync active" else "Non connecté",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (isCloudConnected) Color(0xFF2E7D32) else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (isCloudConnected) Color(0xFFE8F5E9) else MaterialTheme.colorScheme.secondaryContainer
+                        ) {
+                            Text(
+                                text = if (isCloudConnected) "ACTIF 🟢" else "MULTI-APPAREILS",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isCloudConnected) Color(0xFF2E7D32) else MaterialTheme.colorScheme.onSecondaryContainer,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+
+                    if (isCloudConnected) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = "Compte Google : ${currentUserEmail ?: "Connecté"}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Deux personnes utilisant ce même compte Google accèdent et mettent à jour les fiches de lapins, saillies, stocks et rappels en temps réel et à distance.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                lineHeight = 18.sp
+                            )
+                            if (syncMessage.isNotEmpty()) {
+                                Text(
+                                    text = "Statut : $syncMessage",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Button(
+                                onClick = {
+                                    viewModel.syncAllLocalDataToCloud { success, msg ->
+                                        Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                    }
+                                },
+                                enabled = !isSyncing,
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                if (isSyncing) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(18.dp),
+                                        strokeWidth = 2.dp,
+                                        color = MaterialTheme.colorScheme.onPrimary
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Synchro...")
+                                } else {
+                                    Icon(Icons.Rounded.Sync, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Forcer la synchro")
+                                }
+                            }
+
+                            OutlinedButton(
+                                onClick = {
+                                    val credManager = CredentialManager.create(context)
+                                    GoogleAuthHelper.signOut(
+                                        context = context,
+                                        credentialManager = credManager,
+                                        onSignOutComplete = {
+                                            Toast.makeText(context, "Déconnexion réussie", Toast.LENGTH_SHORT).show()
+                                        },
+                                        scope = scope
+                                    )
+                                },
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text("Déconnexion")
+                            }
+                        }
+                    } else {
+                        Text(
+                            text = "Connectez votre compte Google pour sauvegarder automatiquement vos données dans le Cloud et permettre à plusieurs personnes d'accéder aux données en temps réel peu importe la distance.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            lineHeight = 18.sp
+                        )
+
+                        GoogleSignInButton(
+                            modifier = Modifier.fillMaxWidth(),
+                            onAuthSuccess = {
+                                Toast.makeText(context, "Connecté avec succès au Cloud !", Toast.LENGTH_SHORT).show()
+                            },
+                            onAuthError = { err ->
+                                Toast.makeText(context, "Erreur : $err", Toast.LENGTH_LONG).show()
+                            }
                         )
                     }
                 }

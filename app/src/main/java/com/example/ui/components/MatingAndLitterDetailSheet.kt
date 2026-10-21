@@ -3,6 +3,8 @@ package com.example.ui.components
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -82,6 +84,7 @@ fun MatingAndLitterDetailSheet(
     // Sub-dialogs state
     var showEditStatusDialog by remember { mutableStateOf(false) }
     var showRegisterBirthDialog by remember { mutableStateOf(false) }
+    var showCreateBatchDialog by remember { mutableStateOf(false) }
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
 
     ModalBottomSheet(
@@ -542,13 +545,27 @@ fun MatingAndLitterDetailSheet(
                             color = MaterialTheme.colorScheme.onSurface
                         )
 
-                        TextButton(
-                            onClick = { showRegisterBirthDialog = true },
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                        ) {
-                            Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Ajouter à la portée", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            if (kits.isNotEmpty() || mating.status == "Mise bas") {
+                                OutlinedButton(
+                                    onClick = { showCreateBatchDialog = true },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                    shape = RoundedCornerShape(10.dp)
+                                ) {
+                                    Icon(Icons.Rounded.Groups, contentDescription = null, modifier = Modifier.size(15.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Sevrer en Lot", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+
+                            TextButton(
+                                onClick = { showRegisterBirthDialog = true },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                            ) {
+                                Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Ajouter", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
@@ -797,6 +814,121 @@ fun MatingAndLitterDetailSheet(
             },
             dismissButton = {
                 TextButton(onClick = { showRegisterBirthDialog = false }) {
+                    Text("Annuler")
+                }
+            }
+        )
+    }
+
+    // ---- DIALOG: CREATE FATTENING BATCH FROM LITTER ----
+    if (showCreateBatchDialog) {
+        val now = System.currentTimeMillis()
+        var batchCode by remember {
+            mutableStateOf("LOT-${femaleRabbit?.name?.take(4)?.uppercase() ?: "PORT"}-${mating.id}")
+        }
+        val defaultCount = if (kits.isNotEmpty()) kits.count { it.isActive }.toString() else "6"
+        var countStr by remember { mutableStateOf(defaultCount) }
+        var cageLocation by remember { mutableStateOf("Parc Engraissement 1") }
+        var avgWeightStr by remember { mutableStateOf("650") }
+        var durationDaysStr by remember { mutableStateOf("45") }
+
+        AlertDialog(
+            onDismissRequest = { showCreateBatchDialog = false },
+            title = { Text("Créer une Bande d'Engraissement", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.verticalScroll(rememberScrollState())
+                ) {
+                    Text(
+                        "Constituez un lot collectif au sevrage pour la portée de ${femaleRabbit?.name ?: "Femelle #${mating.femaleId}"} :",
+                        fontSize = 13.sp
+                    )
+
+                    OutlinedTextField(
+                        value = batchCode,
+                        onValueChange = { batchCode = it },
+                        label = { Text("Code du Lot") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp)
+                    )
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = countStr,
+                            onValueChange = { countStr = it },
+                            label = { Text("Nombre au sevrage") },
+                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                            shape = RoundedCornerShape(12.dp)
+                        )
+
+                        OutlinedTextField(
+                            value = avgWeightStr,
+                            onValueChange = { avgWeightStr = it },
+                            label = { Text("Poids moyen (g)") },
+                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                    }
+
+                    OutlinedTextField(
+                        value = cageLocation,
+                        onValueChange = { cageLocation = it },
+                        label = { Text("Cage / Parc d'engraissement") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp)
+                    )
+
+                    OutlinedTextField(
+                        value = durationDaysStr,
+                        onValueChange = { durationDaysStr = it },
+                        label = { Text("Durée d'engraissement (jours)") },
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val count = countStr.toIntOrNull() ?: 1
+                        val weight = avgWeightStr.toIntOrNull() ?: 0
+                        val targetDays = durationDaysStr.toLongOrNull() ?: 45L
+                        val targetDate = now + (targetDays * 86_400_000L)
+
+                        viewModel.addFatteningBatch(
+                            com.example.data.FatteningBatch(
+                                batchCode = batchCode.trim(),
+                                matingRecordId = mating.id,
+                                weaningDate = now,
+                                initialCount = count,
+                                currentCount = count,
+                                mortalityCount = 0,
+                                cageLocation = cageLocation.trim(),
+                                averageWeightGrams = weight,
+                                targetSaleDate = targetDate,
+                                status = "ACTIVE"
+                            )
+                        )
+                        showCreateBatchDialog = false
+                        navController.navigate(com.example.ui.navigation.Screen.FatteningBatches.route)
+                        onDismiss()
+                    },
+                    enabled = batchCode.isNotBlank() && (countStr.toIntOrNull() ?: 0) > 0
+                ) {
+                    Text("Créer le Lot", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCreateBatchDialog = false }) {
                     Text("Annuler")
                 }
             }

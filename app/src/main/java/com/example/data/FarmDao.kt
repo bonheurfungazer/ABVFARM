@@ -114,4 +114,33 @@ interface FarmDao {
 
     @Delete
     suspend fun deleteDailyFeedLog(log: DailyFeedLog)
+
+    // ---- Fattening Batches ----
+    @Query("SELECT * FROM fattening_batches ORDER BY weaningDate DESC")
+    fun getAllFatteningBatchesFlow(): Flow<List<FatteningBatch>>
+
+    @Query("SELECT * FROM fattening_batches WHERE id = :id LIMIT 1")
+    suspend fun getFatteningBatchById(id: Long): FatteningBatch?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertFatteningBatch(batch: FatteningBatch): Long
+
+    @Update
+    suspend fun updateFatteningBatch(batch: FatteningBatch)
+
+    @Delete
+    suspend fun deleteFatteningBatch(batch: FatteningBatch)
+
+    // ---- Financial Transactions ----
+    @Query("SELECT * FROM financial_transactions ORDER BY date DESC")
+    fun getAllFinancialTransactionsFlow(): Flow<List<FinancialTransaction>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertFinancialTransaction(tx: FinancialTransaction): Long
+
+    @Update
+    suspend fun updateFinancialTransaction(tx: FinancialTransaction)
+
+    @Delete
+    suspend fun deleteFinancialTransaction(tx: FinancialTransaction)
 }

@@ -15,6 +15,23 @@ class FarmViewModel(application: Application) : AndroidViewModel(application) {
 
     private val db = AppDatabase.getDatabase(application)
     private val repository = FarmRepository(db.farmDao())
+    val firestoreRepo = FirestoreFarmRepository(application)
+    private val firebaseAuth = com.google.firebase.auth.FirebaseAuth.getInstance()
+
+    private var cloudJob: kotlinx.coroutines.Job? = null
+    private var isSyncingFromCloud = false
+
+    private val _isCloudConnected = kotlinx.coroutines.flow.MutableStateFlow(firebaseAuth.currentUser != null)
+    val isCloudConnected: StateFlow<Boolean> = _isCloudConnected
+
+    private val _currentUserEmail = kotlinx.coroutines.flow.MutableStateFlow(firebaseAuth.currentUser?.email)
+    val currentUserEmail: StateFlow<String?> = _currentUserEmail
+
+    private val _isSyncing = kotlinx.coroutines.flow.MutableStateFlow(false)
+    val isSyncing: StateFlow<Boolean> = _isSyncing
+
+    private val _syncMessage = kotlinx.coroutines.flow.MutableStateFlow("Prêt")
+    val syncMessage: StateFlow<String> = _syncMessage
 
     private val prefs = application.getSharedPreferences("farm_prefs", android.content.Context.MODE_PRIVATE)
     private val _manualFeedStock = kotlinx.coroutines.flow.MutableStateFlow(prefs.getFloat("manual_feed_stock", -1f).toDouble())
@@ -88,6 +105,20 @@ class FarmViewModel(application: Application) : AndroidViewModel(application) {
             initialValue = emptyList()
         )
 
+    val fatteningBatches: StateFlow<List<FatteningBatch>> = repository.fatteningBatches
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
+    val financialTransactions: StateFlow<List<FinancialTransaction>> = repository.financialTransactions
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
     init {
         // App starts with clean reminders maintenance and automatic alarm scheduling
         cleanExpiredReminders()
@@ -97,6 +128,253 @@ class FarmViewModel(application: Application) : AndroidViewModel(application) {
                 list.filter { !it.isCompleted && it.dueDate > now }.forEach { rem ->
                     ReminderScheduler.scheduleReminder(getApplication(), rem)
                 }
+            }
+        }
+
+        // Firebase Auth listener for cloud sync
+        val authListener = com.google.firebase.auth.FirebaseAuth.AuthStateListener { auth ->
+            val user = auth.currentUser
+            _isCloudConnected.value = user != null
+            _currentUserEmail.value = user?.email
+            if (user != null) {
+                startCloudSync(user.uid, user.displayName, user.email)
+            } else {
+                stopCloudSync()
+            }
+        }
+        firebaseAuth.addAuthStateListener(authListener)
+    }
+
+    fun startCloudSync(uid: String, displayName: String?, email: String?) {
+        cloudJob?.cancel()
+        cloudJob = viewModelScope.launch {
+            try {
+                firestoreRepo.recordUserSync(displayName, email)
+                _syncMessage.value = "Connecté au Cloud (Temps réel)"
+            } catch (e: Exception) {
+                _syncMessage.value = "Erreur de connexion Cloud: ${e.message}"
+            }
+
+            // Launch listener for rabbits
+            launch {
+                firestoreRepo.observeRabbits().collect { cloudRabbits ->
+                    if (cloudRabbits.isNotEmpty()) {
+                        isSyncingFromCloud = true
+                        try {
+                            val localList = rabbits.value
+                            for (cr in cloudRabbits) {
+                                val roomRabbit = cr.toRoom()
+                                val existing = localList.find { it.id == roomRabbit.id || (it.name == roomRabbit.name && it.dateOfBirth == roomRabbit.dateOfBirth) }
+                                if (existing != null) {
+                                    if (existing != roomRabbit) {
+                                        repository.updateRabbit(roomRabbit.copy(id = existing.id))
+                                    }
+                                } else {
+                                    repository.insertRabbit(roomRabbit)
+                                }
+                            }
+                        } finally {
+                            isSyncingFromCloud = false
+                        }
+                    }
+                }
+            }
+
+            // Launch listener for mating records
+            launch {
+                firestoreRepo.observeMatingRecords().collect { cloudMatings ->
+                    if (cloudMatings.isNotEmpty()) {
+                        isSyncingFromCloud = true
+                        try {
+                            val localList = matingRecords.value
+                            for (cm in cloudMatings) {
+                                val roomMating = cm.toRoom()
+                                val existing = localList.find { it.id == roomMating.id || (it.maleId == roomMating.maleId && it.femaleId == roomMating.femaleId && it.matingDate == roomMating.matingDate) }
+                                if (existing != null) {
+                                    if (existing != roomMating) {
+                                        repository.updateMatingRecord(roomMating.copy(id = existing.id))
+                                    }
+                                } else {
+                                    repository.insertMatingRecord(roomMating)
+                                }
+                            }
+                        } finally {
+                            isSyncingFromCloud = false
+                        }
+                    }
+                }
+            }
+
+            // Launch listener for inventory
+            launch {
+                firestoreRepo.observeInventory().collect { cloudItems ->
+                    if (cloudItems.isNotEmpty()) {
+                        isSyncingFromCloud = true
+                        try {
+                            val localList = inventoryItems.value
+                            for (ci in cloudItems) {
+                                val roomItem = ci.toRoom()
+                                val existing = localList.find { it.id == roomItem.id || it.name == roomItem.name }
+                                if (existing != null) {
+                                    if (existing != roomItem) {
+                                        repository.updateInventoryItem(roomItem.copy(id = existing.id))
+                                    }
+                                } else {
+                                    repository.insertInventoryItem(roomItem)
+                                }
+                            }
+                        } finally {
+                            isSyncingFromCloud = false
+                        }
+                    }
+                }
+            }
+
+            // Launch listener for reminders
+            launch {
+                firestoreRepo.observeReminders().collect { cloudReminders ->
+                    if (cloudReminders.isNotEmpty()) {
+                        isSyncingFromCloud = true
+                        try {
+                            val localList = reminders.value
+                            for (cr in cloudReminders) {
+                                val roomRem = cr.toRoom()
+                                val existing = localList.find { it.id == roomRem.id || (it.title == roomRem.title && it.dueDate == roomRem.dueDate) }
+                                if (existing != null) {
+                                    if (existing != roomRem) {
+                                        repository.updateReminder(roomRem.copy(id = existing.id))
+                                    }
+                                } else {
+                                    repository.insertReminder(roomRem)
+                                }
+                            }
+                        } finally {
+                            isSyncingFromCloud = false
+                        }
+                    }
+                }
+            }
+
+            // Launch listener for treatments
+            launch {
+                firestoreRepo.observeTreatments().collect { cloudTreatments ->
+                    if (cloudTreatments.isNotEmpty()) {
+                        isSyncingFromCloud = true
+                        try {
+                            val localList = treatmentRecords.value
+                            for (ct in cloudTreatments) {
+                                val roomTreat = ct.toRoom()
+                                val existing = localList.find { it.id == roomTreat.id || (it.rabbitId == roomTreat.rabbitId && it.designation == roomTreat.designation && it.date == roomTreat.date) }
+                                if (existing == null) {
+                                    repository.insertTreatmentRecord(roomTreat)
+                                }
+                            }
+                        } finally {
+                            isSyncingFromCloud = false
+                        }
+                    }
+                }
+            }
+
+            // Launch listener for weights
+            launch {
+                firestoreRepo.observeWeights().collect { cloudWeights ->
+                    if (cloudWeights.isNotEmpty()) {
+                        isSyncingFromCloud = true
+                        try {
+                            val localList = repository.getAllWeightRecords()
+                            for (cw in cloudWeights) {
+                                val roomWeight = cw.toRoom()
+                                val existing = localList.find { it.id == roomWeight.id || (it.rabbitId == roomWeight.rabbitId && it.recordDate == roomWeight.recordDate) }
+                                if (existing == null) {
+                                    repository.insertWeightRecord(roomWeight)
+                                }
+                            }
+                        } finally {
+                            isSyncingFromCloud = false
+                        }
+                    }
+                }
+            }
+
+            // Launch listener for feed logs
+            launch {
+                firestoreRepo.observeFeedLogs().collect { cloudLogs ->
+                    if (cloudLogs.isNotEmpty()) {
+                        isSyncingFromCloud = true
+                        try {
+                            val localList = dailyFeedLogs.value
+                            for (cl in cloudLogs) {
+                                val roomLog = cl.toRoom()
+                                val existing = localList.find { it.id == roomLog.id || (it.feedDate == roomLog.feedDate && it.quantityGrams == roomLog.quantityGrams) }
+                                if (existing == null) {
+                                    repository.insertDailyFeedLog(roomLog)
+                                }
+                            }
+                        } finally {
+                            isSyncingFromCloud = false
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fun stopCloudSync() {
+        cloudJob?.cancel()
+        cloudJob = null
+        _syncMessage.value = "Hors-ligne"
+    }
+
+    fun syncAllLocalDataToCloud(onComplete: (Boolean, String) -> Unit = { _, _ -> }) {
+        val user = firebaseAuth.currentUser
+        if (user == null) {
+            onComplete(false, "Veuillez vous connecter avec votre compte Google")
+            return
+        }
+        viewModelScope.launch {
+            _isSyncing.value = true
+            _syncMessage.value = "Sauvegarde en cours vers le Cloud..."
+            try {
+                val uid = user.uid
+                firestoreRepo.recordUserSync(user.displayName, user.email)
+
+                // Sync Rabbits
+                rabbits.value.forEach { r ->
+                    firestoreRepo.saveRabbit(r.toFirestore(uid))
+                }
+                // Sync Mating
+                matingRecords.value.forEach { m ->
+                    firestoreRepo.saveMatingRecord(m.toFirestore(uid))
+                }
+                // Sync Inventory
+                inventoryItems.value.forEach { i ->
+                    firestoreRepo.saveInventoryItem(i.toFirestore(uid))
+                }
+                // Sync Reminders
+                reminders.value.forEach { rem ->
+                    firestoreRepo.saveReminder(rem.toFirestore(uid))
+                }
+                // Sync Treatments
+                treatmentRecords.value.forEach { t ->
+                    firestoreRepo.saveTreatment(t.toFirestore(uid))
+                }
+                // Sync Weights
+                repository.getAllWeightRecords().forEach { w ->
+                    firestoreRepo.saveWeight(w.toFirestore(uid))
+                }
+                // Sync Feed logs
+                dailyFeedLogs.value.forEach { f ->
+                    firestoreRepo.saveFeedLog(f.toFirestore(uid))
+                }
+
+                _syncMessage.value = "Sauvegarde Cloud réussie et synchronisée en temps réel !"
+                onComplete(true, "Toutes les données sont sauvegardées et synchronisées en temps réel !")
+            } catch (e: Exception) {
+                _syncMessage.value = "Erreur: ${e.localizedMessage}"
+                onComplete(false, "Erreur de sauvegarde: ${e.localizedMessage}")
+            } finally {
+                _isSyncing.value = false
             }
         }
     }
@@ -208,19 +486,53 @@ class FarmViewModel(application: Application) : AndroidViewModel(application) {
 
     // ---- Operations ----
     fun addRabbit(rabbit: Rabbit) = viewModelScope.launch {
-        repository.insertRabbit(rabbit)
+        val newId = repository.insertRabbit(rabbit)
+        val user = firebaseAuth.currentUser
+        if (user != null && !isSyncingFromCloud) {
+            try {
+                val savedRabbit = rabbit.copy(id = newId.toInt())
+                firestoreRepo.saveRabbit(savedRabbit.toFirestore(user.uid))
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
     fun updateRabbit(rabbit: Rabbit) = viewModelScope.launch {
         repository.updateRabbit(rabbit)
+        val user = firebaseAuth.currentUser
+        if (user != null && !isSyncingFromCloud) {
+            try {
+                firestoreRepo.saveRabbit(rabbit.toFirestore(user.uid))
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
     fun deleteRabbit(rabbit: Rabbit) = viewModelScope.launch {
         repository.deleteRabbit(rabbit)
+        val user = firebaseAuth.currentUser
+        if (user != null && !isSyncingFromCloud) {
+            try {
+                firestoreRepo.deleteRabbit("rabbit_${rabbit.id}")
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
     fun addMatingRecord(record: MatingRecord) = viewModelScope.launch {
-        repository.insertMatingRecord(record)
+        val newId = repository.insertMatingRecord(record)
+        val user = firebaseAuth.currentUser
+        if (user != null && !isSyncingFromCloud) {
+            try {
+                val saved = record.copy(id = newId.toInt())
+                firestoreRepo.saveMatingRecord(saved.toFirestore(user.uid))
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
         
         // Auto-Reminder: Installer le nid d'accouchement 1 jour avant la mise bas
         val female = repository.getRabbitById(record.femaleId)
@@ -236,15 +548,31 @@ class FarmViewModel(application: Application) : AndroidViewModel(application) {
         val id = repository.insertReminder(r)
         val savedReminder = r.copy(id = id.toInt())
         ReminderScheduler.scheduleReminder(getApplication(), savedReminder)
+        if (user != null && !isSyncingFromCloud) {
+            try {
+                firestoreRepo.saveReminder(savedReminder.toFirestore(user.uid))
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
     fun registerBirth(record: MatingRecord, offspringCount: Int, birthDate: Long = System.currentTimeMillis()) = viewModelScope.launch {
         // 1. Update status and notes
         val countNotes = "Mise bas de $offspringCount lapereaux sains"
-        repository.updateMatingRecord(record.copy(
+        val updatedRecord = record.copy(
             status = "Mise bas",
             notes = if (record.notes.isEmpty()) countNotes else "${record.notes} • $countNotes"
-        ))
+        )
+        repository.updateMatingRecord(updatedRecord)
+        val user = firebaseAuth.currentUser
+        if (user != null && !isSyncingFromCloud) {
+            try {
+                firestoreRepo.saveMatingRecord(updatedRecord.toFirestore(user.uid))
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
         
         // 2. Fetch mother
         val mother = repository.getRabbitById(record.femaleId)
@@ -270,54 +598,180 @@ class FarmViewModel(application: Application) : AndroidViewModel(application) {
                 notes = "Sexe indéterminé à la naissance. À sexer et nommer après 4-6 semaines.",
                 isActive = true
             )
-            repository.insertRabbit(baby)
+            val kitId = repository.insertRabbit(baby)
+            if (user != null && !isSyncingFromCloud) {
+                try {
+                    firestoreRepo.saveRabbit(baby.copy(id = kitId.toInt()).toFirestore(user.uid))
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
         }
     }
 
     fun updateMatingRecord(record: MatingRecord) = viewModelScope.launch {
         repository.updateMatingRecord(record)
+        val user = firebaseAuth.currentUser
+        if (user != null && !isSyncingFromCloud) {
+            try {
+                firestoreRepo.saveMatingRecord(record.toFirestore(user.uid))
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
     fun deleteMatingRecord(record: MatingRecord) = viewModelScope.launch {
         repository.deleteMatingRecord(record)
+        val user = firebaseAuth.currentUser
+        if (user != null && !isSyncingFromCloud) {
+            try {
+                firestoreRepo.deleteMatingRecord("mating_${record.id}")
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
     // ---- Treatment Operations ----
     fun getTreatmentsForRabbit(rabbitId: Int) = repository.getTreatmentsForRabbit(rabbitId)
 
     fun addTreatmentRecord(record: TreatmentRecord) = viewModelScope.launch {
-        repository.insertTreatmentRecord(record)
+        val newId = repository.insertTreatmentRecord(record)
+        val user = firebaseAuth.currentUser
+        if (user != null && !isSyncingFromCloud) {
+            try {
+                firestoreRepo.saveTreatment(record.copy(id = newId.toInt()).toFirestore(user.uid))
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
     fun deleteTreatmentRecord(record: TreatmentRecord) = viewModelScope.launch {
         repository.deleteTreatmentRecord(record)
+        val user = firebaseAuth.currentUser
+        if (user != null && !isSyncingFromCloud) {
+            try {
+                firestoreRepo.deleteTreatment("treat_${record.id}")
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
     // ---- Daily Feed Operations ----
     fun addDailyFeedLog(log: DailyFeedLog) = viewModelScope.launch {
-        repository.insertDailyFeedLog(log)
+        val newId = repository.insertDailyFeedLog(log)
+        val user = firebaseAuth.currentUser
+        if (user != null && !isSyncingFromCloud) {
+            try {
+                firestoreRepo.saveFeedLog(log.copy(id = newId.toInt()).toFirestore(user.uid))
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
     fun deleteDailyFeedLog(log: DailyFeedLog) = viewModelScope.launch {
         repository.deleteDailyFeedLog(log)
+        val user = firebaseAuth.currentUser
+        if (user != null && !isSyncingFromCloud) {
+            try {
+                firestoreRepo.deleteFeedLog("feed_${log.id}")
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    // ---- Fattening Batches Operations ----
+    fun addFatteningBatch(batch: FatteningBatch) = viewModelScope.launch {
+        repository.insertFatteningBatch(batch)
+    }
+
+    fun updateFatteningBatch(batch: FatteningBatch) = viewModelScope.launch {
+        repository.updateFatteningBatch(batch)
+    }
+
+    fun deleteFatteningBatch(batch: FatteningBatch) = viewModelScope.launch {
+        repository.deleteFatteningBatch(batch)
+    }
+
+    // ---- Financial Transactions Operations ----
+    fun addFinancialTransaction(tx: FinancialTransaction) = viewModelScope.launch {
+        repository.insertFinancialTransaction(tx)
+    }
+
+    fun updateFinancialTransaction(tx: FinancialTransaction) = viewModelScope.launch {
+        repository.updateFinancialTransaction(tx)
+    }
+
+    fun deleteFinancialTransaction(tx: FinancialTransaction) = viewModelScope.launch {
+        repository.deleteFinancialTransaction(tx)
+    }
+
+    // ---- Sanitary Withdrawal Helpers ----
+    fun isRabbitUnderWithdrawal(rabbitId: Int): Boolean {
+        val now = System.currentTimeMillis()
+        val list = treatmentRecords.value.filter { it.rabbitId == rabbitId }
+        return list.any { it.isUnderWithdrawal(now) }
+    }
+
+    fun getActiveWithdrawalEndDate(rabbitId: Int): Long? {
+        val now = System.currentTimeMillis()
+        val list = treatmentRecords.value.filter { it.rabbitId == rabbitId && it.isUnderWithdrawal(now) }
+        return list.mapNotNull { it.effectiveWithdrawalEndTime() }.maxOrNull()
     }
 
     fun addInventoryItem(item: InventoryItem) = viewModelScope.launch {
-        repository.insertInventoryItem(item)
+        val newId = repository.insertInventoryItem(item)
+        val user = firebaseAuth.currentUser
+        if (user != null && !isSyncingFromCloud) {
+            try {
+                firestoreRepo.saveInventoryItem(item.copy(id = newId.toInt()).toFirestore(user.uid))
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
     fun updateInventoryItem(item: InventoryItem) = viewModelScope.launch {
         repository.updateInventoryItem(item)
+        val user = firebaseAuth.currentUser
+        if (user != null && !isSyncingFromCloud) {
+            try {
+                firestoreRepo.saveInventoryItem(item.toFirestore(user.uid))
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
     fun deleteInventoryItem(item: InventoryItem) = viewModelScope.launch {
         repository.deleteInventoryItem(item)
+        val user = firebaseAuth.currentUser
+        if (user != null && !isSyncingFromCloud) {
+            try {
+                firestoreRepo.deleteInventoryItem("item_${item.id}")
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
     fun addReminder(reminder: Reminder) = viewModelScope.launch {
         val id = repository.insertReminder(reminder)
         val savedReminder = reminder.copy(id = id.toInt())
         ReminderScheduler.scheduleReminder(getApplication(), savedReminder)
+        val user = firebaseAuth.currentUser
+        if (user != null && !isSyncingFromCloud) {
+            try {
+                firestoreRepo.saveReminder(savedReminder.toFirestore(user.uid))
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
     fun updateReminder(reminder: Reminder) = viewModelScope.launch {
@@ -327,17 +781,41 @@ class FarmViewModel(application: Application) : AndroidViewModel(application) {
         } else {
             ReminderScheduler.scheduleReminder(getApplication(), reminder)
         }
+        val user = firebaseAuth.currentUser
+        if (user != null && !isSyncingFromCloud) {
+            try {
+                firestoreRepo.saveReminder(reminder.toFirestore(user.uid))
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
     fun deleteReminder(reminder: Reminder) = viewModelScope.launch {
         repository.deleteReminder(reminder)
         ReminderScheduler.cancelReminder(getApplication(), reminder)
+        val user = firebaseAuth.currentUser
+        if (user != null && !isSyncingFromCloud) {
+            try {
+                firestoreRepo.deleteReminder("rem_${reminder.id}")
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
     fun getWeightForRabbit(rabbitId: Int) = repository.getWeightRecordsForRabbit(rabbitId)
 
     fun addWeightRecord(weightRecord: WeightRecord) = viewModelScope.launch {
-        repository.insertWeightRecord(weightRecord)
+        val newId = repository.insertWeightRecord(weightRecord)
+        val user = firebaseAuth.currentUser
+        if (user != null && !isSyncingFromCloud) {
+            try {
+                firestoreRepo.saveWeight(weightRecord.copy(id = newId.toInt()).toFirestore(user.uid))
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
     // ---- Photo Records Manager Operations ----

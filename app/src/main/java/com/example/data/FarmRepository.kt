@@ -70,4 +70,31 @@ class FarmRepository(private val farmDao: FarmDao) {
 
     suspend fun deleteDailyFeedLog(log: DailyFeedLog) =
         farmDao.deleteDailyFeedLog(log)
+
+    // ---- Fattening Batches ----
+    val fatteningBatches: Flow<List<FatteningBatch>> = farmDao.getAllFatteningBatchesFlow()
+
+    suspend fun getFatteningBatchById(id: Long): FatteningBatch? =
+        farmDao.getFatteningBatchById(id)
+
+    suspend fun insertFatteningBatch(batch: FatteningBatch): Long =
+        farmDao.insertFatteningBatch(batch)
+
+    suspend fun updateFatteningBatch(batch: FatteningBatch) =
+        farmDao.updateFatteningBatch(batch)
+
+    suspend fun deleteFatteningBatch(batch: FatteningBatch) =
+        farmDao.deleteFatteningBatch(batch)
+
+    // ---- Financial Transactions ----
+    val financialTransactions: Flow<List<FinancialTransaction>> = farmDao.getAllFinancialTransactionsFlow()
+
+    suspend fun insertFinancialTransaction(tx: FinancialTransaction): Long =
+        farmDao.insertFinancialTransaction(tx)
+
+    suspend fun updateFinancialTransaction(tx: FinancialTransaction) =
+        farmDao.updateFinancialTransaction(tx)
+
+    suspend fun deleteFinancialTransaction(tx: FinancialTransaction) =
+        farmDao.deleteFinancialTransaction(tx)
 }

@@ -13,4 +13,6 @@ sealed class Screen(val route: String) {
     object Genealogy : Screen("genealogy/{rabbitId}") {
         fun createRoute(rabbitId: Int) = "genealogy/$rabbitId"
     }
+    object FatteningBatches : Screen("fattening_batches")
+    object Finances : Screen("finances")
 }

@@ -165,6 +165,12 @@ fun AppNavigation(viewModel: FarmViewModel = viewModel()) {
                 val rabbitId = backStackEntry.arguments?.getInt("rabbitId") ?: return@composable
                 GenealogyScreen(navController, viewModel, rabbitId)
             }
+            composable(Screen.FatteningBatches.route) {
+                FatteningBatchesScreen(navController, viewModel)
+            }
+            composable(Screen.Finances.route) {
+                FinancesScreen(navController, viewModel)
+            }
         }
     }
 }

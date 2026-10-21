@@ -1,0 +1,263 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny all access
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Validation helper for user profile
+    function isValidUserProfile(data) {
+      return data.userId is string && data.userId == request.auth.uid &&
+             (!('email' in data) || data.email == null || (data.email is string && data.email.size() <= 200)) &&
+             (!('displayName' in data) || data.displayName == null || (data.displayName is string && data.displayName.size() <= 200)) &&
+             (!('farmName' in data) || data.farmName == null || (data.farmName is string && data.farmName.size() <= 200)) &&
+             (!('updatedAt' in data) || data.updatedAt == null || (data.updatedAt is timestamp && data.updatedAt <= request.time));
+    }
+
+    // Validation helper for rabbits
+    function isValidRabbit(data) {
+      return data.userId is string && data.userId == request.auth.uid &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             data.sex is string && data.sex.size() > 0 && data.sex.size() <= 50 &&
+             (!('localId' in data) || data.localId is int) &&
+             (!('dateOfBirth' in data) || data.dateOfBirth is int) &&
+             (!('breed' in data) || (data.breed is string && data.breed.size() <= 100)) &&
+             (!('cageNumber' in data) || (data.cageNumber is string && data.cageNumber.size() <= 50)) &&
+             (!('weight' in data) || data.weight is number) &&
+             (!('fatherId' in data) || data.fatherId == null || data.fatherId is int) &&
+             (!('motherId' in data) || data.motherId == null || data.motherId is int) &&
+             (!('notes' in data) || (data.notes is string && data.notes.size() <= 2000)) &&
+             (!('isActive' in data) || data.isActive is bool) &&
+             (!('status' in data) || (data.status is string && data.status.size() <= 50)) &&
+             (!('imageUri' in data) || data.imageUri == null || (data.imageUri is string && data.imageUri.size() <= 1000)) &&
+             (!('updatedAt' in data) || data.updatedAt == null || (data.updatedAt is timestamp && data.updatedAt <= request.time));
+    }
+
+    // Validation helper for mating records
+    function isValidMating(data) {
+      return data.userId is string && data.userId == request.auth.uid &&
+             data.maleId is int &&
+             data.femaleId is int &&
+             data.matingDate is int &&
+             (!('localId' in data) || data.localId is int) &&
+             (!('expectedBirthDate' in data) || data.expectedBirthDate is int) &&
+             (!('status' in data) || (data.status is string && data.status.size() <= 50)) &&
+             (!('notes' in data) || (data.notes is string && data.notes.size() <= 2000)) &&
+             (!('updatedAt' in data) || data.updatedAt == null || (data.updatedAt is timestamp && data.updatedAt <= request.time));
+    }
+
+    // Validation helper for inventory items
+    function isValidInventory(data) {
+      return data.userId is string && data.userId == request.auth.uid &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             data.category is string && data.category.size() > 0 && data.category.size() <= 50 &&
+             (!('localId' in data) || data.localId is int) &&
+             (!('quantity' in data) || data.quantity is number) &&
+             (!('unit' in data) || (data.unit is string && data.unit.size() <= 30)) &&
+             (!('pricePerUnit' in data) || data.pricePerUnit is number) &&
+             (!('totalPrice' in data) || data.totalPrice is number) &&
+             (!('purchaseDate' in data) || data.purchaseDate is int) &&
+             (!('durationMonths' in data) || data.durationMonths is int) &&
+             (!('notes' in data) || (data.notes is string && data.notes.size() <= 1000)) &&
+             (!('updatedAt' in data) || data.updatedAt == null || (data.updatedAt is timestamp && data.updatedAt <= request.time));
+    }
+
+    // Validation helper for reminders
+    function isValidReminder(data) {
+      return data.userId is string && data.userId == request.auth.uid &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 150 &&
+             data.dueDate is int &&
+             (!('localId' in data) || data.localId is int) &&
+             (!('description' in data) || (data.description is string && data.description.size() <= 1000)) &&
+             (!('priority' in data) || (data.priority is string && data.priority.size() <= 50)) &&
+             (!('isCompleted' in data) || data.isCompleted is bool) &&
+             (!('updatedAt' in data) || data.updatedAt == null || (data.updatedAt is timestamp && data.updatedAt <= request.time));
+    }
+
+    // Validation helper for treatments
+    function isValidTreatment(data) {
+      return data.userId is string && data.userId == request.auth.uid &&
+             data.rabbitId is int &&
+             data.date is int &&
+             (!('localId' in data) || data.localId is int) &&
+             (!('type' in data) || (data.type is string && data.type.size() <= 50)) &&
+             (!('designation' in data) || (data.designation is string && data.designation.size() <= 150)) &&
+             (!('dosage' in data) || (data.dosage is string && data.dosage.size() <= 100)) &&
+             (!('notes' in data) || (data.notes is string && data.notes.size() <= 1000)) &&
+             (!('nextDueDate' in data) || data.nextDueDate == null || data.nextDueDate is int) &&
+             (!('updatedAt' in data) || data.updatedAt == null || (data.updatedAt is timestamp && data.updatedAt <= request.time));
+    }
+
+    // Validation helper for weights
+    function isValidWeight(data) {
+      return data.userId is string && data.userId == request.auth.uid &&
+             data.rabbitId is int &&
+             data.weight is number &&
+             data.recordDate is int &&
+             (!('localId' in data) || data.localId is int) &&
+             (!('notes' in data) || (data.notes is string && data.notes.size() <= 1000)) &&
+             (!('updatedAt' in data) || data.updatedAt == null || (data.updatedAt is timestamp && data.updatedAt <= request.time));
+    }
+
+    // Validation helper for daily feed logs
+    function isValidFeedLog(data) {
+      return data.userId is string && data.userId == request.auth.uid &&
+             data.feedDate is int &&
+             data.quantityGrams is number &&
+             (!('localId' in data) || data.localId is int) &&
+             (!('notes' in data) || (data.notes is string && data.notes.size() <= 1000)) &&
+             (!('updatedAt' in data) || data.updatedAt == null || (data.updatedAt is timestamp && data.updatedAt <= request.time));
+    }
+
+    // User Profile
+    match /users/{userId} {
+      allow get, list: if isOwner(userId);
+      allow create: if isOwner(userId) &&
+                       isValidId(userId) &&
+                       isValidUserProfile(incoming()) &&
+                       incoming().createdAt is timestamp &&
+                       incoming().createdAt <= request.time;
+      allow update: if isOwner(userId) &&
+                       isValidUserProfile(incoming()) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['email', 'displayName', 'farmName', 'updatedAt']);
+      allow delete: if isOwner(userId);
+
+      // Rabbits subcollection
+      match /rabbits/{rabbitId} {
+        allow get, list: if isOwner(userId);
+        allow create: if isOwner(userId) &&
+                         isValidId(rabbitId) &&
+                         isValidRabbit(incoming()) &&
+                         incoming().createdAt is timestamp &&
+                         incoming().createdAt <= request.time;
+        allow update: if isOwner(userId) &&
+                         isValidRabbit(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['localId', 'name', 'sex', 'dateOfBirth', 'breed', 'cageNumber', 'weight', 'fatherId', 'motherId', 'notes', 'isActive', 'status', 'imageUri', 'updatedAt']);
+        allow delete: if isOwner(userId);
+      }
+
+      // Mating records subcollection
+      match /mating_records/{matingId} {
+        allow get, list: if isOwner(userId);
+        allow create: if isOwner(userId) &&
+                         isValidId(matingId) &&
+                         isValidMating(incoming()) &&
+                         incoming().createdAt is timestamp &&
+                         incoming().createdAt <= request.time;
+        allow update: if isOwner(userId) &&
+                         isValidMating(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['localId', 'maleId', 'femaleId', 'matingDate', 'expectedBirthDate', 'status', 'notes', 'updatedAt']);
+        allow delete: if isOwner(userId);
+      }
+
+      // Inventory subcollection
+      match /inventory_items/{itemId} {
+        allow get, list: if isOwner(userId);
+        allow create: if isOwner(userId) &&
+                         isValidId(itemId) &&
+                         isValidInventory(incoming()) &&
+                         incoming().createdAt is timestamp &&
+                         incoming().createdAt <= request.time;
+        allow update: if isOwner(userId) &&
+                         isValidInventory(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['localId', 'name', 'category', 'quantity', 'unit', 'pricePerUnit', 'totalPrice', 'purchaseDate', 'durationMonths', 'notes', 'updatedAt']);
+        allow delete: if isOwner(userId);
+      }
+
+      // Reminders subcollection
+      match /reminders/{reminderId} {
+        allow get, list: if isOwner(userId);
+        allow create: if isOwner(userId) &&
+                         isValidId(reminderId) &&
+                         isValidReminder(incoming()) &&
+                         incoming().createdAt is timestamp &&
+                         incoming().createdAt <= request.time;
+        allow update: if isOwner(userId) &&
+                         isValidReminder(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['localId', 'title', 'description', 'dueDate', 'priority', 'isCompleted', 'updatedAt']);
+        allow delete: if isOwner(userId);
+      }
+
+      // Treatments subcollection
+      match /treatments/{treatmentId} {
+        allow get, list: if isOwner(userId);
+        allow create: if isOwner(userId) &&
+                         isValidId(treatmentId) &&
+                         isValidTreatment(incoming()) &&
+                         incoming().createdAt is timestamp &&
+                         incoming().createdAt <= request.time;
+        allow update: if isOwner(userId) &&
+                         isValidTreatment(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['localId', 'rabbitId', 'type', 'designation', 'date', 'dosage', 'notes', 'nextDueDate', 'updatedAt']);
+        allow delete: if isOwner(userId);
+      }
+
+      // Weights subcollection
+      match /weights/{weightId} {
+        allow get, list: if isOwner(userId);
+        allow create: if isOwner(userId) &&
+                         isValidId(weightId) &&
+                         isValidWeight(incoming()) &&
+                         incoming().createdAt is timestamp &&
+                         incoming().createdAt <= request.time;
+        allow update: if isOwner(userId) &&
+                         isValidWeight(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['localId', 'rabbitId', 'weight', 'recordDate', 'notes', 'updatedAt']);
+        allow delete: if isOwner(userId);
+      }
+
+      // Feed logs subcollection
+      match /feed_logs/{feedLogId} {
+        allow get, list: if isOwner(userId);
+        allow create: if isOwner(userId) &&
+                         isValidId(feedLogId) &&
+                         isValidFeedLog(incoming()) &&
+                         incoming().createdAt is timestamp &&
+                         incoming().createdAt <= request.time;
+        allow update: if isOwner(userId) &&
+                         isValidFeedLog(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['localId', 'feedDate', 'quantityGrams', 'notes', 'updatedAt']);
+        allow delete: if isOwner(userId);
+      }
+    }
+  }
+}

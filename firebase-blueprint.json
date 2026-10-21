@@ -1,0 +1,185 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Information about the farm manager or registered user",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "farmName": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "createdAt"]
+    },
+    "RabbitDoc": {
+      "title": "RabbitDoc",
+      "description": "A rabbit in the cuniculture breeding registry",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "localId": { "type": "number" },
+        "name": { "type": "string" },
+        "sex": { "type": "string" },
+        "dateOfBirth": { "type": "number" },
+        "breed": { "type": "string" },
+        "cageNumber": { "type": "string" },
+        "weight": { "type": "number" },
+        "fatherId": { "type": "number" },
+        "motherId": { "type": "number" },
+        "notes": { "type": "string" },
+        "isActive": { "type": "boolean" },
+        "status": { "type": "string" },
+        "imageUri": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "name", "sex", "createdAt"]
+    },
+    "MatingDoc": {
+      "title": "MatingDoc",
+      "description": "A mating reproduction and gestation tracking record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "localId": { "type": "number" },
+        "maleId": { "type": "number" },
+        "femaleId": { "type": "number" },
+        "matingDate": { "type": "number" },
+        "expectedBirthDate": { "type": "number" },
+        "status": { "type": "string" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "maleId", "femaleId", "matingDate", "createdAt"]
+    },
+    "InventoryDoc": {
+      "title": "InventoryDoc",
+      "description": "Stock of food, medicine, equipment or supplies",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "localId": { "type": "number" },
+        "name": { "type": "string" },
+        "category": { "type": "string" },
+        "quantity": { "type": "number" },
+        "unit": { "type": "string" },
+        "lowStockThreshold": { "type": "number" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "name", "category", "createdAt"]
+    },
+    "ReminderDoc": {
+      "title": "ReminderDoc",
+      "description": "A scheduled task or alert (palpation, nest box, birth, weaning, vaccine)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "localId": { "type": "number" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "dueDate": { "type": "number" },
+        "rabbitId": { "type": "number" },
+        "category": { "type": "string" },
+        "isCompleted": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "title", "dueDate", "createdAt"]
+    },
+    "TreatmentDoc": {
+      "title": "TreatmentDoc",
+      "description": "Health treatment or vaccination administered to a rabbit",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "localId": { "type": "number" },
+        "rabbitId": { "type": "number" },
+        "treatmentName": { "type": "string" },
+        "date": { "type": "number" },
+        "dosage": { "type": "string" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "rabbitId", "treatmentName", "date", "createdAt"]
+    },
+    "WeightDoc": {
+      "title": "WeightDoc",
+      "description": "A weight growth tracking entry for a rabbit",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "localId": { "type": "number" },
+        "rabbitId": { "type": "number" },
+        "weight": { "type": "number" },
+        "date": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "rabbitId", "weight", "date", "createdAt"]
+    },
+    "FeedLogDoc": {
+      "title": "FeedLogDoc",
+      "description": "Daily feed consumption record for the herd",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "localId": { "type": "number" },
+        "date": { "type": "number" },
+        "feedType": { "type": "string" },
+        "quantityKg": { "type": "number" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "date", "feedType", "quantityKg", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Profile and sync metadata for the farm user"
+    },
+    "/users/{userId}/rabbits/{rabbitId}": {
+      "schema": { "$ref": "#/entities/RabbitDoc" },
+      "description": "Rabbits belonging to the user's farm"
+    },
+    "/users/{userId}/mating_records/{matingId}": {
+      "schema": { "$ref": "#/entities/MatingDoc" },
+      "description": "Mating and breeding records"
+    },
+    "/users/{userId}/inventory_items/{itemId}": {
+      "schema": { "$ref": "#/entities/InventoryDoc" },
+      "description": "Inventory and supplies"
+    },
+    "/users/{userId}/reminders/{reminderId}": {
+      "schema": { "$ref": "#/entities/ReminderDoc" },
+      "description": "Breeding and health task reminders"
+    },
+    "/users/{userId}/treatments/{treatmentId}": {
+      "schema": { "$ref": "#/entities/TreatmentDoc" },
+      "description": "Medical treatments and vaccines"
+    },
+    "/users/{userId}/weights/{weightId}": {
+      "schema": { "$ref": "#/entities/WeightDoc" },
+      "description": "Rabbit weight growth records"
+    },
+    "/users/{userId}/feed_logs/{feedLogId}": {
+      "schema": { "$ref": "#/entities/FeedLogDoc" },
+      "description": "Daily feed distribution logs"
+    }
+  }
+}

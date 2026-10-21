@@ -48,6 +48,7 @@ import com.example.viewmodels.FarmViewModel
 fun RabbitListScreen(navController: NavController, viewModel: FarmViewModel) {
     val rabbits by viewModel.rabbits.collectAsState()
     val matingRecords by viewModel.matingRecords.collectAsState()
+    val treatmentRecords by viewModel.treatmentRecords.collectAsState()
     val context = LocalContext.current
 
     var searchQuery by remember { mutableStateOf("") }
@@ -602,7 +603,10 @@ fun RabbitListScreen(navController: NavController, viewModel: FarmViewModel) {
                             
                             items(listInCategory) { rabbit ->
                                 val mating = matingRecords.find { it.femaleId == rabbit.id && it.status in listOf("Accouplé", "Gestation confirmée") && it.expectedBirthDate > now }
-                                val statusBadge = if (!rabbit.isActive || rabbit.status != "Actif") {
+                                val isUnderWithdrawal = treatmentRecords.any { it.rabbitId == rabbit.id && it.isUnderWithdrawal(now) }
+                                val statusBadge = if (isUnderWithdrawal) {
+                                    "⛔ Délai Sanitaire"
+                                } else if (!rabbit.isActive || rabbit.status != "Actif") {
                                     when (rabbit.status) {
                                         "Vendu" -> "Vendu 💰"
                                         "Mort" -> "Décédé 🕊️"

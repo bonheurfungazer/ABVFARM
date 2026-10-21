@@ -104,10 +104,12 @@ fun RabbitDetailScreen(navController: NavController, viewModel: FarmViewModel, r
 
     // Treatment dialog states
     var showTreatmentDialog by remember { mutableStateOf(false) }
-    var treatmentType by remember { mutableStateOf("Vaccin") } // "Vaccin", "Vermifuge", "Anti-coccidien", "Vitamines", "Autre soin"
+    var treatmentType by remember { mutableStateOf("Vaccin") } // "Vaccin", "Vermifuge", "Anti-coccidien", "Antibiotique", "Vitamines", "Autre soin"
     var treatmentDesignation by remember { mutableStateOf("") }
     var treatmentDosage by remember { mutableStateOf("") }
     var treatmentNotes by remember { mutableStateOf("") }
+    var treatmentWithdrawalDays by remember { mutableStateOf("0") }
+    var showWithdrawalBlockedDialog by remember { mutableStateOf(false) }
 
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia(),
@@ -356,6 +358,49 @@ fun RabbitDetailScreen(navController: NavController, viewModel: FarmViewModel, r
                                     modifier = Modifier.size(11.dp)
                                 )
                             }
+                        }
+                    }
+                }
+            }
+
+            // Sanitary Withdrawal Alert Card (Withdrawal Period)
+            val activeWithdrawalEnd = treatmentRecords.filter { it.isUnderWithdrawal() }.mapNotNull { it.effectiveWithdrawalEndTime() }.maxOrNull()
+            if (activeWithdrawalEnd != null) {
+                val remainingDays = maxOf(1L, ((activeWithdrawalEnd - System.currentTimeMillis()) / 86_400_000L) + 1)
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Warning,
+                            contentDescription = "Alerte sanitaire",
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(28.dp)
+                        )
+                        Column {
+                            Text(
+                                "⛔ DÉLAI D'ATTENTE SANITAIRE ACTIF ($remainingDays j restant${if (remainingDays > 1) "s" else ""})",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                            Text(
+                                "Fin du délai : ${SimpleDateFormat("dd MMMM yyyy", Locale.FRENCH).format(Date(activeWithdrawalEnd))}.\nVente et abattage pour consommation interdits suite à un traitement médical.",
+                                fontSize = 11.sp,
+                                lineHeight = 15.sp,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
                         }
                     }
                 }
@@ -838,6 +883,41 @@ fun RabbitDetailScreen(navController: NavController, viewModel: FarmViewModel, r
                                                     text = record.notes,
                                                     fontSize = 12.sp,
                                                     color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                            if (record.isUnderWithdrawal()) {
+                                                val endMs = record.effectiveWithdrawalEndTime() ?: 0L
+                                                val remaining = maxOf(1L, ((endMs - System.currentTimeMillis()) / 86_400_000L) + 1)
+                                                Surface(
+                                                    color = MaterialTheme.colorScheme.errorContainer,
+                                                    shape = RoundedCornerShape(6.dp),
+                                                    modifier = Modifier.padding(top = 4.dp)
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                    ) {
+                                                        Icon(
+                                                            Icons.Rounded.Warning,
+                                                            contentDescription = null,
+                                                            tint = MaterialTheme.colorScheme.error,
+                                                            modifier = Modifier.size(12.dp)
+                                                        )
+                                                        Text(
+                                                            text = "⛔ Délai d'attente actif : ${remaining}j restants (fin le ${SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date(endMs))})",
+                                                            fontSize = 10.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = MaterialTheme.colorScheme.onErrorContainer
+                                                        )
+                                                    }
+                                                }
+                                            } else if (record.withdrawalDays > 0) {
+                                                Text(
+                                                    text = "✅ Délai d'attente purgé (${record.withdrawalDays}j)",
+                                                    fontSize = 10.5.sp,
+                                                    color = Color(0xFF166534),
+                                                    modifier = Modifier.padding(top = 2.dp)
                                                 )
                                             }
                                         }
@@ -1910,26 +1990,65 @@ fun RabbitDetailScreen(navController: NavController, viewModel: FarmViewModel, r
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp)
                     )
+
+                    // Sanitary Withdrawal Period (Délai d'attente sanitaire)
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("Délai d'attente sanitaire (jours) :", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf("0", "3", "7", "14", "28").forEach { d ->
+                                FilterChip(
+                                    selected = treatmentWithdrawalDays == d,
+                                    onClick = { treatmentWithdrawalDays = d },
+                                    label = { Text(if (d == "0") "Aucun" else "${d}j", fontSize = 11.sp) }
+                                )
+                            }
+                        }
+                        OutlinedTextField(
+                            value = treatmentWithdrawalDays,
+                            onValueChange = { treatmentWithdrawalDays = it.filter { c -> c.isDigit() } },
+                            label = { Text("Nombre de jours de rémanence") },
+                            placeholder = { Text("0") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        if ((treatmentWithdrawalDays.toIntOrNull() ?: 0) > 0) {
+                            Text(
+                                "⛔ Vente et abattage bloqués pendant $treatmentWithdrawalDays jours après injection.",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.error,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
                 }
             },
             confirmButton = {
                 Button(
                     onClick = {
                         if (treatmentDesignation.isNotBlank()) {
+                            val days = treatmentWithdrawalDays.toIntOrNull() ?: 0
+                            val now = System.currentTimeMillis()
+                            val endMs = if (days > 0) now + (days * 86_400_000L) else null
+
                             viewModel.addTreatmentRecord(
                                 TreatmentRecord(
                                     rabbitId = rabbitId,
                                     type = treatmentType,
                                     designation = treatmentDesignation.trim(),
-                                    date = System.currentTimeMillis(),
+                                    date = now,
                                     dosage = treatmentDosage.trim(),
-                                    notes = treatmentNotes.trim()
+                                    notes = treatmentNotes.trim(),
+                                    withdrawalDays = days,
+                                    withdrawalEndDate = endMs
                                 )
                             )
                             showTreatmentDialog = false
                             treatmentDesignation = ""
                             treatmentDosage = ""
                             treatmentNotes = ""
+                            treatmentWithdrawalDays = "0"
                         }
                     },
                     enabled = treatmentDesignation.isNotBlank()
@@ -1944,6 +2063,7 @@ fun RabbitDetailScreen(navController: NavController, viewModel: FarmViewModel, r
                         treatmentDesignation = ""
                         treatmentDosage = ""
                         treatmentNotes = ""
+                        treatmentWithdrawalDays = "0"
                     }
                 ) {
                     Text("Annuler")
@@ -2390,22 +2510,27 @@ fun RabbitDetailScreen(navController: NavController, viewModel: FarmViewModel, r
                 Button(
                     onClick = {
                         if (editName.isNotBlank()) {
-                            val finalIsActive = (editStatus == "Actif")
-                            val updatedRabbit = rabbit.copy(
-                                name = editName.trim(),
-                                breed = editBreed.trim().ifEmpty { "Inconnu" },
-                                sex = editSex,
-                                cageNumber = editCageNumber.trim(),
-                                notes = editNotes.trim(),
-                                isActive = finalIsActive,
-                                status = editStatus,
-                                fatherId = editFatherId,
-                                motherId = editMotherId,
-                                imageUri = editImageUri,
-                                dateOfBirth = editBirthDate
-                            )
-                            viewModel.updateRabbit(updatedRabbit)
-                            showEditDialog = false
+                            val isWithdrawalActive = viewModel.isRabbitUnderWithdrawal(rabbit.id)
+                            if (isWithdrawalActive && (editStatus == "Vendu" || editStatus == "Abattu")) {
+                                showWithdrawalBlockedDialog = true
+                            } else {
+                                val finalIsActive = (editStatus == "Actif")
+                                val updatedRabbit = rabbit.copy(
+                                    name = editName.trim(),
+                                    breed = editBreed.trim().ifEmpty { "Inconnu" },
+                                    sex = editSex,
+                                    cageNumber = editCageNumber.trim(),
+                                    notes = editNotes.trim(),
+                                    isActive = finalIsActive,
+                                    status = editStatus,
+                                    fatherId = editFatherId,
+                                    motherId = editMotherId,
+                                    imageUri = editImageUri,
+                                    dateOfBirth = editBirthDate
+                                )
+                                viewModel.updateRabbit(updatedRabbit)
+                                showEditDialog = false
+                            }
                         }
                     },
                     enabled = editName.isNotBlank()
@@ -2625,14 +2750,19 @@ fun RabbitDetailScreen(navController: NavController, viewModel: FarmViewModel, r
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable {
-                                    val newIsActive = (code == "Actif")
-                                    viewModel.updateRabbit(
-                                        rabbit.copy(
-                                            status = code,
-                                            isActive = newIsActive
+                                    val isWithdrawalActive = viewModel.isRabbitUnderWithdrawal(rabbit.id)
+                                    if (isWithdrawalActive && (code == "Vendu" || code == "Abattu")) {
+                                        showWithdrawalBlockedDialog = true
+                                    } else {
+                                        val newIsActive = (code == "Actif")
+                                        viewModel.updateRabbit(
+                                            rabbit.copy(
+                                                status = code,
+                                                isActive = newIsActive
+                                            )
                                         )
-                                    )
-                                    showStatusDialog = false
+                                        showStatusDialog = false
+                                    }
                                 }
                         ) {
                             Column(modifier = Modifier.padding(12.dp)) {
@@ -2672,6 +2802,45 @@ fun RabbitDetailScreen(navController: NavController, viewModel: FarmViewModel, r
             dismissButton = {
                 TextButton(onClick = { showStatusDialog = false }) {
                     Text("Annuler")
+                }
+            }
+        )
+    }
+
+    if (showWithdrawalBlockedDialog) {
+        val endMs = viewModel.getActiveWithdrawalEndDate(rabbit.id)
+        val formattedDate = if (endMs != null) SimpleDateFormat("dd MMMM yyyy", Locale.FRENCH).format(Date(endMs)) else "inconnue"
+        AlertDialog(
+            onDismissRequest = { showWithdrawalBlockedDialog = false },
+            icon = {
+                Icon(
+                    Icons.Rounded.Warning,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(36.dp)
+                )
+            },
+            title = {
+                Text(
+                    "⛔ Action Bloquée : Délai Sanitaire",
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.error
+                )
+            },
+            text = {
+                Text(
+                    "Ce lapin est actuellement sous traitement médical (antibiotique / antiparasitaire).\n\n" +
+                    "La vente et l'abattage pour consommation humaine sont formellement INTERDITS jusqu'au $formattedDate pour garantir l'absence de résidus chimiques dans la viande.",
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = { showWithdrawalBlockedDialog = false },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Compris", fontWeight = FontWeight.Bold)
                 }
             }
         )

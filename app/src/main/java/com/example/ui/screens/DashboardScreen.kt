@@ -57,6 +57,8 @@ fun DashboardScreen(navController: NavController, viewModel: FarmViewModel) {
     val reminders by viewModel.reminders.collectAsState()
     val treatmentRecords by viewModel.treatmentRecords.collectAsState()
     val dailyFeedLogs by viewModel.dailyFeedLogs.collectAsState()
+    val fatteningBatches by viewModel.fatteningBatches.collectAsState()
+    val financialTransactions by viewModel.financialTransactions.collectAsState()
     val manualFeedStock by viewModel.manualFeedStock.collectAsState()
     val themeMode by viewModel.themeMode.collectAsState()
     val isSystemDark = androidx.compose.foundation.isSystemInDarkTheme()
@@ -66,6 +68,8 @@ fun DashboardScreen(navController: NavController, viewModel: FarmViewModel) {
         else -> isSystemDark
     }
 
+    val isCloudConnected by viewModel.isCloudConnected.collectAsState()
+    val currentUserEmail by viewModel.currentUserEmail.collectAsState()
     var showDataBackupSheet by remember { mutableStateOf(false) }
 
     val scope = rememberCoroutineScope()
@@ -184,6 +188,18 @@ fun DashboardScreen(navController: NavController, viewModel: FarmViewModel) {
         cal.get(java.util.Calendar.YEAR) == nowCal.get(java.util.Calendar.YEAR) &&
                 cal.get(java.util.Calendar.MONTH) == nowCal.get(java.util.Calendar.MONTH)
     }.sumOf { it.totalPrice }
+
+    val activeBatches = remember(fatteningBatches) { fatteningBatches.filter { it.status == "ACTIVE" } }
+    val totalFatteningKits = remember(activeBatches) { activeBatches.sumOf { it.currentCount } }
+
+    val totalIncome = remember(financialTransactions) { financialTransactions.filter { it.type == "INCOME" }.sumOf { it.amountFcfa } }
+    val totalExpense = remember(financialTransactions) { financialTransactions.filter { it.type == "EXPENSE" }.sumOf { it.amountFcfa } }
+    val netFinancialBalance = totalIncome - totalExpense
+
+    val rabbitsUnderWithdrawal = remember(treatmentRecords, rabbits) {
+        val nowMs = System.currentTimeMillis()
+        rabbits.filter { r -> treatmentRecords.any { it.rabbitId == r.id && it.isUnderWithdrawal(nowMs) } }
+    }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background
@@ -346,6 +362,87 @@ fun DashboardScreen(navController: NavController, viewModel: FarmViewModel) {
                 WelcomeCard()
             }
 
+            // Cloud Sync Status Banner
+            item {
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = if (isCloudConnected) Color(0xFFE8F5E9) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                    border = androidx.compose.foundation.BorderStroke(
+                        1.dp,
+                        if (isCloudConnected) Color(0xFF81C784) else MaterialTheme.colorScheme.outlineVariant
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 6.dp)
+                        .clickable { showDataBackupSheet = true }
+                        .testTag("cloud_sync_banner")
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .background(if (isCloudConnected) Color(0xFF2E7D32) else MaterialTheme.colorScheme.primary),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = if (isCloudConnected) Icons.Rounded.CloudDone else Icons.Rounded.CloudSync,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(
+                                    text = if (isCloudConnected) "Cloud Google Synchronisé" else "Cloud Google Non Connecté",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isCloudConnected) Color(0xFF1B5E20) else MaterialTheme.colorScheme.onSurface
+                                )
+                                if (isCloudConnected) {
+                                    Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = Color(0xFFC8E6C9)
+                                    ) {
+                                        Text(
+                                            text = "TEMPS RÉEL",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Black,
+                                            color = Color(0xFF1B5E20),
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                            }
+                            Text(
+                                text = if (isCloudConnected) {
+                                    "Compte : ${currentUserEmail ?: "Actif"} • 2 personnes peuvent collaborer à distance"
+                                } else {
+                                    "Touchez pour connecter Google et synchroniser à plusieurs en temps réel"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (isCloudConnected) Color(0xFF2E7D32) else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Icon(
+                            imageVector = Icons.Rounded.ChevronRight,
+                            contentDescription = null,
+                            tint = if (isCloudConnected) Color(0xFF2E7D32) else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+
             // High action beautiful horizontal buttons
             item {
                 SectionHeader(title = "Navigation de l'Élevage")
@@ -468,8 +565,52 @@ fun DashboardScreen(navController: NavController, viewModel: FarmViewModel) {
                         }
 
                         // Breeding & Health alerts if any
-                        if (palpationsDue.isNotEmpty() || nestBoxesDue.isNotEmpty() || birthsImminent.isNotEmpty() || treatmentsDue.isNotEmpty()) {
+                        if (rabbitsUnderWithdrawal.isNotEmpty() || palpationsDue.isNotEmpty() || nestBoxesDue.isNotEmpty() || birthsImminent.isNotEmpty() || treatmentsDue.isNotEmpty()) {
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                if (rabbitsUnderWithdrawal.isNotEmpty()) {
+                                    Surface(
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = MaterialTheme.colorScheme.errorContainer,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { navController.navigate(Screen.Rabbits.route) }
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(12.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(36.dp)
+                                                    .clip(CircleShape)
+                                                    .background(MaterialTheme.colorScheme.error),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    Icons.Rounded.Warning,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.onError,
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                            }
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    "⛔ Délai Sanitaire en cours (${rabbitsUnderWithdrawal.size} lapins)",
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 13.sp,
+                                                    color = MaterialTheme.colorScheme.error
+                                                )
+                                                Text(
+                                                    "Sous traitement antibiotique / antiparasitaire. Vente et abattage bloqués.",
+                                                    fontSize = 11.sp,
+                                                    color = MaterialTheme.colorScheme.onErrorContainer
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
                                 palpationsDue.forEach { mating ->
                                     val female = rabbits.find { it.id == mating.femaleId }
                                     val male = rabbits.find { it.id == mating.maleId }
@@ -856,6 +997,26 @@ fun DashboardScreen(navController: NavController, viewModel: FarmViewModel) {
                             icon = Icons.Rounded.FolderShared,
                             color = Color(0xFF6B7280),
                             onClick = { navController.navigate(Screen.Rabbits.route) }
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        StatCard(
+                            modifier = Modifier.weight(1f),
+                            title = "Engraissement",
+                            value = "$totalFatteningKits",
+                            subtitle = "${activeBatches.size} lots actifs",
+                            icon = Icons.Rounded.Groups,
+                            color = Color(0xFF0D9488),
+                            onClick = { navController.navigate(Screen.FatteningBatches.route) }
+                        )
+                        StatCard(
+                            modifier = Modifier.weight(1f),
+                            title = "Trésorerie",
+                            value = "${if (netFinancialBalance >= 0) "+" else ""}${String.format(Locale.getDefault(), "%,.0f F", netFinancialBalance)}",
+                            subtitle = "Recettes & Dépenses",
+                            icon = Icons.Rounded.AccountBalanceWallet,
+                            color = if (netFinancialBalance >= 0) Color(0xFF166534) else MaterialTheme.colorScheme.error,
+                            onClick = { navController.navigate(Screen.Finances.route) }
                         )
                     }
                 }

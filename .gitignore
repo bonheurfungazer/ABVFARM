@@ -5,3 +5,5 @@ firebase-debug.log
 .gradle/
 build/
 app/build/
+debug.keystore
+app/google-services.json

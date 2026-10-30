@@ -2335,10 +2335,21 @@ VIEWS.donnees = () => {
     <p>Vos données sont protégées et enregistrées instantanément sur cet appareil pour vous garantir un fonctionnement continu avec ou sans connexion Internet. Connectez votre compte par Email ou Google pour une sauvegarde automatique et permanente dans le Cloud Firebase.</p>
   </section>
   <div class="grid g2">
+    <section class="card full" style="border-left:4px solid var(--hero);background:linear-gradient(to right,rgba(62,90,71,0.08),transparent)">
+      <div class="row-h">
+        <h2>📦 Ancienne sauvegarde extraite</h2>
+        <span class="badge" style="background:var(--hero);color:var(--hero-ink);font-weight:600">145 fiches prêtes</span>
+      </div>
+      <p class="hint" style="margin:6px 0 14px">Vos 48 lapins, 8 saillies, 63 distributions d'aliments, pesées, soins et stocks ont été extraits et convertis en JSON universel compatible avec cette nouvelle application.</p>
+      <div class="actions">
+        <a href="abvfarm_backup_restored.json" download="abvfarm_sauvegarde.json" class="btn pri" style="text-decoration:none">${ICON.download}Télécharger le fichier JSON</a>
+        <button class="btn" data-act="importRestoredDirect">${ICON.refresh}Importer directement dans l'application</button>
+      </div>
+    </section>
     <section class="card"><h2>Application Téléphone (PWA)</h2><p class="hint" style="margin:6px 0 12px">Installez ABV Farm directement sur l'écran d'accueil de votre smartphone ou tablette pour l'ouvrir comme une application native sans ouvrir le navigateur.</p><button class="btn pri" onclick="installPWA()">${ICON.phone}Installer sur mon téléphone</button></section>
     <section class="card"><h2>Rapport officiel PDF</h2><p class="hint" style="margin:6px 0 12px">Document PDF complet prêt à l'impression : synthèse d'élevage, liste détaillée des lapins, gestations et indicateurs clés.</p><button class="btn pri" data-act="exportpdf">${ICON.fileText}Télécharger l'inventaire PDF</button></section>
     <section class="card"><h2>Sauvegarde fichier JSON</h2><p class="hint" style="margin:6px 0 12px">Archive locale complète de votre élevage pour sauvegarde externe ou transfert de machine.</p><button class="btn" data-act="export">${ICON.download}Exporter le fichier de sauvegarde</button></section>
-    <section class="card"><h2>Restaurer à partir d'un fichier</h2><p class="hint" style="margin:6px 0 12px">Importez une sauvegarde au format JSON pour restaurer ou fusionner vos données d'élevage.</p><button class="btn" data-act="import">${ICON.upload}Importer une sauvegarde</button></section>
+    <section class="card"><h2>Restaurer à partir d'un fichier</h2><p class="hint" style="margin:6px 0 12px">Importez une sauvegarde au format JSON (supporte tous les formats ABV Farm).</p><button class="btn" data-act="import">${ICON.upload}Importer une sauvegarde</button></section>
     <section class="card full"><h2>Réinitialisation du cheptel</h2><p class="hint" style="margin:6px 0 12px">Supprime l'intégralité des fiches de cet élevage. Cette action est irréversible.</p><button class="btn danger" data-act="wipe">${ICON.trash}Réinitialiser l'élevage</button></section>
   </div>`;
 };
@@ -3499,17 +3510,173 @@ const A = {
     toast("Fichier de sauvegarde exporté");
   },
   import: () => $("#importFile").click(),
+  importRestoredDirect: async () => {
+    confirmBox("Importer directement les 145 fiches de votre sauvegarde (48 lapins sans doublons de noms, 8 saillies, pesées, soins, rations) dans l'application ?", "Importer maintenant", async () => {
+      try {
+        toast("Chargement des données de sauvegarde…");
+        const res = await fetch("abvfarm_backup_restored.json");
+        if (!res.ok) throw new Error("Fichier introuvable");
+        const j = await res.json();
+        const docs = parseBackupToDocs(j);
+        toast("Restauration en cours…");
+        const n = await bulk(docs, "Import");
+        toast(`✅ ${n} fiches importées avec succès !`);
+        go("lapins");
+      } catch (err) {
+        console.error(err);
+        toast("Impossible de charger la sauvegarde locale");
+      }
+    });
+  },
 };
+
+function parseBackupToDocs(j) {
+  if (Array.isArray(j.docs)) return j.docs;
+  const docs = [];
+  const tsToDate = (ts) => {
+    if (!ts) return "";
+    try {
+      const d = new Date(Number(ts));
+      return isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10);
+    } catch (e) { return ""; }
+  };
+
+  (j.rabbits || []).forEach((r) => {
+    docs.push({
+      kind: "rabbit",
+      id: String(r.id),
+      name: r.name || "Inconnu",
+      sex: r.sex === "Female" ? "Female" : (r.sex === "Male" ? "Male" : "Indéterminé"),
+      birth: tsToDate(r.dateOfBirth) || today(),
+      breed: r.breed || "",
+      cage: r.cageNumber || "",
+      status: r.status || (r.isActive !== false ? "Actif" : "Inactif"),
+      notes: r.notes || "",
+      father: r.fatherId ? String(r.fatherId) : "",
+      mother: r.motherId ? String(r.motherId) : "",
+      photo: r.imageUri || ""
+    });
+  });
+
+  (j.matingRecords || []).forEach((m) => {
+    docs.push({
+      kind: "mating",
+      id: String(m.id),
+      male: String(m.maleId),
+      female: String(m.femaleId),
+      date: tsToDate(m.matingDate) || today(),
+      due: tsToDate(m.expectedBirthDate) || today(),
+      status: m.status || "Accouplé",
+      notes: m.notes || ""
+    });
+  });
+
+  (j.weightRecords || []).forEach((w) => {
+    docs.push({
+      kind: "weight",
+      id: String(w.id),
+      rabbit: String(w.rabbitId),
+      kg: Number(w.weight) || 0,
+      date: tsToDate(w.recordDate) || today(),
+      notes: w.notes || ""
+    });
+  });
+
+  (j.treatmentRecords || []).forEach((t) => {
+    docs.push({
+      kind: "treatment",
+      id: String(t.id),
+      rabbit: t.rabbitId ? String(t.rabbitId) : "",
+      type: t.type || "Autre soin",
+      product: t.designation || "",
+      date: tsToDate(t.date) || today(),
+      dosage: t.dosage || "",
+      notes: t.notes || "",
+      next: tsToDate(t.nextDueDate),
+      withdrawal: Number(t.withdrawalDays) || 0
+    });
+  });
+
+  (j.inventoryItems || []).forEach((item) => {
+    docs.push({
+      kind: "item",
+      id: String(item.id),
+      name: item.name || "",
+      cat: item.category || "Autre",
+      qty: Number(item.quantity) || 0,
+      unit: item.unit || "unité",
+      price: Number(item.totalPrice) || 0,
+      date: tsToDate(item.purchaseDate) || today(),
+      notes: item.notes || ""
+    });
+  });
+
+  (j.dailyFeedLogs || []).forEach((f) => {
+    docs.push({
+      kind: "feed",
+      id: String(f.id),
+      grams: Number(f.quantityGrams) || 0,
+      date: tsToDate(f.feedDate) || today(),
+      notes: f.notes || ""
+    });
+  });
+
+  (j.reminders || []).forEach((rem) => {
+    docs.push({
+      kind: "reminder",
+      id: String(rem.id),
+      title: rem.title || "",
+      desc: rem.description || "",
+      due: tsToDate(rem.dueDate) || today(),
+      prio: rem.priority || "Moyenne",
+      done: !!rem.isCompleted
+    });
+  });
+
+  (j.fatteningBatches || []).forEach((b) => {
+    docs.push({
+      kind: "batch",
+      id: String(b.id),
+      code: b.batchCode || `LOT-${b.id}`,
+      mating: b.matingRecordId ? String(b.matingRecordId) : "",
+      weaning: tsToDate(b.weaningDate) || today(),
+      initial: Number(b.initialCount) || 0,
+      current: Number(b.currentCount) || 0,
+      deaths: Number(b.mortalityCount) || 0,
+      cage: b.cageLocation || "",
+      avgWeight: Number(b.averageWeightGrams) || 0,
+      target: tsToDate(b.targetSaleDate) || today(),
+      status: b.status || "Actif"
+    });
+  });
+
+  (j.financialTransactions || []).forEach((tx) => {
+    docs.push({
+      kind: "tx",
+      id: String(tx.id),
+      type: tx.type === "INCOME" || tx.type === "in" ? "in" : "out",
+      cat: tx.category || "Autre",
+      amount: Number(tx.amountFcfa) || 0,
+      label: tx.description || "",
+      date: tsToDate(tx.date) || today()
+    });
+  });
+
+  return docs;
+}
 
 $("#importFile").addEventListener("change", async (e) => {
   const f = e.target.files[0]; e.target.value = ""; if (!f) return;
   try {
     const j = JSON.parse(await f.text());
-    if (!Array.isArray(j.docs)) throw new Error("Format invalide");
+    const docs = parseBackupToDocs(j);
+    if (!docs.length) throw new Error("Aucune fiche trouvée");
     toast("Restauration en cours…");
-    const n = await bulk(j.docs, "Import");
-    toast(`${n} fiche(s) importée(s) avec succès`);
+    const n = await bulk(docs, "Import");
+    toast(`✅ ${n} fiche(s) importée(s) avec succès`);
+    render();
   } catch (err) {
+    console.error("Import error:", err);
     toast("Fichier invalide : choisissez une sauvegarde ABV Farm (.json)");
   }
 });

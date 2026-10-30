@@ -178,7 +178,10 @@ service cloud.firestore {
                        incoming().userId == existing().userId &&
                        incoming().createdAt == existing().createdAt &&
                        incoming().diff(existing()).affectedKeys().hasOnly(['email', 'displayName', 'farmName', 'updatedAt']);
-      allow delete: if isOwner(userId);
+      // Cheptel documents subcollection used by Web App
+      match /cheptel/{docId} {
+        allow read, write: if isOwner(userId);
+      }
 
       // Rabbits subcollection
       match /rabbits/{rabbitId} {

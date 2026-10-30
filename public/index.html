@@ -664,6 +664,11 @@ function initFirebaseSync() {
     window.firebaseDb = db;
     window.firebaseAuth = firebase.auth();
 
+    // Set local persistence once at boot
+    window.firebaseAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch((err) => {
+      console.warn("Persistence notice:", err);
+    });
+
     // Enable offline persistence
     db.enablePersistence({ synchronizeTabs: true }).catch((err) => {
       console.log("Firestore offline persistence notice:", err.code);
@@ -678,8 +683,8 @@ function initFirebaseSync() {
       console.warn("Redirect auth notice:", err);
       if (err.code === "auth/unauthorized-domain") {
         unauthorizedDomainModal();
-      } else if (err.message) {
-        toast("Erreur de connexion Google : " + err.message);
+      } else if (err.message && err.code !== "auth/popup-closed-by-user") {
+        toast("Notice Google : " + err.message);
       }
     });
 
@@ -781,50 +786,41 @@ function updateUserUI() {
 }
 
 /* ---------- Google Authentication Handler ---------- */
-async function signInWithGoogle() {
+function signInWithGoogle() {
   if (!window.firebaseAuth) {
     toast("Service d'authentification indisponible. Réessayez.");
     return;
-  }
-  
-  try {
-    await window.firebaseAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
-  } catch (e) {
-    console.warn("Persistence set notice:", e);
   }
 
   const provider = new firebase.auth.GoogleAuthProvider();
   provider.addScope("profile");
   provider.addScope("email");
-  provider.setCustomParameters({ prompt: "select_account" });
   
   toast("Connexion avec Google en cours…");
-  try {
-    const result = await window.firebaseAuth.signInWithPopup(provider);
+
+  window.firebaseAuth.signInWithPopup(provider).then((result) => {
     if (result && result.user) {
       handleUserAuthenticated(result.user, `Connecté avec Google : ${result.user.displayName || result.user.email}`);
       closeModal();
     }
-  } catch (err) {
+  }).catch((err) => {
     console.warn("Popup notice, handling auth error:", err);
     if (err.code === "auth/unauthorized-domain") {
       unauthorizedDomainModal();
       return;
     }
     if (err.code === "auth/popup-blocked" || err.code === "auth/cancelled-popup-request" || err.code === "auth/popup-closed-by-user") {
-      try {
-        await window.firebaseAuth.signInWithRedirect(provider);
-      } catch (redirectErr) {
+      window.firebaseAuth.signInWithRedirect(provider).catch((redirectErr) => {
         if (redirectErr.code === "auth/unauthorized-domain") {
           unauthorizedDomainModal();
         } else {
-          toast("Erreur de redirection Google : " + redirectErr.message);
+          toast("Erreur Google : " + (redirectErr.message || redirectErr.code));
         }
-      }
+      });
     } else {
       toast("Erreur Google : " + (err.message || "Impossible de se connecter"));
     }
-  }
+  });
 }
 
 /* ---------- Derived data ---------- */

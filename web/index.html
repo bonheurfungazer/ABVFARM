@@ -924,6 +924,12 @@
       </div>
 
       <div class="space-y-3 pt-2">
+        <!-- New Feature: Full Herd Inventory PDF Export with Dashboard Stats and Logo -->
+        <button onclick="exportHerdInventoryPdfWeb()" class="w-full py-3.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-forest-950 font-black text-xs flex items-center justify-center gap-2.5 shadow-md transition border border-amber-600">
+          <i class="fa-solid fa-file-pdf text-forest-950 text-sm"></i>
+          <span>Exporter Inventaire Cheptel & Bilan (PDF)</span>
+        </button>
+
         <button onclick="downloadBackupJson()" class="w-full py-3 px-4 rounded-xl bg-forest-900 hover:bg-forest-800 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md transition">
           <i class="fa-solid fa-download"></i> Télécharger Sauvegarde Complète (.json)
         </button>
@@ -2105,8 +2111,137 @@
       `;
     }
 
-    // --- BACKUP & RESTORE JSON ---
+    // --- BACKUP & RESTORE JSON & FULL HERD INVENTORY PDF ---
     function openBackupModal() { openModal('backupModal'); }
+
+    async function exportHerdInventoryPdfWeb() {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+
+      // Forest Green Banner
+      doc.setFillColor(20, 83, 45); // #14532d
+      doc.rect(0, 0, 210, 36, 'F');
+
+      // Gold Accent
+      doc.setFillColor(245, 158, 11); // #f59e0b
+      doc.rect(0, 36, 210, 2, 'F');
+
+      // Logo
+      try {
+        const logoImg = document.getElementById('headerLogo');
+        if (logoImg && logoImg.complete) {
+          doc.addImage(logoImg, 'JPEG', 12, 5, 26, 26);
+        }
+      } catch (e) {
+        console.warn("Logo bypassed in web inventory pdf:", e);
+      }
+
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(16);
+      doc.text("ABV FARM • ÉLEVAGE CUNICOLE PROFESSIONNEL", 44, 16);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9.5);
+      doc.setTextColor(220, 252, 231);
+      doc.text("INVENTAIRE COMPLET DU CHEPTEL & BILAN GLOBAL DU TABLEAU DE BORD", 44, 23);
+      doc.text(`Rapport officiel de gestion cunicole • Édité le ${new Date().toLocaleDateString('fr-FR')} à ${new Date().toLocaleTimeString('fr-FR').slice(0,5)}`, 44, 29);
+
+      // Dashboard KPI Cards
+      const males = rabbits.filter(r => r.sex === 'MALE').length;
+      const females = rabbits.filter(r => r.sex === 'FEMALE').length;
+      const feedKg = inventory.filter(i => i.category === 'Nourriture').reduce((acc, i) => acc + i.quantity, 0);
+      const rec = finances.filter(f => f.type === 'Recette').reduce((acc, f) => acc + f.amount, 0);
+      const dep = finances.filter(f => f.type === 'Dépense').reduce((acc, f) => acc + f.amount, 0);
+      const balance = rec - dep;
+
+      const kpiData = [
+        [
+          `CHEPTEL TOTAL ACTIF\n${rabbits.length} sujets vivants`,
+          `REPRODUCTEURS MATURES\n${males} Mâles ♂ / ${females} Femelles ♀`,
+          `SAILLIES EN COURS\n${matings.length} portées attendues`,
+          `STOCK ALIMENTS & TRÉSORERIE\n${feedKg.toFixed(1)} kg | ${balance.toLocaleString('fr-FR')} FCFA`
+        ]
+      ];
+
+      doc.autoTable({
+        startY: 44,
+        body: kpiData,
+        theme: 'plain',
+        styles: {
+          fillColor: [244, 248, 245],
+          textColor: [20, 83, 45],
+          fontStyle: 'bold',
+          fontSize: 8,
+          halign: 'center',
+          cellPadding: 3,
+          lineColor: [203, 213, 225],
+          lineWidth: 0.3
+        }
+      });
+
+      // Section Title
+      let nextY = doc.lastAutoTable.finalY + 8;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor(20, 83, 45);
+      doc.text(`REGISTRE OFFICIEL DES SUJETS EN ÉLEVAGE (${rabbits.length} sujets)`, 14, nextY);
+
+      // Herd Table
+      const rows = rabbits.map(r => {
+        const age = getRabbitAgeDetails(r.dob);
+        const latestW = getLatestWeight(r);
+        return [
+          r.tag || r.id.slice(-6).toUpperCase(),
+          r.name,
+          r.sex === 'MALE' ? '♂ Mâle' : '♀ Femelle',
+          r.breed,
+          r.cage,
+          age.text,
+          `${latestW.toFixed(2)} kg`,
+          r.status,
+          `${r.sire || '-'} / ${r.dam || '-'}`
+        ];
+      });
+
+      doc.autoTable({
+        startY: nextY + 4,
+        head: [['Bague / ID', 'Nom du Sujet', 'Sexe', 'Race Cunicole', 'Cage', 'Âge', 'Dernier Poids', 'Statut', 'Père / Mère']],
+        body: rows,
+        theme: 'striped',
+        headStyles: { fillColor: [22, 101, 52], fontSize: 8, halign: 'left' },
+        styles: { fontSize: 7.5, cellPadding: 2.2 },
+        alternateRowStyles: { fillColor: [250, 252, 250] },
+        columnStyles: {
+          0: { fontStyle: 'bold' },
+          1: { fontStyle: 'bold', textColor: [15, 23, 42] },
+          6: { fontStyle: 'bold', textColor: [22, 101, 52] }
+        }
+      });
+
+      // Certification Stamp Box
+      let stampY = doc.lastAutoTable.finalY + 8;
+      if (stampY > 260) {
+        doc.addPage();
+        stampY = 20;
+      }
+
+      doc.setFillColor(248, 250, 252);
+      doc.setDrawColor(203, 213, 225);
+      doc.roundedRect(14, stampY, 182, 22, 3, 3, 'FD');
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8.5);
+      doc.setTextColor(20, 83, 45);
+      doc.text("DOCUMENT OFFICIEL CERTIFIÉ CONFORME PAR L'ÉLEVAGE CUNICOLE ABV FARM", 20, stampY + 8);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7.5);
+      doc.setTextColor(71, 85, 105);
+      doc.text(`Inventaire et statistiques globales certifiés sincères et conformes au registre d'exploitation ABV Farm le ${new Date().toLocaleDateString('fr-FR')}.`, 20, stampY + 15);
+
+      doc.save(`Inventaire_Cheptel_ABVFarm_${new Date().toISOString().split('T')[0]}.pdf`);
+    }
 
     function downloadBackupJson() {
       const dump = {

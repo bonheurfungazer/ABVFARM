@@ -674,4 +674,419 @@ object PdfExporter {
             Toast.makeText(context, "Erreur PDF : " + e.localizedMessage, Toast.LENGTH_LONG).show()
         }
     }
+
+    fun exportHerdInventoryPdf(
+        context: Context,
+        rabbits: List<Rabbit>,
+        matingRecords: List<MatingRecord> = emptyList(),
+        inventoryItems: List<com.example.data.InventoryItem> = emptyList(),
+        financialTransactions: List<com.example.data.FinancialTransaction> = emptyList(),
+        feedKg: Double = 0.0
+    ) {
+        val pdfDocument = PdfDocument()
+        var pageNumber = 1
+        var pageInfo = PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, pageNumber).create()
+        var page = pdfDocument.startPage(pageInfo)
+        var canvas = page.canvas
+
+        val df = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+        val dfTime = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
+
+        val colorPrimary = Color.parseColor("#1B3D2F")
+        val colorSecondary = Color.parseColor("#2E7D32")
+        val colorAccent = Color.parseColor("#C59B27")
+        val colorDark = Color.parseColor("#212121")
+        val colorGray = Color.parseColor("#616161")
+        val colorLightGray = Color.parseColor("#EEEEEE")
+        val colorBgCard = Color.parseColor("#F4F8F5")
+        val colorRowAlt = Color.parseColor("#FAFCFA")
+
+        val paintBorder = Paint().apply {
+            color = colorLightGray
+            style = Paint.Style.STROKE
+            strokeWidth = 0.8f
+            isAntiAlias = true
+        }
+        val paintTableHeader = Paint().apply {
+            color = Color.WHITE
+            textSize = 8.5f
+            isFakeBoldText = true
+            isAntiAlias = true
+        }
+        val paintTableText = Paint().apply {
+            color = colorDark
+            textSize = 8.5f
+            isAntiAlias = true
+        }
+        val paintFooter = Paint().apply {
+            color = colorGray
+            textSize = 8f
+            isAntiAlias = true
+        }
+
+        val logoBitmap: Bitmap? = try {
+            BitmapFactory.decodeResource(context.resources, R.drawable.abvnewlogo)
+        } catch (_: Exception) {
+            null
+        }
+
+        fun drawFooter(c: Canvas, pNum: Int) {
+            c.drawLine(MARGIN_X, 800f, MARGIN_X + CONTENT_WIDTH, 800f, paintBorder)
+            c.drawText("Ferme ABV Sarl • Inventaire Général Cunicole & Registre d'Élevage", MARGIN_X, 816f, paintFooter)
+            val pageStr = "Page $pNum"
+            val textWidth = paintFooter.measureText(pageStr)
+            c.drawText(pageStr, MARGIN_X + CONTENT_WIDTH - textWidth, 816f, paintFooter)
+        }
+
+        fun drawRunningHeader(c: Canvas) {
+            val pHeader = Paint().apply {
+                color = colorPrimary
+                style = Paint.Style.FILL
+            }
+            c.drawRect(0f, 0f, PAGE_WIDTH.toFloat(), 38f, pHeader)
+
+            var headTextX = MARGIN_X
+            if (logoBitmap != null) {
+                try {
+                    val iconSize = 22f
+                    val iconLeft = MARGIN_X
+                    val iconTop = 8f
+                    val path = Path().apply {
+                        addRoundRect(RectF(iconLeft, iconTop, iconLeft + iconSize, iconTop + iconSize), 5f, 5f, Path.Direction.CW)
+                    }
+                    c.save()
+                    c.clipPath(path)
+                    val scaledIcon = Bitmap.createScaledBitmap(logoBitmap, iconSize.toInt(), iconSize.toInt(), true)
+                    c.drawBitmap(scaledIcon, iconLeft, iconTop, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+                    c.restore()
+                    headTextX = MARGIN_X + iconSize + 8f
+                } catch (_: Exception) {
+                    headTextX = MARGIN_X
+                }
+            }
+
+            val pHeadText = Paint().apply {
+                color = Color.WHITE
+                textSize = 9.5f
+                isFakeBoldText = true
+                isAntiAlias = true
+            }
+            c.drawText("ABV FARM • INVENTAIRE GLOBAL DU CHEPTEL & REGISTRE D'ÉLEVAGE", headTextX, 24f, pHeadText)
+        }
+
+        // --- PAGE 1 : MAIN HEADER ---
+        val pBanner = Paint().apply {
+            color = colorPrimary
+            style = Paint.Style.FILL
+        }
+        canvas.drawRect(0f, 0f, PAGE_WIDTH.toFloat(), 95f, pBanner)
+
+        val pAccent = Paint().apply {
+            color = colorAccent
+            style = Paint.Style.FILL
+        }
+        canvas.drawRect(0f, 95f, PAGE_WIDTH.toFloat(), 98f, pAccent)
+
+        // Logo Header
+        var textStartX = MARGIN_X
+        if (logoBitmap != null) {
+            try {
+                val logoSize = 64f
+                val logoLeft = MARGIN_X
+                val logoTop = 16f
+                val bgRect = RectF(logoLeft - 3f, logoTop - 3f, logoLeft + logoSize + 3f, logoTop + logoSize + 3f)
+                val pLogoBg = Paint().apply {
+                    color = Color.WHITE
+                    style = Paint.Style.FILL
+                    isAntiAlias = true
+                }
+                val pLogoBorder = Paint().apply {
+                    color = colorAccent
+                    style = Paint.Style.STROKE
+                    strokeWidth = 1.8f
+                    isAntiAlias = true
+                }
+                canvas.drawRoundRect(bgRect, 10f, 10f, pLogoBg)
+                canvas.drawRoundRect(bgRect, 10f, 10f, pLogoBorder)
+
+                val clipPath = Path().apply {
+                    addRoundRect(RectF(logoLeft, logoTop, logoLeft + logoSize, logoTop + logoSize), 8f, 8f, Path.Direction.CW)
+                }
+                canvas.save()
+                canvas.clipPath(clipPath)
+                val scaledLogo = Bitmap.createScaledBitmap(logoBitmap, logoSize.toInt(), logoSize.toInt(), true)
+                canvas.drawBitmap(scaledLogo, logoLeft, logoTop, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+                canvas.restore()
+                textStartX = logoLeft + logoSize + 16f
+            } catch (_: Exception) {
+                textStartX = MARGIN_X
+            }
+        }
+
+        val pTitle = Paint().apply {
+            color = Color.WHITE
+            textSize = 15f
+            isFakeBoldText = true
+            isAntiAlias = true
+        }
+        canvas.drawText("ABV FARM • ÉLEVAGE CUNICOLE PROFESSIONNEL", textStartX, 38f, pTitle)
+
+        val pSub = Paint().apply {
+            color = Color.parseColor("#E0E0E0")
+            textSize = 9.5f
+            isAntiAlias = true
+        }
+        canvas.drawText("INVENTAIRE COMPLET DU CHEPTEL & BILAN GLOBAL DU TABLEAU DE BORD", textStartX, 54f, pSub)
+        canvas.drawText("Édité le : ${dfTime.format(Date())} • Registre de Traçabilité Officiel", textStartX, 68f, pSub)
+
+        var currentY = 114f
+
+        // --- DASHBOARD KPIS SUMMARY BOX ---
+        val activeRabbits = rabbits.filter { it.isActive }
+        val malesCount = activeRabbits.count { it.sex.equals("Male", ignoreCase = true) }
+        val femalesCount = activeRabbits.count { it.sex.equals("Female", ignoreCase = true) }
+
+        val sevenDaysAgo = System.currentTimeMillis() - (7 * 24 * 60 * 60 * 1000L)
+        val births7d = activeRabbits.count { it.dateOfBirth >= sevenDaysAgo }
+
+        val activeMatings = matingRecords.count { it.status.contains("Gestation", ignoreCase = true) || it.status.contains("Saillie", ignoreCase = true) }
+
+        val totalFeedKg = if (feedKg > 0) feedKg else {
+            inventoryItems.filter { it.category.equals("Nourriture", ignoreCase = true) }.sumOf { it.quantity }
+        }
+
+        val totalRecettes = financialTransactions.filter { it.type.equals("Recette", ignoreCase = true) }.sumOf { it.amountFcfa }
+        val totalDepenses = financialTransactions.filter { it.type.equals("Dépense", ignoreCase = true) || it.type.equals("Depense", ignoreCase = true) }.sumOf { it.amountFcfa }
+        val netBalance = totalRecettes - totalDepenses
+
+        val pKpiBg = Paint().apply {
+            color = colorBgCard
+            style = Paint.Style.FILL
+        }
+        val kpiBoxH = 68f
+        canvas.drawRoundRect(MARGIN_X, currentY, MARGIN_X + CONTENT_WIDTH, currentY + kpiBoxH, 10f, 10f, pKpiBg)
+        canvas.drawRoundRect(MARGIN_X, currentY, MARGIN_X + CONTENT_WIDTH, currentY + kpiBoxH, 10f, 10f, paintBorder)
+
+        val colW = CONTENT_WIDTH / 4f
+        val kpiLabels = listOf(
+            "CHEPTEL ACTIF" to "${activeRabbits.size} sujets",
+            "REPRODUCTEURS" to "$malesCount ♂ / $femalesCount ♀",
+            "NAISSANCES (7J)" to "$births7d lapereaux",
+            "TRÉSORERIE NETTE" to "${String.format(Locale.FRANCE, "%,d", netBalance.toInt())} FCFA"
+        )
+
+        val pKpiTitle = Paint().apply {
+            color = colorGray
+            textSize = 7.5f
+            isFakeBoldText = true
+            isAntiAlias = true
+        }
+        val pKpiVal = Paint().apply {
+            color = colorPrimary
+            textSize = 11f
+            isFakeBoldText = true
+            isAntiAlias = true
+        }
+        val pKpiSub = Paint().apply {
+            color = colorSecondary
+            textSize = 7.5f
+            isAntiAlias = true
+        }
+
+        kpiLabels.forEachIndexed { i, pair ->
+            val cx = MARGIN_X + (i * colW) + 10f
+            canvas.drawText(pair.first, cx, currentY + 20f, pKpiTitle)
+            canvas.drawText(pair.second, cx, currentY + 38f, pKpiVal)
+            val subText = when (i) {
+                0 -> "Aliment dispo : ${String.format(Locale.FRANCE, "%.1f", totalFeedKg)} kg"
+                1 -> "Prêts ou en saillie"
+                2 -> "Saillies en cours : $activeMatings"
+                else -> "Recettes - Dépenses"
+            }
+            canvas.drawText(subText, cx, currentY + 54f, pKpiSub)
+            if (i > 0) {
+                canvas.drawLine(MARGIN_X + (i * colW), currentY + 10f, MARGIN_X + (i * colW), currentY + kpiBoxH - 10f, paintBorder)
+            }
+        }
+
+        currentY += kpiBoxH + 16f
+
+        // --- SECTION : LISTE DU CHEPTEL ---
+        val pSectionH = Paint().apply {
+            color = colorPrimary
+            textSize = 11f
+            isFakeBoldText = true
+            isAntiAlias = true
+        }
+        canvas.drawText("REGISTRE GÉNÉRAL DES SUJETS EN CLAPIER (${activeRabbits.size} sujets actifs)", MARGIN_X, currentY + 12f, pSectionH)
+        currentY += 20f
+
+        // Table Header
+        fun drawTableColumnHeader(c: Canvas, topY: Float) {
+            val pHeaderBg = Paint().apply {
+                color = colorSecondary
+                style = Paint.Style.FILL
+            }
+            c.drawRect(MARGIN_X, topY, MARGIN_X + CONTENT_WIDTH, topY + 18f, pHeaderBg)
+
+            val thY = topY + 12f
+            c.drawText("ID / N°", MARGIN_X + 6f, thY, paintTableHeader)
+            c.drawText("Nom du Sujet", MARGIN_X + 50f, thY, paintTableHeader)
+            c.drawText("Sexe", MARGIN_X + 155f, thY, paintTableHeader)
+            c.drawText("Race", MARGIN_X + 195f, thY, paintTableHeader)
+            c.drawText("Cage", MARGIN_X + 300f, thY, paintTableHeader)
+            c.drawText("Âge", MARGIN_X + 345f, thY, paintTableHeader)
+            c.drawText("Poids", MARGIN_X + 410f, thY, paintTableHeader)
+            c.drawText("Statut", MARGIN_X + 460f, thY, paintTableHeader)
+        }
+
+        drawTableColumnHeader(canvas, currentY)
+        currentY += 18f
+
+        val rowH = 18f
+        val sortedRabbits = activeRabbits.sortedWith(compareBy({ it.cageNumber }, { it.name }))
+
+        sortedRabbits.forEachIndexed { index, r ->
+            if (currentY + rowH > MAX_Y) {
+                drawFooter(canvas, pageNumber)
+                pdfDocument.finishPage(page)
+
+                pageNumber++
+                pageInfo = PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, pageNumber).create()
+                page = pdfDocument.startPage(pageInfo)
+                canvas = page.canvas
+
+                drawRunningHeader(canvas)
+                currentY = 48f
+                drawTableColumnHeader(canvas, currentY)
+                currentY += 18f
+            }
+
+            if (index % 2 == 1) {
+                val pRowAlt = Paint().apply {
+                    color = colorRowAlt
+                    style = Paint.Style.FILL
+                }
+                canvas.drawRect(MARGIN_X, currentY, MARGIN_X + CONTENT_WIDTH, currentY + rowH, pRowAlt)
+            }
+            canvas.drawLine(MARGIN_X, currentY + rowH, MARGIN_X + CONTENT_WIDTH, currentY + rowH, paintBorder)
+
+            val rowY = currentY + 12f
+            val idStr = "#${r.id}"
+            val safeName = if (r.name.length > 18) r.name.take(16) + ".." else r.name
+            val sexStr = if (r.sex.equals("Male", ignoreCase = true)) "Mâle ♂" else "Femelle ♀"
+            val safeBreed = if (r.breed.length > 16) r.breed.take(14) + ".." else r.breed
+            val cageStr = r.cageNumber.ifEmpty { "C-01" }
+
+            val ageDays = ((System.currentTimeMillis() - r.dateOfBirth) / (24 * 3600 * 1000L)).coerceAtLeast(0)
+            val ageStr = if (ageDays < 30) "${ageDays}j" else "${(ageDays / 30)}m"
+            val weightStr = if (r.weight > 0) "${String.format(Locale.FRANCE, "%.2f", r.weight)}kg" else "-"
+            val statusStr = if (r.status.length > 11) r.status.take(9) + ".." else r.status
+
+            canvas.drawText(idStr, MARGIN_X + 6f, rowY, paintTableText)
+            canvas.drawText(safeName, MARGIN_X + 50f, rowY, paintTableText)
+            canvas.drawText(sexStr, MARGIN_X + 155f, rowY, paintTableText)
+            canvas.drawText(safeBreed, MARGIN_X + 195f, rowY, paintTableText)
+            canvas.drawText(cageStr, MARGIN_X + 300f, rowY, paintTableText)
+            canvas.drawText(ageStr, MARGIN_X + 345f, rowY, paintTableText)
+            canvas.drawText(weightStr, MARGIN_X + 410f, rowY, paintTableText)
+            canvas.drawText(statusStr, MARGIN_X + 460f, rowY, paintTableText)
+
+            currentY += rowH
+        }
+
+        // --- STAMP CERTIFICATION ---
+        if (currentY + 65f > MAX_Y) {
+            drawFooter(canvas, pageNumber)
+            pdfDocument.finishPage(page)
+
+            pageNumber++
+            pageInfo = PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, pageNumber).create()
+            page = pdfDocument.startPage(pageInfo)
+            canvas = page.canvas
+            drawRunningHeader(canvas)
+            currentY = 55f
+        } else {
+            currentY += 16f
+        }
+
+        val stampTop = currentY
+        val pStampBox = Paint().apply {
+            color = Color.parseColor("#F9FBF9")
+            style = Paint.Style.FILL
+        }
+        canvas.drawRoundRect(MARGIN_X, stampTop, MARGIN_X + CONTENT_WIDTH, stampTop + 52f, 8f, 8f, pStampBox)
+        canvas.drawRoundRect(MARGIN_X, stampTop, MARGIN_X + CONTENT_WIDTH, stampTop + 52f, 8f, 8f, paintBorder)
+
+        var stampTextX = MARGIN_X + 12f
+        if (logoBitmap != null) {
+            try {
+                val stampLogoSize = 36f
+                val stampLogoLeft = MARGIN_X + 10f
+                val stampLogoTop = stampTop + 8f
+                val path = Path().apply {
+                    addRoundRect(RectF(stampLogoLeft, stampLogoTop, stampLogoLeft + stampLogoSize, stampLogoTop + stampLogoSize), 6f, 6f, Path.Direction.CW)
+                }
+                canvas.save()
+                canvas.clipPath(path)
+                val scaledStamp = Bitmap.createScaledBitmap(logoBitmap, stampLogoSize.toInt(), stampLogoSize.toInt(), true)
+                canvas.drawBitmap(scaledStamp, stampLogoLeft, stampLogoTop, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+                canvas.restore()
+                stampTextX = MARGIN_X + stampLogoSize + 18f
+            } catch (_: Exception) {
+                stampTextX = MARGIN_X + 12f
+            }
+        }
+
+        val pStampText = Paint().apply {
+            color = colorPrimary
+            textSize = 8.5f
+            isFakeBoldText = true
+            isAntiAlias = true
+        }
+        canvas.drawText("DOCUMENT OFFICIEL CERTIFIÉ CONFORME PAR L'ÉLEVAGE CUNICOLE ABV FARM", stampTextX, stampTop + 20f, pStampText)
+        val pStampSub = Paint().apply {
+            color = colorGray
+            textSize = 8f
+            isAntiAlias = true
+        }
+        canvas.drawText("Inventaire et bilan zootechnique certifiés conformes au registre de la Ferme ABV le ${df.format(Date())}.", stampTextX, stampTop + 35f, pStampSub)
+
+        drawFooter(canvas, pageNumber)
+        pdfDocument.finishPage(page)
+
+        // Write and share
+        val cacheDir = context.cacheDir
+        val pdfFile = File(cacheDir, "Inventaire_Cheptel_ABVFarm_${SimpleDateFormat("yyyyMMdd", Locale.getDefault()).format(Date())}.pdf")
+
+        try {
+            val fos = FileOutputStream(pdfFile)
+            pdfDocument.writeTo(fos)
+            fos.close()
+            pdfDocument.close()
+
+            val fileUri: Uri = FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                pdfFile
+            )
+
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "application/pdf"
+                putExtra(Intent.EXTRA_STREAM, fileUri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+
+            val chooser = Intent.createChooser(intent, "Partager l'Inventaire du Cheptel ABV Farm (PDF)")
+            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(chooser)
+
+            Toast.makeText(context, "Inventaire complet du cheptel généré avec succès !", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Toast.makeText(context, "Erreur PDF : " + e.localizedMessage, Toast.LENGTH_LONG).show()
+        }
+    }
 }
+

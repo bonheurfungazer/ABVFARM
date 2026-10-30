@@ -332,6 +332,40 @@ fun DataBackupBottomSheet(
                 }
             }
 
+            // ACTION CARD: Full Herd Inventory PDF Export (Official report with Logo and Dashboard Stats)
+            DataActionCard(
+                icon = Icons.Rounded.PictureAsPdf,
+                iconTint = Color(0xFFC59B27),
+                iconBackground = Color(0xFFFFF9E6),
+                badge = "RAPPORT OFFICIEL PDF",
+                badgeColor = Color(0xFFC59B27),
+                title = "Inventaire Complet du Cheptel (PDF)",
+                description = "Générez un rapport PDF officiel avec le logo ABV Farm, comprenant toutes les statistiques du tableau de bord et la liste détaillée de tous les lapins (tatouages, cages, âges, poids, filiations).",
+                actionLabel = "Exporter l'Inventaire PDF",
+                isLoading = isProcessing,
+                onClick = {
+                    if (isProcessing) return@DataActionCard
+                    isProcessing = true
+                    processingMessage = "Génération du rapport d'inventaire PDF officiel..."
+                    scope.launch {
+                        try {
+                            com.example.utils.PdfExporter.exportHerdInventoryPdf(
+                                context = context,
+                                rabbits = rabbits,
+                                matingRecords = matingRecords,
+                                inventoryItems = inventoryItems,
+                                financialTransactions = viewModel.financialTransactions.value,
+                                feedKg = viewModel.manualFeedStock.value
+                            )
+                            isProcessing = false
+                        } catch (e: Exception) {
+                            isProcessing = false
+                            Toast.makeText(context, "Erreur : ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+            )
+
             // ACTION CARD 1: Full JSON Backup (lightweight, standard, no zip/photos)
             DataActionCard(
                 icon = Icons.Rounded.Code,

@@ -1022,6 +1022,14 @@ function renderGoogleSignInButton(containerId = "g_id_signin_container") {
     } catch (e) {
       console.warn("GIS renderButton notice:", e);
     }
+  } else {
+    // Retry in 300ms if GIS script is still loading
+    setTimeout(() => {
+      const c = document.getElementById(containerId);
+      if (c && window.google && window.google.accounts && window.google.accounts.id) {
+        renderGoogleSignInButton(containerId);
+      }
+    }, 300);
   }
 }
 

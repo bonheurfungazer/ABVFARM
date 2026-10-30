@@ -571,16 +571,21 @@ function saveUserSession(session) {
 }
 
 function getUserDataKey() {
-  if (userSession && userSession.isLoggedIn && userSession.uid) {
-    return "abvfarm_data_user_" + userSession.uid;
-  }
-  return "abvfarm_data_guest";
+  return (userSession.isLoggedIn && userSession.uid) ? "abvfarm_data_user_" + userSession.uid : "abvfarm_data_guest";
 }
 
 function getLocalData() {
   try {
     const key = getUserDataKey();
-    return JSON.parse(localStorage.getItem(key) || "{}");
+    let val = localStorage.getItem(key);
+    if (!val && key === "abvfarm_data_guest") {
+      const legacy = localStorage.getItem(LS_DATA_KEY);
+      if (legacy) {
+        val = legacy;
+        try { localStorage.setItem(key, legacy); } catch (e) {}
+      }
+    }
+    return JSON.parse(val || "{}");
   } catch (e) {
     return {};
   }
@@ -693,6 +698,10 @@ function initFirebaseSync() {
       if (user) {
         handleUserAuthenticated(user);
       } else {
+        if (unsubscribeSnapshot) {
+          try { unsubscribeSnapshot(); } catch (e) {}
+          unsubscribeSnapshot = null;
+        }
         cloudSyncActive = false;
         updateUserUI();
       }
@@ -702,7 +711,15 @@ function initFirebaseSync() {
   }
 }
 
+let unsubscribeSnapshot = null;
+
 function handleUserAuthenticated(user, msg) {
+  if (unsubscribeSnapshot) {
+    try { unsubscribeSnapshot(); } catch (e) {}
+    unsubscribeSnapshot = null;
+  }
+
+  // Basculer l'identité sur l'UID connecté
   userSession.isLoggedIn = true;
   userSession.isLocalProfile = false;
   userSession.uid = user.uid;
@@ -712,17 +729,25 @@ function handleUserAuthenticated(user, msg) {
   saveUserSession(userSession);
   if (msg) toast(msg);
 
-  // Ingest existing user-isolated local data first
+  // Vider complètement la mémoire de la session précédente
+  ready = false;
+  S = blank();
+
+  // Basculer immédiatement et uniquement sur les données locales isolées de l'UID connecté
   const userLocalData = getLocalData();
   ingest(Object.values(userLocalData));
 
-  // Listen to user's Cloud herd data in real-time
+  // Charger et écouter son cheptel Cloud dédié (/users/{uid}/cheptel/)
   if (window.firebaseDb && user.uid) {
-    window.firebaseDb.collection("users").doc(user.uid).collection("cheptel").onSnapshot((snap) => {
+    unsubscribeSnapshot = window.firebaseDb.collection("users").doc(user.uid).collection("cheptel").onSnapshot((snap) => {
       cloudSyncActive = true;
       const cloudDocs = snap.docs.map((d) => d.data());
       const all = getLocalData();
-      cloudDocs.forEach((d) => { all[d.kind + "-" + d.id] = d; });
+      cloudDocs.forEach((d) => {
+        if (d && d.kind && d.id) {
+          all[d.kind + "-" + d.id] = d;
+        }
+      });
       setLocalData(all);
       ingest(Object.values(all));
       userSession.lastSync = new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
@@ -1419,78 +1444,7 @@ VIEWS.lapins = () => {
     </div>
   </div>
 
-  <!-- SECTION COLLAPSIBLE : Répartition & Effectif par tranche d'âge -->
-  <details class="card" style="padding:12px 16px;background:var(--surface)" ${ui.ageBracket && ui.ageBracket !== 'all' ? "open" : ""}>
-    <summary style="cursor:pointer;font-weight:700;display:flex;justify-content:space-between;align-items:center;user-select:none">
-      <div style="display:flex;align-items:center;gap:8px">
-        ${ICON.tree}
-        <span>📊 Répartition par tranche d'âge</span>
-        <span class="chip sm ok">${baseList.length} lapins</span>
-      </div>
-      <span class="hint" style="font-size:0.8rem">Afficher / Masquer ▸</span>
-    </summary>
-    <div style="margin-top:12px">
-      <p class="hint" style="margin-bottom:10px">Cliquez sur une tranche d'âge pour filtrer la liste :</p>
-      <div class="grid g3" style="gap:10px">
-        ${ageDistribution.map((st) => {
-          const isSelected = ui.ageBracket === st.id;
-          return `
-          <div class="tile" style="cursor:pointer;border-color:${isSelected ? 'var(--sage)' : 'var(--line)'};background:${isSelected ? 'var(--sage-soft)' : 'var(--surface-2)'};padding:8px 10px;border-radius:10px;transition:all .15s ease" data-act="ui" data-k="ageBracket" data-v="${isSelected ? 'all' : st.id}" title="Filtrer pour ${esc(st.label)}">
-            <div style="display:flex;justify-content:space-between;align-items:flex-start">
-              <b style="font-size:0.85rem;color:${isSelected ? 'var(--sage-soft-ink)' : 'inherit'}">${esc(st.label)}</b>
-              <span class="v" style="font-size:1.2rem;color:${isSelected ? 'var(--sage)' : st.count ? 'var(--ink)' : 'var(--muted)'}">${st.count}</span>
-            </div>
-            <div style="display:flex;justify-content:space-between;font-size:0.72rem;color:var(--muted);margin-top:2px">
-              <span>${esc(st.desc)}</span>
-              ${st.count ? `<span style="font-weight:700">${st.males}♂ ${st.females}♀</span>` : "<span>0</span>"}
-            </div>
-            <div class="bar" style="margin-top:4px;height:4px">
-              <i style="width:${st.percent}%;background:${isSelected ? 'var(--sage)' : 'var(--clay)'}"></i>
-            </div>
-          </div>
-          `;
-        }).join("")}
-      </div>
-    </div>
-  </details>
-
-  <!-- Puces d'état rapides (Chips bar) -->
-  <div class="chip-bar" role="toolbar" aria-label="Filtres rapides d'élevage">
-    <button type="button" class="chip-btn" data-act="ui" data-k="stage" data-v="all" aria-pressed="${!ui.stage || ui.stage === 'all'}">
-      <span>Tous</span>
-      <span class="badge">${counts.all}</span>
-    </button>
-    <button type="button" class="chip-btn" data-act="ui" data-k="stage" data-v="female" aria-pressed="${ui.stage === 'female'}">
-      <span>♀ Femelles</span>
-      <span class="badge">${counts.female}</span>
-    </button>
-    <button type="button" class="chip-btn" data-act="ui" data-k="stage" data-v="male" aria-pressed="${ui.stage === 'male'}">
-      <span>♂ Mâles</span>
-      <span class="badge">${counts.male}</span>
-    </button>
-    <button type="button" class="chip-btn" data-act="ui" data-k="stage" data-v="gest" aria-pressed="${ui.stage === 'gest'}">
-      <span>🤰 Gestantes</span>
-      <span class="badge">${counts.gest}</span>
-    </button>
-    <button type="button" class="chip-btn" data-act="ui" data-k="stage" data-v="lact" aria-pressed="${ui.stage === 'lact'}">
-      <span>🤱 Allaitantes</span>
-      <span class="badge">${counts.lact}</span>
-    </button>
-    <button type="button" class="chip-btn" data-act="ui" data-k="stage" data-v="mature" aria-pressed="${ui.stage === 'mature'}">
-      <span>🐇 Reproducteurs (≥5m)</span>
-      <span class="badge">${counts.mature}</span>
-    </button>
-    <button type="button" class="chip-btn" data-act="ui" data-k="stage" data-v="young" aria-pressed="${ui.stage === 'young'}">
-      <span>🌱 Jeunes (<5m)</span>
-      <span class="badge">${counts.young}</span>
-    </button>
-    <button type="button" class="chip-btn" data-act="ui" data-k="stage" data-v="treat" aria-pressed="${ui.stage === 'treat'}">
-      <span>💊 Sous soin / Délai</span>
-      <span class="badge">${counts.treat}</span>
-    </button>
-  </div>
-
-  <!-- Barre d'outils et sélecteurs de filtres -->
+  <!-- Barre d'outils et filtres principaux en haut -->
   <div class="toolbar" style="gap:10px">
     <label class="search" style="flex:1 1 220px">
       ${ICON.search}
@@ -1535,12 +1489,83 @@ VIEWS.lapins = () => {
     ` : ""}
   </div>
 
-  <!-- PANNEAU COLLAPSIBLE : Filtrage précis selon Âge donné et Poids donné -->
-  <details class="card" style="padding:12px 16px;background:var(--surface-2);border-color:var(--line)" ${(ui.minAgeM !== "" || ui.maxAgeM !== "" || ui.minWeight !== "" || ui.maxWeight !== "") ? "open" : ""}>
+  <!-- Puces d'état rapides (Chips bar) -->
+  <div class="chip-bar" role="toolbar" aria-label="Filtres rapides d'élevage">
+    <button type="button" class="chip-btn" data-act="ui" data-k="stage" data-v="all" aria-pressed="${!ui.stage || ui.stage === 'all'}">
+      <span>Tous</span>
+      <span class="badge">${counts.all}</span>
+    </button>
+    <button type="button" class="chip-btn" data-act="ui" data-k="stage" data-v="female" aria-pressed="${ui.stage === 'female'}">
+      <span>♀ Femelles</span>
+      <span class="badge">${counts.female}</span>
+    </button>
+    <button type="button" class="chip-btn" data-act="ui" data-k="stage" data-v="male" aria-pressed="${ui.stage === 'male'}">
+      <span>♂ Mâles</span>
+      <span class="badge">${counts.male}</span>
+    </button>
+    <button type="button" class="chip-btn" data-act="ui" data-k="stage" data-v="gest" aria-pressed="${ui.stage === 'gest'}">
+      <span>🤰 Gestantes</span>
+      <span class="badge">${counts.gest}</span>
+    </button>
+    <button type="button" class="chip-btn" data-act="ui" data-k="stage" data-v="lact" aria-pressed="${ui.stage === 'lact'}">
+      <span>🤱 Allaitantes</span>
+      <span class="badge">${counts.lact}</span>
+    </button>
+    <button type="button" class="chip-btn" data-act="ui" data-k="stage" data-v="mature" aria-pressed="${ui.stage === 'mature'}">
+      <span>🐇 Reproducteurs (≥5m)</span>
+      <span class="badge">${counts.mature}</span>
+    </button>
+    <button type="button" class="chip-btn" data-act="ui" data-k="stage" data-v="young" aria-pressed="${ui.stage === 'young'}">
+      <span>🌱 Jeunes (<5m)</span>
+      <span class="badge">${counts.young}</span>
+    </button>
+    <button type="button" class="chip-btn" data-act="ui" data-k="stage" data-v="treat" aria-pressed="${ui.stage === 'treat'}">
+      <span>💊 Sous soin / Délai</span>
+      <span class="badge">${counts.treat}</span>
+    </button>
+  </div>
+
+  <!-- 1. SECTION REPLIABLE : 📊 Répartition par tranche d'âge (7 tranches) -->
+  <details class="card" style="padding:10px 14px;background:var(--surface);margin-bottom:8px" ${ui.ageBracket && ui.ageBracket !== 'all' ? "open" : ""}>
+    <summary style="cursor:pointer;font-weight:700;display:flex;justify-content:space-between;align-items:center;user-select:none">
+      <div style="display:flex;align-items:center;gap:8px">
+        ${ICON.tree}
+        <span>📊 Répartition par tranche d'âge (7 tranches)</span>
+        <span class="chip sm ok">${baseList.length} lapins</span>
+      </div>
+      <span class="hint" style="font-size:0.8rem">Afficher / Masquer ▸</span>
+    </summary>
+    <div style="margin-top:10px">
+      <p class="hint" style="margin-bottom:8px">Cliquez sur une tranche d'âge pour filtrer automatiquement la liste :</p>
+      <div class="grid g3" style="gap:8px">
+        ${ageDistribution.map((st) => {
+          const isSelected = ui.ageBracket === st.id;
+          return `
+          <div class="tile" style="cursor:pointer;border-color:${isSelected ? 'var(--sage)' : 'var(--line)'};background:${isSelected ? 'var(--sage-soft)' : 'var(--surface-2)'};padding:8px 10px;border-radius:10px;transition:all .15s ease" data-act="ui" data-k="ageBracket" data-v="${isSelected ? 'all' : st.id}" title="Filtrer pour ${esc(st.label)}">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start">
+              <b style="font-size:0.85rem;color:${isSelected ? 'var(--sage-soft-ink)' : 'inherit'}">${esc(st.label)}</b>
+              <span class="v" style="font-size:1.15rem;color:${isSelected ? 'var(--sage)' : st.count ? 'var(--ink)' : 'var(--muted)'}">${st.count}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;font-size:0.72rem;color:var(--muted);margin-top:2px">
+              <span>${esc(st.desc)}</span>
+              ${st.count ? `<span style="font-weight:700">${st.males}♂ ${st.females}♀</span>` : "<span>0</span>"}
+            </div>
+            <div class="bar" style="margin-top:4px;height:4px">
+              <i style="width:${st.percent}%;background:${isSelected ? 'var(--sage)' : 'var(--clay)'}"></i>
+            </div>
+          </div>
+          `;
+        }).join("")}
+      </div>
+    </div>
+  </details>
+
+  <!-- 2. PANNEAU REPLIABLE : ⚖️ Filtres précis (Âge min/max et Poids min/max) -->
+  <details class="card" style="padding:10px 14px;background:var(--surface-2);border-color:var(--line);margin-bottom:8px" ${(ui.minAgeM !== "" || ui.maxAgeM !== "" || ui.minWeight !== "" || ui.maxWeight !== "") ? "open" : ""}>
     <summary style="cursor:pointer;font-weight:700;display:flex;justify-content:space-between;align-items:center;user-select:none">
       <div style="display:flex;align-items:center;gap:6px;font-size:0.9rem">
         ${ICON.scale}
-        <span>⚖️ Filtres précis (Âge & Poids)</span>
+        <span>⚖️ Filtres précis (Âge min/max et Poids min/max)</span>
         ${(ui.minAgeM !== "" || ui.maxAgeM !== "" || ui.minWeight !== "" || ui.maxWeight !== "") ? `<span class="chip warn sm">Actif</span>` : ""}
       </div>
       <span class="hint" style="font-size:0.8rem">Afficher / Masquer ▸</span>
@@ -2138,6 +2163,10 @@ function accountModal() {
   const btnLogout = $("#btnLogout");
   if (btnLogout) {
     btnLogout.addEventListener("click", async () => {
+      if (unsubscribeSnapshot) {
+        try { unsubscribeSnapshot(); } catch (e) {}
+        unsubscribeSnapshot = null;
+      }
       if (window.firebaseAuth) {
         await window.firebaseAuth.signOut().catch(() => {});
       }
@@ -2152,9 +2181,13 @@ function accountModal() {
         lastSync: null
       };
       try { localStorage.setItem(LS_USER_KEY, JSON.stringify(userSession)); } catch (e) {}
+      cloudSyncActive = false;
+      // Vider complètement l'état mémoire S
       ready = false;
       S = blank();
-      ingest(Object.values(getLocalData()));
+      // Charger uniquement l'espace invité ("abvfarm_data_guest")
+      const guestData = getLocalData();
+      ingest(Object.values(guestData));
       toast("Vous êtes déconnecté");
       closeModal();
       render();
@@ -2376,17 +2409,29 @@ function matingForm(preId) {
       const young = [fe, ma].filter((x) => age(x) < MATURE_DAYS).map((x) => x.name);
       $("#f_risk").innerHTML = `<div class="risk ${rk.lvl}">${ICON[rk.lvl === "ok" ? "shield" : "alert"].replace("<svg", '<svg width="26" height="26" style="flex:none"')}<div><b class="num">F = ${nf2.format(f)} %</b> · ${rk.label}<div style="font-size:.85rem">${rk.tip}</div></div></div>${young.length ? `<p class="hint" style="margin-top:6px;color:var(--warn)">Attention : ${esc(young.join(", "))} a moins de 5 mois.</p>` : ""}`;
     },
-    onSubmit: async (v) => { const ok = await save("mating", { male: v.male, female: v.female, date: v.date, due: addDays(v.date, GESTATION), status: "Accouplé", notes: v.notes }); if (ok) toast("Saillie enregistrée"); return ok; } });
+    onSubmit: async (v) => {
+      const ok = await save("mating", { male: v.male, female: v.female, date: v.date, due: addDays(v.date, GESTATION), status: "Accouplé", notes: v.notes });
+      if (ok) { closeModal(); toast("Saillie enregistrée"); }
+      return ok;
+    } });
 }
 function kindleForm(id) {
   const m = byId(S.matings, id); if (!m) return;
   form({ title: `Mise bas de ${rname(m.female)}`, submit: "Enregistrer la portée", values: { birthDate: today() },
     fields: [{ k: "birthDate", label: "Date de mise bas", type: "date", req: true }, { k: "alive", label: "Nombre de nés vivants", type: "number", min: 0, req: true, def: 8 }, { k: "dead", label: "Nombre de morts-nés", type: "number", min: 0, def: 0 }, { k: "notes", label: "Observations", type: "textarea", full: true, def: m.notes }],
-    onSubmit: async (v) => { const ok = await save("mating", { ...m, ...v, status: "Mise bas" }); if (ok) toast(`Mise bas enregistrée : ${v.alive} lapereaux`); return ok; } });
+    onSubmit: async (v) => {
+      const ok = await save("mating", { ...m, ...v, status: "Mise bas" });
+      if (ok) { closeModal(); toast(`Mise bas enregistrée : ${v.alive} lapereaux`); }
+      return ok;
+    } });
 }
 function weightForm(rid) {
   form({ title: `Pesée de ${rname(rid)}`, fields: [{ k: "kg", label: "Poids mesuré (kg)", type: "number", step: "0.01", min: 0, req: true, def: lastWeight(rid) ?? "" }, { k: "date", label: "Date de pesée", type: "date", req: true, def: today() }, { k: "notes", label: "Note", full: true }],
-    onSubmit: async (v) => { const ok = await save("weight", { rabbit: rid, ...v }); if (ok) toast("Pesée enregistrée"); return ok; } });
+    onSubmit: async (v) => {
+      const ok = await save("weight", { rabbit: rid, ...v });
+      if (ok) { closeModal(); toast("Pesée enregistrée"); }
+      return ok;
+    } });
 }
 function treatForm(rid) {
   form({ title: rid ? `Soin pour ${rname(rid)}` : "Soin collectif du cheptel", fields: [
@@ -2394,7 +2439,11 @@ function treatForm(rid) {
       { k: "date", label: "Date d'administration", type: "date", req: true, def: today() }, { k: "dosage", label: "Dosage / mode", ph: "ex. 0,5 mL sous-cutané" },
       { k: "withdrawal", label: "Délai d'attente (jours)", type: "number", min: 0, def: 0, hint: "Aucune vente ni abattage autorisés pendant ce délai." },
       { k: "next", label: "Date du prochain rappel", type: "date" }, { k: "notes", label: "Notes", type: "textarea", full: true }],
-    onSubmit: async (v) => { const ok = await save("treatment", { rabbit: rid || "", ...v, withdrawal: Number(v.withdrawal) || 0 }); if (ok) toast("Soin enregistré"); return ok; } });
+    onSubmit: async (v) => {
+      const ok = await save("treatment", { rabbit: rid || "", ...v, withdrawal: Number(v.withdrawal) || 0 });
+      if (ok) { closeModal(); toast("Soin enregistré"); }
+      return ok;
+    } });
 }
 function itemForm() {
   form({ title: "Enregistrer un achat / approvisionnement", fields: [
@@ -2403,20 +2452,32 @@ function itemForm() {
       { k: "price", label: "Coût total (FCFA)", type: "number", min: 0, def: "" }, { k: "date", label: "Date d'achat", type: "date", req: true, def: today() },
       { k: "mktx", label: "Imputer directement aux dépenses financières", type: "check", def: true }, { k: "notes", label: "Détails fournisseur", type: "textarea", full: true }],
     onSubmit: async (v) => {
-      const mk = v.mktx; delete v.mktx; const ok = await save("item", { ...v, price: Number(v.price) || 0 }); if (!ok) return false;
+      const mk = v.mktx; delete v.mktx;
+      const ok = await save("item", { ...v, price: Number(v.price) || 0 });
+      if (!ok) return false;
       if (mk && Number(v.price) > 0) await save("tx", { type: "out", cat: v.cat === "Nourriture" ? "Aliment" : v.cat === "Médicament" ? "Santé" : v.cat === "Matériel" ? "Matériel" : "Autre dépense", amount: Number(v.price), date: v.date, label: v.name });
+      closeModal();
       toast("Achat enregistré");
+      return true;
     } });
 }
 function feedForm(grams) {
   form({ title: "Distribution d'aliment", fields: [{ k: "kg", label: "Quantité totale distribuée (kg)", type: "number", step: "0.1", min: 0, req: true, def: grams ? +(grams / 1000).toFixed(1) : "", hint: grams ? `Ration conseillée pour le cheptel : ${nf1.format(grams / 1000)} kg` : "" }, { k: "date", label: "Date de distribution", type: "date", req: true, def: today() }, { k: "notes", label: "Remarques", full: true }],
-    onSubmit: async (v) => { const ok = await save("feed", { grams: Math.round(v.kg * 1000), date: v.date, notes: v.notes }); if (ok) toast(`${nf1.format(v.kg)} kg déduits du stock`); return ok; } });
+    onSubmit: async (v) => {
+      const ok = await save("feed", { grams: Math.round(v.kg * 1000), date: v.date, notes: v.notes });
+      if (ok) { closeModal(); toast(`${nf1.format(v.kg)} kg déduits du stock`); }
+      return ok;
+    } });
 }
 function txForm(type) {
   form({ title: type === "in" ? "Enregistrer une recette" : "Enregistrer une dépense", fields: [
       { k: "amount", label: "Montant (FCFA)", type: "number", min: 0, req: true }, { k: "cat", label: "Poste comptable", type: "select", opts: type === "in" ? TX_IN : TX_OUT },
       { k: "label", label: "Libellé de l'opération", full: true, ph: type === "in" ? "ex. Vente de 8 lapins de chair" : "ex. Achat de mangeoires" }, { k: "date", label: "Date", type: "date", req: true, def: today() }],
-    onSubmit: async (v) => { const ok = await save("tx", { ...v, type }); if (ok) toast(type === "in" ? "Recette enregistrée" : "Dépense enregistrée"); return ok; } });
+    onSubmit: async (v) => {
+      const ok = await save("tx", { ...v, type });
+      if (ok) { closeModal(); toast(type === "in" ? "Recette enregistrée" : "Dépense enregistrée"); }
+      return ok;
+    } });
 }
 function batchForm(matingId, b) {
   const m = matingId ? byId(S.matings, matingId) : null; b = b || {};
@@ -2430,21 +2491,33 @@ function batchForm(matingId, b) {
       { k: "cage", label: "Cage ou parc", ph: "ex. Parc 1, Cage E" }, { k: "avgWeight", label: "Poids moyen estimé (g)", type: "number", min: 0 },
       { k: "target", label: "Date visée de commercialisation", type: "date", def: b.target || addDays(wean, FATTEN_DAYS) },
       { k: "status", label: "Statut", type: "select", opts: ["Actif", "Quarantaine", "Vendu"], def: "Actif" }],
-    onSubmit: async (v) => { const obj = { ...b, ...v, target: v.target || addDays(v.weaning, FATTEN_DAYS), current: b.id ? b.current : v.initial, deaths: b.deaths || 0 }; const ok = await save("batch", obj); if (ok) { toast("Lot enregistré"); go("engraissement"); } return ok; } });
+    onSubmit: async (v) => {
+      const obj = { ...b, ...v, target: v.target || addDays(v.weaning, FATTEN_DAYS), current: b.id ? b.current : v.initial, deaths: b.deaths || 0 };
+      const ok = await save("batch", obj);
+      if (ok) { closeModal(); toast("Lot enregistré"); go("engraissement"); }
+      return ok;
+    } });
 }
 function sellForm(id) {
   const b = byId(S.batches, id); if (!b) return;
   form({ title: `Vente d'animaux — ${b.code}`, submit: "Enregistrer la vente", fields: [{ k: "n", label: "Nombre d'animaux vendus", type: "number", min: 1, req: true, def: b.current }, { k: "price", label: "Montant total perçu (FCFA)", type: "number", min: 0, req: true }, { k: "date", label: "Date de transaction", type: "date", req: true, def: today() }],
     onSubmit: async (v) => {
       const left = Math.max(0, (Number(b.current) || 0) - v.n);
-      const ok = await save("batch", { ...b, current: left, status: left === 0 ? "Vendu" : b.status }); if (!ok) return false;
+      const ok = await save("batch", { ...b, current: left, status: left === 0 ? "Vendu" : b.status });
+      if (!ok) return false;
       if (v.price > 0) await save("tx", { type: "in", cat: "Vente chair", amount: v.price, date: v.date, label: `Vente ${v.n} lapins (${b.code})` });
+      closeModal();
       toast(left ? `${v.n} vendus, ${left} restants dans le lot` : "Lot intégralement commercialisé");
+      return true;
     } });
 }
 function remForm() {
   form({ title: "Planifier une tâche / rappel", fields: [{ k: "title", label: "Objet de la tâche", req: true, full: true, ph: "ex. Désinfecter la batterie de cages B" }, { k: "due", label: "Date d'échéance", type: "date", req: true, def: today() }, { k: "prio", label: "Niveau d'urgence", type: "select", opts: PRIOS, def: "Moyenne" }, { k: "desc", label: "Précisions", type: "textarea", full: true }],
-    onSubmit: async (v) => { const ok = await save("reminder", { ...v, done: false }); if (ok) toast("Rappel planifié"); return ok; } });
+    onSubmit: async (v) => {
+      const ok = await save("reminder", { ...v, done: false });
+      if (ok) { closeModal(); toast("Rappel planifié"); }
+      return ok;
+    } });
 }
 
 /* ---------- Actions Handler ---------- */
@@ -2464,7 +2537,7 @@ const A = {
   resetFilters: () => { ui.q = ""; ui.sex = "all"; ui.stage = "all"; ui.breed = "all"; ui.st = "actifs"; ui.ageBracket = "all"; ui.minAgeM = ""; ui.maxAgeM = ""; ui.minWeight = ""; ui.maxWeight = ""; render(); },
   resetCustomMetrics: () => { ui.minAgeM = ""; ui.maxAgeM = ""; ui.minWeight = ""; ui.maxWeight = ""; render(); },
   newrabbit: () => rabbitForm(), editrabbit: (el) => rabbitForm(rab(el.dataset.id)),
-  status: (el) => { const r = rab(el.dataset.id); form({ title: `Statut de ${r.name}`, values: r, fields: [{ k: "status", label: "Statut", type: "select", opts: STATUSES, full: true, hint: "Un animal vendu, abattu ou décédé passe dans la rubrique « Sortis »." }], onSubmit: async (v) => save("rabbit", { ...r, status: v.status }) }); },
+  status: (el) => { const r = rab(el.dataset.id); form({ title: `Statut de ${r.name}`, values: r, fields: [{ k: "status", label: "Statut", type: "select", opts: STATUSES, full: true, hint: "Un animal vendu, abattu ou décédé passe dans la rubrique « Sortis »." }], onSubmit: async (v) => { const ok = await save("rabbit", { ...r, status: v.status }); if (ok) { closeModal(); toast("Statut mis à jour"); } return ok; } }); },
   delrabbit: (el) => { const r = rab(el.dataset.id); confirmBox(`Supprimer définitivement la fiche de ${r.name} ainsi que ses pesées et soins ? Pour un animal vendu ou décédé, modifiez plutôt son statut.`, "Supprimer", async () => {
     for (const w of S.weights.filter((x) => x.rabbit === r.id)) await removeDoc("weight", w.id);
     for (const x of S.treatments.filter((x) => x.rabbit === r.id)) await removeDoc("treatment", x.id);
@@ -2474,15 +2547,15 @@ const A = {
   newweight: (el) => weightForm(el.dataset.id), newtreat: (el) => treatForm(el.dataset.id),
   newitem: () => itemForm(), feed: (el) => feedForm(Number(el.dataset.v) || 0), newtx: (el) => txForm(el.dataset.v),
   newbatch: (el) => batchForm(el.dataset.id), editbatch: (el) => batchForm(null, byId(S.batches, el.dataset.id)), sell: (el) => sellForm(el.dataset.id),
-  bdeath: (el) => { const b = byId(S.batches, el.dataset.id); form({ title: `Perte sur le lot ${b.code}`, fields: [{ k: "n", label: "Nombre de lapereaux décédés", type: "number", min: 1, req: true, def: 1 }], onSubmit: async (v) => { const ok = await save("batch", { ...b, current: Math.max(0, b.current - v.n), deaths: (Number(b.deaths) || 0) + v.n }); if (ok) toast("Perte enregistrée"); return ok; } }); },
-  bweight: (el) => { const b = byId(S.batches, el.dataset.id); form({ title: `Poids moyen du lot ${b.code}`, fields: [{ k: "avgWeight", label: "Poids moyen mesuré (g)", type: "number", min: 0, req: true, def: b.avgWeight || "" }], onSubmit: async (v) => save("batch", { ...b, avgWeight: v.avgWeight }) }); },
+  bdeath: (el) => { const b = byId(S.batches, el.dataset.id); form({ title: `Perte sur le lot ${b.code}`, fields: [{ k: "n", label: "Nombre de lapereaux décédés", type: "number", min: 1, req: true, def: 1 }], onSubmit: async (v) => { const ok = await save("batch", { ...b, current: Math.max(0, b.current - v.n), deaths: (Number(b.deaths) || 0) + v.n }); if (ok) { closeModal(); toast("Perte enregistrée"); } return ok; } }); },
+  bweight: (el) => { const b = byId(S.batches, el.dataset.id); form({ title: `Poids moyen du lot ${b.code}`, fields: [{ k: "avgWeight", label: "Poids moyen mesuré (g)", type: "number", min: 0, req: true, def: b.avgWeight || "" }], onSubmit: async (v) => { const ok = await save("batch", { ...b, avgWeight: v.avgWeight }); if (ok) { closeModal(); toast("Poids moyen enregistré"); } return ok; } }); },
   newrem: () => remForm(),
   remtoggle: async (el) => { const r = byId(S.reminders, el.dataset.id); if (r) await save("reminder", { ...r, done: !r.done }); },
   remdone: async (el) => { const r = byId(S.reminders, el.dataset.id); if (r && (await save("reminder", { ...r, done: true }))) toast("Tâche clôturée"); },
   del: (el) => { const k = el.dataset.kind, id = el.dataset.id; confirmBox("Supprimer définitivement cet enregistrement ?", "Supprimer", async () => { if (await removeDoc(k, id)) toast("Supprimé"); }); },
   wipe: () => confirmBox("Réinitialiser l'intégralité du cheptel ? Toutes vos données d'élevage seront effacées.", "Tout réinitialiser", async () => {
     for (const [kind, key] of Object.entries(KIND)) for (const x of S[key].slice()) await removeDoc(kind, x.id);
-    localStorage.removeItem(LS_DATA_KEY);
+    localStorage.removeItem(getUserDataKey());
     toast("Élevage réinitialisé");
     render();
   }),

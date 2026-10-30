@@ -2,16 +2,30 @@
 <html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
 <title>ABV Farm • Gestion Cunicole</title>
 <meta name="theme-color" content="#3E5A47">
+
+<!-- Progressive Web App (PWA) Manifest & Meta Tags -->
+<link rel="manifest" href="manifest.json">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="ABV Farm">
+<link rel="apple-touch-icon" href="icon-192.png">
+
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Figtree:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap">
+
+<!-- Firebase SDKs for Google Authentication & Firestore Cloud Sync -->
+<script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
 
 <!-- jsPDF & AutoTable for official PDF herd inventory -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 
 <style>
-/* Layout: app shell — sidebar on wide screens, bottom tab bar on phones; content column of cards built from the farm's real records */
+/* Production Layout & Palette */
 :root {
   --bg: #F6F5EF;
   --surface: #FFFFFF;
@@ -82,14 +96,14 @@ main { min-width: 0; padding-block: 20px 110px; padding-left: max(16px, env(safe
 .wrap { max-width: 1080px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
 
 @media (min-width: 900px) {
-  .shell { grid-template-columns: 248px 1fr; }
+  .shell { grid-template-columns: 256px 1fr; }
   .mobile-header { display: none; }
   .side { display: flex; flex-direction: column; gap: 4px; position: sticky; top: env(safe-area-inset-top, 0px); height: 100vh; padding: 22px 14px; padding-left: max(14px, env(safe-area-inset-left, 0px)); border-right: 1px solid var(--line); background: var(--surface); }
   main { padding-block: 28px 48px; padding-right: max(28px, env(safe-area-inset-right, 0px)); padding-left: 28px; }
   .bottom { display: none !important; }
 }
 
-.brand { display: flex; align-items: center; gap: 12px; padding: 4px 8px 18px; border-bottom: 1px solid var(--line); margin-bottom: 8px; }
+.brand { display: flex; align-items: center; gap: 12px; padding: 4px 8px 16px; border-bottom: 1px solid var(--line); margin-bottom: 6px; }
 .brand-mark { width: 42px; height: 42px; border-radius: 12px; background: var(--hero); color: var(--hero-ink); display: grid; place-items: center; flex: none; }
 .brand b { font-family: var(--f-display); font-size: 1.15rem; display: block; line-height: 1.1; }
 .brand small { color: var(--muted); font-size: .75rem; }
@@ -97,9 +111,20 @@ main { min-width: 0; padding-block: 20px 110px; padding-left: max(16px, env(safe
 .nav-a:hover { background: var(--surface-2); color: var(--ink); }
 .nav-a[aria-current="page"] { background: var(--sage-soft); color: var(--sage-soft-ink); font-weight: 700; }
 .nav-a svg { width: 20px; height: 20px; flex: none; }
-.side .sync { margin-top: auto; font-size: .78rem; color: var(--muted); padding: 10px 12px; display: flex; gap: 8px; align-items: center; border-top: 1px solid var(--line); }
+
+/* User Account & Sync widget in Sidebar */
+.side-account { margin-top: auto; border-top: 1px solid var(--line); padding-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+.user-card { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 12px; background: var(--surface-2); cursor: pointer; text-decoration: none; color: inherit; transition: background .12s ease; }
+.user-card:hover { filter: brightness(0.97); }
+.user-avatar { width: 34px; height: 34px; border-radius: 50%; background: var(--sage); color: var(--sage-ink); font-weight: 700; font-size: .85rem; display: grid; place-items: center; flex: none; overflow: hidden; }
+.user-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.user-meta { min-width: 0; flex: 1; }
+.user-meta b { display: block; font-size: .85rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.2; }
+.user-meta small { color: var(--muted); font-size: .72rem; display: flex; align-items: center; gap: 4px; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
-.dot.on { background: var(--ok); } .dot.local { background: var(--warn); }
+.dot.on { background: var(--ok); box-shadow: 0 0 6px rgba(30,107,52,.4); }
+.dot.offline { background: var(--warn); }
+.dot.local { background: var(--info); }
 
 .bottom { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: grid; grid-template-columns: repeat(5, 1fr); background: var(--surface); border-top: 1px solid var(--line); padding: 6px max(6px, env(safe-area-inset-right, 0px)) calc(6px + env(safe-area-inset-bottom, 0px)) max(6px, env(safe-area-inset-left, 0px)); box-shadow: 0 -2px 10px rgba(0,0,0,.04); }
 .bottom a, .bottom button { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 4px 0; text-decoration: none; color: var(--muted); font-size: .7rem; font-weight: 600; background: none; border: 0; cursor: pointer; }
@@ -188,7 +213,7 @@ main { min-width: 0; padding-block: 20px 110px; padding-left: max(16px, env(safe
 .search input { border: 0; background: transparent; padding: 9px 0; width: 100%; outline: none; }
 .search svg { width: 17px; height: 17px; color: var(--muted); flex: none; }
 
-/* Gestation track: 31 days with milestones (palpation J10–14, nest box J28, kindling J31) */
+/* Gestation track */
 .gest { display: flex; flex-direction: column; gap: 8px; }
 .track { position: relative; height: 10px; border-radius: 6px; background: var(--surface-2); margin: 16px 0 18px; }
 .track .fill { position: absolute; inset: 0 auto 0 0; border-radius: 6px; background: var(--clay); }
@@ -203,11 +228,12 @@ main { min-width: 0; padding-block: 20px 110px; padding-left: max(16px, env(safe
 .chart text { fill: var(--muted); font-size: 11px; font-family: var(--f-body); }
 .chart .grid-l { stroke: var(--line); stroke-width: 1; }
 @media (max-width: 600px) { .chart text { font-size: 19px; } }
-.empty { text-align: center; padding: 28px 12px; color: var(--muted); display: flex; flex-direction: column; gap: 10px; align-items: center; }
-.empty svg { width: 46px; height: 46px; opacity: .55; }
-.empty b { color: var(--ink); font-family: var(--f-display); font-size: 1.05rem; }
+.empty { text-align: center; padding: 32px 14px; color: var(--muted); display: flex; flex-direction: column; gap: 10px; align-items: center; }
+.empty svg { width: 48px; height: 48px; opacity: .55; }
+.empty b { color: var(--ink); font-family: var(--f-display); font-size: 1.1rem; }
 .banner { display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; background: var(--info-soft); color: var(--info); border-radius: var(--r-m); padding: 10px 14px; font-size: .88rem; font-weight: 600; }
 .banner.warn { background: var(--warn-soft); color: var(--warn); }
+.banner.ok { background: var(--ok-soft); color: var(--ok); }
 
 .kv { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px 18px; }
 .kv div { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
@@ -275,8 +301,23 @@ dialog { border: 0; padding: 0; background: transparent; max-width: 100vw; max-h
         <small>Élevage cunicole pro</small>
       </div>
     </div>
+    
     <nav id="sidenav"></nav>
-    <div class="sync" id="sync"><span class="dot local"></span><span>Enregistré sur cet appareil</span></div>
+
+    <!-- Account & Cloud Synchronization Widget -->
+    <div class="side-account">
+      <button class="btn sm" id="btnInstallPWA" onclick="installPWA()" style="display:none;background:var(--sage-soft);color:var(--sage-soft-ink);border:none;margin-bottom:4px;width:100%;font-size:.8rem">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+        <span>Installer sur téléphone</span>
+      </button>
+      <div class="user-card" id="userCard" data-act="accountModal" title="Gérer votre compte et la synchronisation">
+        <div class="user-avatar" id="userAvatar">A</div>
+        <div class="user-meta">
+          <b id="userName">Mon Élevage</b>
+          <small id="userSyncStatus"><span class="dot local"></span><span>Prêt</span></small>
+        </div>
+      </div>
+    </div>
   </aside>
 
   <!-- Mobile Top Header Bar -->
@@ -285,10 +326,16 @@ dialog { border: 0; padding: 0; background: transparent; max-width: 100vw; max-h
       <img src="abvnewlogo.jpg" alt="Logo ABV Farm" class="brand-logo sm" onerror="this.style.display='none';">
       <div>
         <b>ABV Farm</b>
-        <small>Gestion cunicole</small>
+        <small id="mobileSyncSub">Élevage cunicole</small>
       </div>
     </div>
     <div class="actions">
+      <button class="btn sm" id="btnInstallMobile" onclick="installPWA()" style="display:none;padding:6px 9px;background:var(--sage-soft);color:var(--sage-soft-ink);border:none" title="Installer l'application sur votre téléphone">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+      </button>
+      <button class="btn sm" data-act="accountModal" title="Compte Google & Cloud" style="padding:6px 9px">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      </button>
       <button class="btn sm pri" data-act="newrabbit">+ Lapin</button>
     </div>
   </header>
@@ -306,6 +353,56 @@ dialog { border: 0; padding: 0; background: transparent; max-width: 100vw; max-h
 
 <script>
 "use strict";
+
+/* ---------- PWA Service Worker Registration ---------- */
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./sw.js").then((reg) => {
+      console.log("PWA Service Worker registered:", reg.scope);
+    }).catch((err) => {
+      console.log("PWA Service Worker registration notice:", err);
+    });
+  });
+}
+
+let deferredPrompt = null;
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  const btn1 = $("#btnInstallPWA");
+  const btn2 = $("#btnInstallMobile");
+  if (btn1) btn1.style.display = "inline-flex";
+  if (btn2) btn2.style.display = "inline-flex";
+});
+
+window.addEventListener("appinstalled", () => {
+  deferredPrompt = null;
+  const btn1 = $("#btnInstallPWA");
+  const btn2 = $("#btnInstallMobile");
+  if (btn1) btn1.style.display = "none";
+  if (btn2) btn2.style.display = "none";
+  toast("Application ABV Farm installée avec succès sur votre téléphone !");
+});
+
+function installPWA() {
+  if (deferredPrompt) {
+    deferredPrompt.prompt();
+    deferredPrompt.userChoice.then((choiceResult) => {
+      if (choiceResult.outcome === "accepted") {
+        toast("Installation en cours...");
+      }
+      deferredPrompt = null;
+    });
+  } else {
+    // Helpful guide for iOS Safari
+    const isIos = /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCase());
+    if (isIos) {
+      toast("Sur iPhone : Touchez le bouton Partager puis « Sur l'écran d'accueil » pour l'installer.");
+    } else {
+      toast("Pour installer : Menu du navigateur (⋮) > « Ajouter à l'écran d'accueil » ou « Installer ».");
+    }
+  }
+}
 
 /* ---------- Icons ---------- */
 const I = (p) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`;
@@ -339,6 +436,9 @@ const ICON = {
   tree: I('<rect x="9" y="3" width="6" height="5" rx="1"/><rect x="3" y="16" width="6" height="5" rx="1"/><rect x="15" y="16" width="6" height="5" rx="1"/><path d="M12 8v4M6 16v-4h12v4"/>'),
   shield: I('<path d="M12 3 4 6v6c0 4.5 3.4 8 8 9 4.6-1 8-4.5 8-9V6Z"/>'),
   fileText: I('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>'),
+  user: I('<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>'),
+  cloud: I('<path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/>'),
+  phone: I('<rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/>'),
 };
 
 /* ---------- Utils ---------- */
@@ -350,7 +450,7 @@ const iso = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate(
 const today = () => iso(new Date());
 const parse = (s) => new Date(String(s).slice(0, 10) + "T00:00:00");
 const addDays = (s, n) => { const d = parse(s); d.setDate(d.getDate() + n); return iso(d); };
-const diff = (a, b) => Math.round((parse(b) - parse(a)) / 864e5); // days from a to b
+const diff = (a, b) => Math.round((parse(b) - parse(a)) / 864e5);
 const MONTHS = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."];
 const fmtDate = (s) => { if (!s) return "—"; const d = parse(s); return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`; };
 const fmtShort = (s) => { if (!s) return "—"; const d = parse(s); return `${d.getDate()} ${MONTHS[d.getMonth()]}`; };
@@ -378,55 +478,260 @@ const TX_IN = ["Vente chair", "Vente reproducteur", "Vente fumier", "Autre recet
 const TX_OUT = ["Aliment", "Santé", "Matériel", "Main-d'œuvre", "Autre dépense"];
 const PRIOS = ["Haute", "Moyenne", "Basse"];
 
-/* ---------- State & storage ---------- */
+/* ---------- State & Cloud/Local Sync Layer ---------- */
 const KIND = { rabbit: "rabbits", mating: "matings", weight: "weights", treatment: "treatments", item: "inventory", feed: "feed", tx: "tx", batch: "batches", reminder: "reminders" };
 let S = blank();
 function blank() { const o = {}; Object.values(KIND).forEach((k) => (o[k] = [])); return o; }
-let mode = "loading"; // cloud | local | loading
-let backend = null, readOnly = false, ready = false;
+
+const LS_DATA_KEY = "abvfarm_production_data_v2";
+const LS_USER_KEY = "abvfarm_user_session_v2";
+
+let userSession = loadUserSession();
+let isOnline = navigator.onLine;
+let ready = false;
+let cloudSyncActive = false;
+
+function loadUserSession() {
+  try {
+    return JSON.parse(localStorage.getItem(LS_USER_KEY) || "null") || {
+      isLoggedIn: false,
+      farmName: "ABV Farm",
+      email: "",
+      managerName: "Éleveur ABV",
+      photoUrl: null,
+      lastSync: null
+    };
+  } catch (e) {
+    return { isLoggedIn: false, farmName: "ABV Farm", email: "", managerName: "Éleveur ABV", photoUrl: null, lastSync: null };
+  }
+}
+
+function saveUserSession(session) {
+  userSession = { ...userSession, ...session };
+  try { localStorage.setItem(LS_USER_KEY, JSON.stringify(userSession)); } catch (e) {}
+  updateUserUI();
+}
+
+function getLocalData() {
+  try {
+    return JSON.parse(localStorage.getItem(LS_DATA_KEY) || "{}");
+  } catch (e) {
+    return {};
+  }
+}
+
+function setLocalData(all) {
+  try {
+    localStorage.setItem(LS_DATA_KEY, JSON.stringify(all));
+  } catch (e) {
+    console.warn("Storage notice:", e);
+  }
+}
 
 function ingest(docs) {
   const s = blank();
-  for (const d of docs) { const k = KIND[d.kind]; if (k) s[k].push(d); }
-  S = s; ready = true; render();
-}
-const LS_KEY = "abvfarm-web-v1";
-function localBackend() {
-  let all = {};
-  try { all = JSON.parse(localStorage.getItem(LS_KEY) || "{}"); } catch (e) { all = {}; }
-  if (Object.keys(all).length === 0) {
-    const samples = sampleDocs();
-    samples.forEach((d) => { all[d.kind + "-" + d.id] = d; });
-    try { localStorage.setItem(LS_KEY, JSON.stringify(all)); } catch (e) {}
+  for (const d of docs) {
+    const k = KIND[d.kind];
+    if (k) s[k].push(d);
   }
-  const persist = () => { try { localStorage.setItem(LS_KEY, JSON.stringify(all)); } catch (e) {} };
-  const emit = () => ingest(Object.values(all));
-  setTimeout(emit, 0);
-  return {
-    async save(kind, obj) { all[kind + "-" + obj.id] = { ...obj, kind }; persist(); emit(); },
-    async remove(kind, id) { delete all[kind + "-" + id]; persist(); emit(); },
-  };
+  S = s;
+  ready = true;
+  render();
 }
 
 async function save(kind, obj) {
-  if (readOnly) { toast("Lecture seule : vous ne pouvez pas modifier cet élevage."); return false; }
   if (!obj.id) obj.id = uid();
-  try { await backend.save(kind, obj); return true; }
-  catch (e) { return fail(e); }
-}
-async function removeDoc(kind, id) {
-  if (readOnly) { toast("Lecture seule : vous ne pouvez pas modifier cet élevage."); return false; }
-  try { await backend.remove(kind, id); return true; } catch (e) { return fail(e); }
-}
-function fail(e) {
-  toast("Erreur lors de l'enregistrement.");
-  console.warn(e); return false;
+  const all = getLocalData();
+  const doc = { ...obj, kind, updatedAt: new Date().toISOString() };
+  all[kind + "-" + obj.id] = doc;
+  setLocalData(all);
+  ingest(Object.values(all));
+
+  // Push to Cloud Firestore if signed in
+  if (userSession.isLoggedIn && isOnline && window.firebaseDb && userSession.uid) {
+    try {
+      await window.firebaseDb.collection("users").doc(userSession.uid).collection("cheptel").doc(kind + "-" + obj.id).set(doc);
+      userSession.lastSync = new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+      saveUserSession();
+    } catch (err) {
+      console.warn("Cloud push notice:", err);
+    }
+  }
+  return true;
 }
 
-async function boot() {
-  mode = "local";
-  backend = localBackend();
-  renderSync();
+async function removeDoc(kind, id) {
+  const all = getLocalData();
+  delete all[kind + "-" + id];
+  setLocalData(all);
+  ingest(Object.values(all));
+
+  if (userSession.isLoggedIn && isOnline && window.firebaseDb && userSession.uid) {
+    try {
+      await window.firebaseDb.collection("users").doc(userSession.uid).collection("cheptel").doc(kind + "-" + id).delete();
+      userSession.lastSync = new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+      saveUserSession();
+    } catch (err) {
+      console.warn("Cloud delete notice:", err);
+    }
+  }
+  return true;
+}
+
+/* ---------- Firebase Google Auth & Cloud Setup ---------- */
+function initFirebaseSync() {
+  try {
+    const firebaseConfig = {
+      apiKey: "AIzaSyCS-dwArbSOKZJM3F5DiY84R0FGdxmzcCk",
+      authDomain: "gen-lang-client-0349652531.firebaseapp.com",
+      projectId: "gen-lang-client-0349652531",
+      storageBucket: "gen-lang-client-0349652531.firebasestorage.app",
+      messagingSenderId: "921975845975",
+      appId: "1:921975845975:web:abvfarm"
+    };
+
+    if (!firebase.apps.length) {
+      firebase.initializeApp(firebaseConfig);
+    }
+    const db = firebase.firestore();
+    window.firebaseDb = db;
+    window.firebaseAuth = firebase.auth();
+
+    // Enable offline persistence
+    db.enablePersistence({ synchronizeTabs: true }).catch((err) => {
+      console.log("Firestore offline persistence notice:", err.code);
+    });
+
+    // Check redirect auth result (for mobile browsers)
+    window.firebaseAuth.getRedirectResult().then((result) => {
+      if (result && result.user) {
+        handleUserAuthenticated(result.user, "Connexion Google réussie !");
+      }
+    }).catch((err) => {
+      console.warn("Redirect auth notice:", err);
+    });
+
+    // Listen to Auth State
+    window.firebaseAuth.onAuthStateChanged((user) => {
+      if (user) {
+        handleUserAuthenticated(user);
+      } else {
+        cloudSyncActive = false;
+        updateUserUI();
+      }
+    });
+  } catch (e) {
+    console.log("Local offline mode active:", e);
+  }
+}
+
+function handleUserAuthenticated(user, msg) {
+  userSession.isLoggedIn = true;
+  userSession.uid = user.uid;
+  userSession.email = user.email || userSession.email;
+  userSession.managerName = user.displayName || userSession.managerName || user.email?.split("@")[0];
+  userSession.photoUrl = user.photoURL || null;
+  saveUserSession(userSession);
+  if (msg) toast(msg);
+
+  // Listen to user's Cloud herd data in real-time
+  window.firebaseDb.collection("users").doc(user.uid).collection("cheptel").onSnapshot((snap) => {
+    cloudSyncActive = true;
+    const cloudDocs = snap.docs.map((d) => d.data());
+    if (cloudDocs.length > 0) {
+      const all = getLocalData();
+      cloudDocs.forEach((d) => { all[d.kind + "-" + d.id] = d; });
+      setLocalData(all);
+      ingest(Object.values(all));
+    }
+    userSession.lastSync = new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+    updateUserUI();
+  }, (err) => {
+    console.warn("Snapshot notice:", err);
+  });
+}
+
+// Network events
+window.addEventListener("online", () => {
+  isOnline = true;
+  toast("Connexion Internet rétablie. Synchronisation active.");
+  updateUserUI();
+});
+window.addEventListener("offline", () => {
+  isOnline = false;
+  toast("Mode Hors-Ligne : vos données continuent d'être enregistrées en local.");
+  updateUserUI();
+});
+
+function updateUserUI() {
+  const nameEl = $("#userName");
+  const avatarEl = $("#userAvatar");
+  const syncEl = $("#userSyncStatus");
+  const mobSub = $("#mobileSyncSub");
+
+  const displayName = userSession.farmName || userSession.managerName || "ABV Farm";
+  const initial = displayName.charAt(0).toUpperCase();
+
+  if (nameEl) nameEl.textContent = displayName;
+  if (avatarEl) {
+    if (userSession.photoUrl) {
+      avatarEl.innerHTML = `<img src="${esc(userSession.photoUrl)}" alt="Avatar" referrerpolicy="no-referrer">`;
+    } else {
+      avatarEl.textContent = initial;
+    }
+  }
+
+  let statusHtml = "";
+  let subText = "";
+
+  if (userSession.isLoggedIn) {
+    if (isOnline) {
+      statusHtml = `<span class="dot on"></span><span style="color:var(--ok)">Google Cloud Synchronisé</span>`;
+      subText = "Google Cloud actif";
+    } else {
+      statusHtml = `<span class="dot offline"></span><span style="color:var(--warn)">Hors-ligne (Local)</span>`;
+      subText = "Hors-ligne • Enregistré";
+    }
+  } else {
+    statusHtml = isOnline 
+      ? `<span class="dot local"></span><span>Stockage local actif</span>`
+      : `<span class="dot offline"></span><span>Mode Hors-ligne</span>`;
+    subText = "Élevage cunicole pro";
+  }
+
+  if (syncEl) syncEl.innerHTML = statusHtml;
+  if (mobSub) mobSub.textContent = subText;
+}
+
+/* ---------- Google Authentication Handler ---------- */
+async function signInWithGoogle() {
+  if (!window.firebaseAuth) {
+    toast("Service d'authentification indisponible. Réessayez.");
+    return;
+  }
+  const provider = new firebase.auth.GoogleAuthProvider();
+  provider.addScope("profile");
+  provider.addScope("email");
+  
+  toast("Connexion avec Google en cours…");
+  try {
+    const result = await window.firebaseAuth.signInWithPopup(provider);
+    if (result && result.user) {
+      handleUserAuthenticated(result.user, `Connecté avec Google : ${result.user.displayName || result.user.email}`);
+      closeModal();
+    }
+  } catch (err) {
+    console.warn("Popup notice, switching to redirect:", err);
+    if (err.code === "auth/popup-blocked" || err.code === "auth/cancelled-popup-request" || err.code === "auth/popup-closed-by-user") {
+      try {
+        await window.firebaseAuth.signInWithRedirect(provider);
+      } catch (redirectErr) {
+        toast("Erreur de redirection Google : " + redirectErr.message);
+      }
+    } else {
+      toast("Erreur Google : " + (err.message || "Impossible de se connecter"));
+    }
+  }
 }
 
 /* ---------- Derived data ---------- */
@@ -454,7 +759,6 @@ function underWithdrawal(id) {
   return S.treatments.filter((x) => x.rabbit === id && Number(x.withdrawal) > 0 && addDays(x.date, Number(x.withdrawal)) > t)
     .map((x) => addDays(x.date, Number(x.withdrawal))).sort().pop() || null;
 }
-/* Daily ration recommendation */
 function ration() {
   const t = today(); const c = { mal: 0, fem: 0, gest: 0, lact: 0, y1: 0, y2: 0 };
   S.rabbits.filter(isActive).forEach((r) => {
@@ -470,7 +774,6 @@ function ration() {
   return { grams: g, c, fat };
 }
 
-/* Wright inbreeding calculation */
 function makeKinship() {
   const memoA = new Map(), memoF = new Map();
   const older = (x, y) => { const a = rab(x), b = rab(y); const da = a?.birth || "9999", dbb = b?.birth || "9999"; return da === dbb ? (x < y) : da < dbb; };
@@ -545,24 +848,17 @@ function renderNav() {
   $("#bottomnav").innerHTML = BOTTOM.map((id) => { const n = NAV.find((x) => x.id === id); return `<a href="#${id}" ${cur === id ? 'aria-current="page"' : ""}><span class="pill">${ICON[n.icon]}</span>${n.id === "rappels" ? "Rappels" : n.label}</a>`; }).join("")
     + `<button type="button" data-act="more" ${inMore ? 'aria-current="page"' : ""}><span class="pill">${ICON.more}</span>Plus</button>`;
 }
-function renderSync() {
-  const el = $("#sync"); if (!el) return;
-  el.innerHTML = `<span class="dot local"></span><span>Enregistré sur cet appareil</span>`;
-}
+
 function render() {
-  renderNav(); renderSync();
+  renderNav();
+  updateUserUI();
   if (!ready) return;
   const r = route(); const v = VIEWS[r.name] || VIEWS.accueil;
-  $("#main").innerHTML = `<div class="wrap">${sampleBanner()}${v(r)}</div>`;
+  $("#main").innerHTML = `<div class="wrap">${v(r)}</div>`;
   afterRender();
 }
 let afterHooks = [];
 function afterRender() { const h = afterHooks; afterHooks = []; h.forEach((f) => f()); }
-function sampleBanner() {
-  const n = Object.values(S).reduce((s, l) => s + l.filter((x) => x.sample).length, 0);
-  let b = n ? `<div class="banner"><span>Données d'exemple chargées (${n} fiches). Vous pouvez les effacer ou les modifier à tout moment.</span><button class="btn sm" data-act="clearsamples">Effacer les exemples</button></div>` : "";
-  return b;
-}
 
 /* ---------- Small renderers ---------- */
 const emptyBox = (icon, title, text, btn) => `<div class="empty">${ICON[icon]}<b>${title}</b><span>${text}</span>${btn || ""}</div>`;
@@ -594,11 +890,6 @@ function gestCard(m) {
 const VIEWS = {};
 VIEWS.accueil = () => {
   const act = S.rabbits.filter(isActive);
-  if (!S.rabbits.length) return `
-    <section class="hero"><div><span class="eyebrow" style="color:inherit;opacity:.8">ABV Farm</span><h1>Bienvenue dans votre élevage</h1>
-    <p>Enregistrez vos lapins, suivez chaque gestation jour par jour, contrôlez la consanguinité avant d'accoupler, et gardez un œil sur l'aliment et la caisse.</p></div>
-    <div class="actions"><button class="btn" data-act="newrabbit">${ICON.plus}Ajouter mon premier lapin</button><button class="btn" style="background:transparent;color:var(--hero-ink);border-color:rgba(255,255,255,.4)" data-act="loadsample">Voir un exemple d'élevage</button></div>${earsSvg()}</section>
-    <div class="grid g3">${[["rabbit", "Fiches lapins", "Race, cage, parents, pesées et soins."], ["heart", "Saillies & gestations", "Palpation J10–14, nid J28, mise bas J31."], ["tree", "Généalogie", "Coefficient de consanguinité calculé avant chaque saillie."], ["layers", "Engraissement", "Lots, mortalité, poids moyen et date de vente."], ["grain", "Aliment", "Ration du jour calculée et stock restant."], ["coins", "Finances", "Recettes et dépenses en FCFA."]].map(([i, t, d]) => `<div class="card" style="display:flex;gap:12px"><span class="ico">${ICON[i]}</span><div><h3>${t}</h3><p class="hint">${d}</p></div></div>`).join("")}</div>`;
   const males = act.filter((r) => r.sex === "Male").length, fem = act.filter((r) => r.sex === "Female").length;
   const mature = act.filter((r) => age(r) >= MATURE_DAYS).length;
   const gest = S.matings.filter((m) => ["Accouplé", "Gestation confirmée"].includes(m.status)).sort((a, b) => a.due.localeCompare(b.due));
@@ -609,10 +900,37 @@ VIEWS.accueil = () => {
   const al = alerts();
   const fedToday = S.feed.filter((f) => f.date === today()).reduce((s, f) => s + Number(f.grams || 0), 0);
   const h = new Date().getHours(); const hello = h < 12 ? "Bonjour" : h < 18 ? "Bon après-midi" : "Bonsoir";
+
+  if (!S.rabbits.length) {
+    return `
+    <section class="hero">
+      <div class="head" style="align-items:flex-start">
+        <div>
+          <span class="eyebrow" style="color:inherit;opacity:.8">${esc(fmtDate(today()))}</span>
+          <h1>Bienvenue sur ABV Farm</h1>
+          <p>Votre registre d'élevage est prêt. Commencez par enregistrer vos reproducteurs pour activer le calcul de ration, le suivi génétique et le planning de reproduction.</p>
+        </div>
+        <div class="actions">
+          <button class="btn pri" data-act="newrabbit">${ICON.plus}Ajouter un lapin</button>
+        </div>
+      </div>
+      <div class="meta">
+        <span class="chip">0 lapin enregistré</span>
+        <span class="chip">${userSession.isLoggedIn ? "Compte Google Cloud actif" : "Stockage local sécurisé"}</span>
+      </div>
+      ${earsSvg()}
+    </section>
+    <div class="grid g3">
+      <div class="card" style="display:flex;gap:12px"><span class="ico">${ICON.rabbit}</span><div><h3>1. Reproducteurs</h3><p class="hint">Enregistrez vos mâles et femelles avec leur cage et date de naissance.</p></div></div>
+      <div class="card" style="display:flex;gap:12px"><span class="ico">${ICON.heart}</span><div><h3>2. Saillies & Gestations</h3><p class="hint">Suivi J10 (palpation), J28 (boîte à nid) et J31 (mise bas).</p></div></div>
+      <div class="card" style="display:flex;gap:12px"><span class="ico">${ICON.cloud}</span><div><h3>3. Synchronisation Google</h3><p class="hint">Fonctionne avec ou sans connexion Internet, sauvegardé en continu.</p></div></div>
+    </div>`;
+  }
+
   return `
   <section class="hero"><div class="head" style="align-items:flex-start"><div><span class="eyebrow" style="color:inherit;opacity:.8">${esc(fmtDate(today()))}</span><h1>${hello} !</h1>
-    <p>${al.length ? `${al.length} action${al.length > 1 ? "s" : ""} à faire dans l'élevage aujourd'hui.` : "Rien d'urgent aujourd'hui. L'élevage est à jour."}</p></div>
-    <div class="actions"><button class="btn" data-act="newrabbit">${ICON.plus}Lapin</button><button class="btn" data-act="newmating">${ICON.heart}Saillie</button><button class="btn" data-act="exportpdf">${ICON.fileText}PDF</button></div></div>
+    <p>${al.length ? `${al.length} action${al.length > 1 ? "s" : ""} à réaliser aujourd'hui dans l'élevage.` : "Toutes les tâches de l'élevage sont à jour."}</p></div>
+    <div class="actions"><button class="btn" data-act="newrabbit">${ICON.plus}Lapin</button><button class="btn" data-act="newmating">${ICON.heart}Saillie</button><button class="btn" data-act="exportpdf">${ICON.fileText}Inventaire PDF</button></div></div>
     <div class="meta"><span class="chip">${act.length} lapins actifs</span><span class="chip">${gest.length} gestation${gest.length > 1 ? "s" : ""}</span><span class="chip">${fat} en engraissement</span></div>${earsSvg()}</section>
   <div class="tiles">
     <div class="tile"><span class="l">Lapins actifs</span><span class="v">${act.length}</span><span class="s">${males} ♂ · ${fem} ♀</span></div>
@@ -632,7 +950,7 @@ VIEWS.accueil = () => {
     </section>
   </div>
   <section class="card"><div class="row-h"><h2>Gestations en cours</h2><a class="btn sm ghost" href="#saillies">Tout voir</a></div>
-    ${gest.length ? `<div class="grid g2">${gest.slice(0, 6).map(gestCard).join("")}</div>` : emptyBox("heart", "Aucune gestation", "Enregistrez une saillie pour suivre la palpation, le nid et la mise bas.", `<button class="btn pri" data-act="newmating">${ICON.plus}Nouvelle saillie</button>`)}
+    ${gest.length ? `<div class="grid g2">${gest.slice(0, 6).map(gestCard).join("")}</div>` : emptyBox("heart", "Aucune gestation en cours", "Enregistrez une saillie pour démarrer le suivi.", `<button class="btn pri" data-act="newmating">${ICON.plus}Nouvelle saillie</button>`)}
   </section>`;
 };
 function earsSvg() { return `<svg class="ears" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8.2 2.5c1.3-.3 2.3 1.5 2.4 4.4.1 1.4 0 2.6-.2 3.4.5-.2 1-.2 1.6-.2s1.1 0 1.6.2c-.2-.8-.3-2-.2-3.4.1-2.9 1.1-4.7 2.4-4.4 1.4.4 1.6 3 .6 5.9-.4 1.1-.9 2.1-1.4 2.8 1.9 1 3.1 2.8 3.1 4.9 0 3.2-2.7 5.4-6.1 5.4s-6.1-2.2-6.1-5.4c0-2.1 1.2-3.9 3.1-4.9-.5-.7-1-1.7-1.4-2.8-1-2.9-.8-5.5.6-5.9Z"/></svg>`; }
@@ -646,23 +964,23 @@ VIEWS.lapins = () => {
   const seg = (k, opts) => `<div class="seg" role="group">${opts.map(([v, l]) => `<button type="button" data-act="ui" data-k="${k}" data-v="${v}" aria-pressed="${ui[k] === v}">${l}</button>`).join("")}</div>`;
   const nArch = S.rabbits.filter((r) => !isActive(r)).length;
   afterHooks.push(() => { const i = $("#q"); if (i) { i.addEventListener("input", () => { ui.q = i.value; const pos = i.selectionStart; render(); const j = $("#q"); if (j) { j.focus(); j.setSelectionRange(pos, pos); } }); } });
-  return `<div class="head"><div><h1>Mes lapins</h1><p>${S.rabbits.filter(isActive).length} actifs · ${nArch} sortis de l'élevage</p></div><div class="actions"><button class="btn" data-act="exportpdf">${ICON.fileText}Export PDF</button><button class="btn pri" data-act="newrabbit">${ICON.plus}Ajouter un lapin</button></div></div>
+  return `<div class="head"><div><h1>Cheptel cunicole</h1><p>${S.rabbits.filter(isActive).length} actifs · ${nArch} archivés</p></div><div class="actions"><button class="btn" data-act="exportpdf">${ICON.fileText}Inventaire PDF</button><button class="btn pri" data-act="newrabbit">${ICON.plus}Ajouter un lapin</button></div></div>
   <div class="toolbar"><label class="search">${ICON.search}<input id="q" type="search" placeholder="Nom, cage ou race" value="${esc(ui.q)}" aria-label="Rechercher"></label>
   ${seg("sex", [["all", "Tous"], ["Male", "♂ Mâles"], ["Female", "♀ Femelles"], ["Indéterminé", "Indét."]])}${seg("st", [["actifs", "Actifs"], ["archives", "Sortis"]])}</div>
-  ${list.length ? `<div class="grid g3">${list.map(rabbitCard).join("")}</div>` : `<div class="card">${emptyBox("rabbit", S.rabbits.length ? "Aucun lapin ne correspond" : "Aucun lapin enregistré", S.rabbits.length ? "Modifiez la recherche ou les filtres." : "Commencez par vos reproducteurs : nom, sexe, date de naissance et cage.", S.rabbits.length ? "" : `<button class="btn pri" data-act="newrabbit">${ICON.plus}Ajouter un lapin</button>`)}</div>`}`;
+  ${list.length ? `<div class="grid g3">${list.map(rabbitCard).join("")}</div>` : `<div class="card">${emptyBox("rabbit", S.rabbits.length ? "Aucun lapin ne correspond au filtre" : "Aucun lapin enregistré pour le moment", S.rabbits.length ? "Modifiez votre recherche." : "Enregistrez vos reproducteurs (nom, sexe, date de naissance, race et cage).", `<button class="btn pri" data-act="newrabbit">${ICON.plus}Ajouter un lapin</button>`)}</div>`}`;
 };
 function rabbitCard(r) {
   const a = age(r), w = lastWeight(r.id), wd = underWithdrawal(r.id);
   const gest = S.matings.find((m) => m.female === r.id && ["Accouplé", "Gestation confirmée"].includes(m.status));
   return `<a class="rcard ${isActive(r) ? sexCls(r) : "off"}" href="#lapin-${r.id}">
-    <div class="top"><div style="min-width:0"><div class="nm">${esc(r.name)}</div><div class="hint">${esc(r.breed || "Race inconnue")}</div></div><span class="sx">${sexSym(r)}</span></div>
+    <div class="top"><div style="min-width:0"><div class="nm">${esc(r.name)}</div><div class="hint">${esc(r.breed || "Race non précisée")}</div></div><span class="sx">${sexSym(r)}</span></div>
     <div class="facts"><span>Âge <b>${ageLabel(a)}</b></span><span>Poids <b>${w != null ? nf2.format(w) + " kg" : "—"}</b></span></div>
     <div class="actions">${r.cage ? `<span class="tag">CAGE ${esc(r.cage)}</span>` : ""}${!isActive(r) ? statusChip(r.status) : ""}${isActive(r) && a >= MATURE_DAYS ? `<span class="chip ok">Reproducteur</span>` : ""}${gest ? `<span class="chip clay">Gestante · J${diff(gest.date, today())}</span>` : ""}${wd ? `<span class="chip bad">Délai d'attente</span>` : ""}</div></a>`;
 }
 
 VIEWS.lapin = ({ id }) => {
   const r = rab(id);
-  if (!r) return `<a class="btn ghost" href="#lapins">${ICON.back}Mes lapins</a><div class="card">${emptyBox("rabbit", "Ce lapin n'existe plus", "Il a peut-être été supprimé.")}</div>`;
+  if (!r) return `<a class="btn ghost" href="#lapins">${ICON.back}Mes lapins</a><div class="card">${emptyBox("rabbit", "Ce lapin n'existe plus", "La fiche a peut-être été supprimée.")}</div>`;
   const a = age(r), ws = weightsOf(id), g = gmq(id), wd = underWithdrawal(id);
   const tr = S.treatments.filter((x) => x.rabbit === id).sort((x, y) => y.date.localeCompare(x.date));
   const mts = S.matings.filter((m) => m.male === id || m.female === id).sort((x, y) => y.date.localeCompare(x.date));
@@ -675,7 +993,7 @@ VIEWS.lapin = ({ id }) => {
   return `<div class="head"><a class="btn ghost" href="#lapins">${ICON.back}Mes lapins</a>
     <div class="actions"><button class="btn" data-act="editrabbit" data-id="${id}">${ICON.edit}Modifier</button><button class="btn" data-act="status" data-id="${id}">Statut</button><button class="btn ghost danger" data-act="delrabbit" data-id="${id}" aria-label="Supprimer">${ICON.trash}</button></div></div>
   <section class="rcard ${isActive(r) ? sexCls(r) : "off"}" style="padding:22px;cursor:default">
-    <div class="top"><div style="min-width:0"><span class="eyebrow">${r.sex === "Male" ? "Mâle" : r.sex === "Female" ? "Femelle" : "Sexe indéterminé"} · ${esc(r.breed || "Race inconnue")}</span><div class="nm" style="font-size:2rem">${esc(r.name)}</div></div><span class="sx" style="font-size:2.2rem">${sexSym(r)}</span></div>
+    <div class="top"><div style="min-width:0"><span class="eyebrow">${r.sex === "Male" ? "Mâle" : r.sex === "Female" ? "Femelle" : "Sexe indéterminé"} · ${esc(r.breed || "Race non précisée")}</span><div class="nm" style="font-size:2rem">${esc(r.name)}</div></div><span class="sx" style="font-size:2.2rem">${sexSym(r)}</span></div>
     <div class="actions">${statusChip(r.status)}${r.cage ? `<span class="tag">CAGE ${esc(r.cage)}</span>` : ""}<span class="chip ${matur[0]}">${matur[1]}</span>${wd ? `<span class="chip bad">Délai d'attente jusqu'au ${fmtShort(wd)}</span>` : ""}${F > 0 ? `<span class="chip warn">Consanguinité F = ${nf1.format(F)} %</span>` : ""}</div>
     <div class="actions"><button class="btn sm" data-act="newweight" data-id="${id}">${ICON.scale}Pesée</button><button class="btn sm" data-act="newtreat" data-id="${id}">${ICON.syringe}Soin</button>${isActive(r) && r.sex !== "Indéterminé" ? `<button class="btn sm" data-act="newmating" data-id="${id}">${ICON.heart}Saillie</button>` : ""}</div>
   </section>
@@ -690,11 +1008,11 @@ VIEWS.lapin = ({ id }) => {
   </div>
   <section class="card"><div class="row-h"><h2>Courbe de poids</h2><button class="btn sm" data-act="newweight" data-id="${id}">${ICON.plus}Pesée</button></div>
     ${ws.length >= 2 ? weightChart(ws) : ""}
-    ${ws.length ? `<div class="tablewrap"><table><thead><tr><th>Date</th><th class="r">Poids</th><th class="r">Écart</th><th>Note</th><th></th></tr></thead><tbody>${ws.slice().reverse().map((w, i, arr) => { const prev = arr[i + 1]; const dlt = prev ? w.kg - prev.kg : null; return `<tr><td>${fmtDate(w.date)}</td><td class="r"><b>${nf2.format(w.kg)} kg</b></td><td class="r ${dlt == null ? "" : dlt >= 0 ? "pos" : "neg"}">${dlt == null ? "—" : (dlt >= 0 ? "+" : "") + nf0.format(dlt * 1000) + " g"}</td><td class="hint">${esc(w.notes || "")}</td><td class="r"><button class="btn sm ghost" data-act="del" data-kind="weight" data-id="${w.id}" aria-label="Supprimer la pesée">${ICON.trash}</button></td></tr>`; }).join("")}</tbody></table></div>` : emptyBox("scale", "Aucune pesée", "Pesez régulièrement pour suivre la croissance et le gain moyen quotidien.")}
+    ${ws.length ? `<div class="tablewrap"><table><thead><tr><th>Date</th><th class="r">Poids</th><th class="r">Écart</th><th>Note</th><th></th></tr></thead><tbody>${ws.slice().reverse().map((w, i, arr) => { const prev = arr[i + 1]; const dlt = prev ? w.kg - prev.kg : null; return `<tr><td>${fmtDate(w.date)}</td><td class="r"><b>${nf2.format(w.kg)} kg</b></td><td class="r ${dlt == null ? "" : dlt >= 0 ? "pos" : "neg"}">${dlt == null ? "—" : (dlt >= 0 ? "+" : "") + nf0.format(dlt * 1000) + " g"}</td><td class="hint">${esc(w.notes || "")}</td><td class="r"><button class="btn sm ghost" data-act="del" data-kind="weight" data-id="${w.id}" aria-label="Supprimer la pesée">${ICON.trash}</button></td></tr>`; }).join("")}</tbody></table></div>` : emptyBox("scale", "Aucune pesée", "Pesez régulièrement pour calculer le gain moyen quotidien (GMQ).")}
   </section>
   <div class="grid g2">
     <section class="card"><div class="row-h"><h2>Soins & traitements</h2><button class="btn sm" data-act="newtreat" data-id="${id}">${ICON.plus}Soin</button></div>
-      ${tr.length ? `<div class="list">${tr.map(treatRow).join("")}</div>` : emptyBox("syringe", "Aucun soin", "Vaccins, vermifuges et traitements avec leur délai d'attente.")}</section>
+      ${tr.length ? `<div class="list">${tr.map(treatRow).join("")}</div>` : emptyBox("syringe", "Aucun soin enregistré", "Vaccins, vermifuges et traitements sanitaires.")}</section>
     <section class="card"><div class="row-h"><h2>Reproduction</h2></div>
       ${mts.length ? `<div class="tiles" style="margin-bottom:12px"><div class="tile"><span class="l">Portées</span><span class="v">${done.length}</span></div><div class="tile"><span class="l">Nés vivants</span><span class="v">${born}</span><span class="s">${done.length ? nf1.format(born / done.length) + " par portée" : ""}</span></div><div class="tile"><span class="l">Réussite</span><span class="v">${rate == null ? "—" : rate + " %"}</span></div></div>
       <div class="list">${mts.map((m) => `<div class="li"><span class="ico ${m.status === "Mise bas" ? "ok" : m.status === "Échoué" ? "bad" : "clay"}">${ICON.heart}</span><div class="grow"><div class="t">× ${esc(rname(m.male === id ? m.female : m.male))}</div><div class="d">Saillie ${fmtDate(m.date)}${m.status === "Mise bas" ? ` · ${Number(m.alive) || 0} vivants, ${Number(m.dead) || 0} morts-nés` : ` · prévue ${fmtShort(m.due)}`}</div></div>${mstChip(m.status)}</div>`).join("")}</div>` : emptyBox("heart", "Aucune saillie", "L'historique de reproduction apparaîtra ici.")}
@@ -746,28 +1064,28 @@ VIEWS.saillies = () => {
   const past = S.matings.filter((m) => !["Accouplé", "Gestation confirmée"].includes(m.status)).sort((a, b) => b.date.localeCompare(a.date));
   const done = past.filter((m) => m.status === "Mise bas"); const born = done.reduce((s, m) => s + (Number(m.alive) || 0), 0);
   const rate = past.length ? Math.round((done.length / past.length) * 100) : null;
-  return `<div class="head"><div><h1>Saillies & gestations</h1><p>Gestation de ${GESTATION} jours · palpation J10–14 · boîte à nid J28</p></div><button class="btn pri" data-act="newmating">${ICON.plus}Nouvelle saillie</button></div>
-  <div class="tiles"><div class="tile"><span class="l">En cours</span><span class="v">${cur.length}</span></div><div class="tile"><span class="l">Portées enregistrées</span><span class="v">${done.length}</span></div><div class="tile"><span class="l">Nés vivants</span><span class="v">${born}</span><span class="s">${done.length ? nf1.format(born / done.length) + " par portée" : "—"}</span></div><div class="tile"><span class="l">Taux de réussite</span><span class="v">${rate == null ? "—" : rate + " %"}</span></div></div>
-  <section class="card"><div class="row-h"><h2>Gestations en cours</h2></div>${cur.length ? `<div class="grid g2">${cur.map(gestCard).join("")}</div>` : emptyBox("heart", "Aucune gestation en cours", "Choisissez un mâle et une femelle : la consanguinité est vérifiée avant d'enregistrer.", `<button class="btn pri" data-act="newmating">${ICON.plus}Nouvelle saillie</button>`)}</section>
-  <section class="card"><div class="row-h"><h2>Historique</h2></div>${past.length ? `<div class="tablewrap"><table><thead><tr><th>Femelle</th><th>Mâle</th><th>Saillie</th><th>Statut</th><th class="r">Vivants</th><th class="r">Morts-nés</th><th class="r">F</th><th></th></tr></thead><tbody>
-    ${past.map((m) => `<tr><td><a href="#lapin-${m.female}">${esc(rname(m.female))}</a></td><td><a href="#lapin-${m.male}">${esc(rname(m.male))}</a></td><td>${fmtDate(m.date)}</td><td>${mstChip(m.status)}</td><td class="r">${m.status === "Mise bas" ? Number(m.alive) || 0 : "—"}</td><td class="r">${m.status === "Mise bas" ? Number(m.dead) || 0 : "—"}</td><td class="r">${nf1.format(offspringF(m.male, m.female))} %</td><td class="r"><button class="btn sm ghost" data-act="del" data-kind="mating" data-id="${m.id}" aria-label="Supprimer">${ICON.trash}</button></td></tr>`).join("")}</tbody></table></div>` : `<p class="hint">Les saillies terminées (mise bas ou échec) s'afficheront ici.</p>`}</section>`;
+  return `<div class="head"><div><h1>Reproduction & Gestations</h1><p>Gestation de ${GESTATION} jours · palpation J10–14 · nid J28</p></div><button class="btn pri" data-act="newmating">${ICON.plus}Nouvelle saillie</button></div>
+  <div class="tiles"><div class="tile"><span class="l">Gestations en cours</span><span class="v">${cur.length}</span></div><div class="tile"><span class="l">Portées nées</span><span class="v">${done.length}</span></div><div class="tile"><span class="l">Lapereaux nés vivants</span><span class="v">${born}</span><span class="s">${done.length ? nf1.format(born / done.length) + " par portée" : "—"}</span></div><div class="tile"><span class="l">Taux de réussite</span><span class="v">${rate == null ? "—" : rate + " %"}</span></div></div>
+  <section class="card"><div class="row-h"><h2>Gestations actives</h2></div>${cur.length ? `<div class="grid g2">${cur.map(gestCard).join("")}</div>` : emptyBox("heart", "Aucune gestation en cours", "Enregistrez une nouvelle saillie pour démarrer le calendrier de gestation.", `<button class="btn pri" data-act="newmating">${ICON.plus}Nouvelle saillie</button>`)}</section>
+  <section class="card"><div class="row-h"><h2>Historique des saillies</h2></div>${past.length ? `<div class="tablewrap"><table><thead><tr><th>Femelle</th><th>Mâle</th><th>Date saillie</th><th>Statut</th><th class="r">Vivants</th><th class="r">Morts-nés</th><th class="r">Consanguinité F</th><th></th></tr></thead><tbody>
+    ${past.map((m) => `<tr><td><a href="#lapin-${m.female}">${esc(rname(m.female))}</a></td><td><a href="#lapin-${m.male}">${esc(rname(m.male))}</a></td><td>${fmtDate(m.date)}</td><td>${mstChip(m.status)}</td><td class="r">${m.status === "Mise bas" ? Number(m.alive) || 0 : "—"}</td><td class="r">${m.status === "Mise bas" ? Number(m.dead) || 0 : "—"}</td><td class="r">${nf1.format(offspringF(m.male, m.female))} %</td><td class="r"><button class="btn sm ghost" data-act="del" data-kind="mating" data-id="${m.id}" aria-label="Supprimer">${ICON.trash}</button></td></tr>`).join("")}</tbody></table></div>` : `<p class="hint">Les portées nées ou terminées s'afficheront ici.</p>`}</section>`;
 };
 
 VIEWS.engraissement = () => {
   const act = S.batches.filter((b) => b.status !== "Vendu"), old = S.batches.filter((b) => b.status === "Vendu");
   const heads = act.reduce((s, b) => s + (Number(b.current) || 0), 0);
   const ini = S.batches.reduce((s, b) => s + (Number(b.initial) || 0), 0), dead = S.batches.reduce((s, b) => s + (Number(b.deaths) || 0), 0);
-  return `<div class="head"><div><h1>Engraissement</h1><p>Lots de lapereaux du sevrage (J${WEANING}) à la vente (environ +${FATTEN_DAYS} j)</p></div><button class="btn pri" data-act="newbatch">${ICON.plus}Nouveau lot</button></div>
-  <div class="tiles"><div class="tile"><span class="l">Lots actifs</span><span class="v">${act.length}</span></div><div class="tile"><span class="l">Lapereaux</span><span class="v">${heads}</span></div><div class="tile ${ini && dead / ini > 0.1 ? "warn" : ""}"><span class="l">Mortalité cumulée</span><span class="v">${ini ? nf1.format((dead / ini) * 100) + " %" : "—"}</span><span class="s">${dead} sur ${ini}</span></div></div>
-  ${act.length ? `<div class="grid g2">${act.map(batchCard).join("")}</div>` : `<div class="card">${emptyBox("layers", "Aucun lot actif", "Créez un lot au sevrage d'une portée pour suivre effectif, mortalité et poids.", `<button class="btn pri" data-act="newbatch">${ICON.plus}Nouveau lot</button>`)}</div>`}
-  ${old.length ? `<section class="card"><div class="row-h"><h2>Lots vendus</h2></div><div class="list">${old.map((b) => `<div class="li"><span class="ico">${ICON.layers}</span><div class="grow"><div class="t">${esc(b.code)}</div><div class="d">Sevré le ${fmtDate(b.weaning)} · ${b.initial} au départ · ${b.deaths || 0} pertes</div></div><button class="btn sm ghost" data-act="del" data-kind="batch" data-id="${b.id}" aria-label="Supprimer">${ICON.trash}</button></div>`).join("")}</div></section>` : ""}`;
+  return `<div class="head"><div><h1>Engraissement des lots</h1><p>Du sevrage (J${WEANING}) jusqu'à la commercialisation</p></div><button class="btn pri" data-act="newbatch">${ICON.plus}Nouveau lot</button></div>
+  <div class="tiles"><div class="tile"><span class="l">Lots en cours</span><span class="v">${act.length}</span></div><div class="tile"><span class="l">Lapins en croissance</span><span class="v">${heads}</span></div><div class="tile ${ini && dead / ini > 0.1 ? "warn" : ""}"><span class="l">Taux de mortalité</span><span class="v">${ini ? nf1.format((dead / ini) * 100) + " %" : "—"}</span><span class="s">${dead} perte(s) sur ${ini}</span></div></div>
+  ${act.length ? `<div class="grid g2">${act.map(batchCard).join("")}</div>` : `<div class="card">${emptyBox("layers", "Aucun lot en engraissement", "Créez un lot au sevrage pour suivre les effectifs, pesées et dates de vente.", `<button class="btn pri" data-act="newbatch">${ICON.plus}Nouveau lot</button>`)}</div>`}
+  ${old.length ? `<section class="card"><div class="row-h"><h2>Lots commercialisés</h2></div><div class="list">${old.map((b) => `<div class="li"><span class="ico">${ICON.layers}</span><div class="grow"><div class="t">${esc(b.code)}</div><div class="d">Sevré le ${fmtDate(b.weaning)} · ${b.initial} au départ · ${b.deaths || 0} pertes</div></div><button class="btn sm ghost" data-act="del" data-kind="batch" data-id="${b.id}" aria-label="Supprimer">${ICON.trash}</button></div>`).join("")}</div></section>` : ""}`;
 };
 function batchCard(b) {
   const days = diff(b.weaning, today()), total = Math.max(1, diff(b.weaning, b.target)), left = diff(today(), b.target);
   const pc = Math.max(0, Math.min(100, (days / total) * 100)); const mort = b.initial ? (Number(b.deaths) || 0) / b.initial : 0;
-  return `<section class="card"><div class="row-h"><div><h2>${esc(b.code)}</h2><span class="hint">${b.mating ? `Portée de ${esc(rname(byId(S.matings, b.mating)?.female))} · ` : ""}${b.cage ? `<span class="tag">${esc(b.cage)}</span>` : ""}</span></div>${b.status === "Quarantaine" ? `<span class="chip bad">Quarantaine</span>` : left <= 0 ? `<span class="chip ok">Prêt à vendre</span>` : `<span class="chip info">J${days} après sevrage</span>`}</div>
-    <dl class="kv" style="margin:0 0 12px"><div><dt>Effectif</dt><dd class="num">${b.current} / ${b.initial}</dd></div><div><dt>Mortalité</dt><dd class="${mort > 0.1 ? "neg" : ""}">${nf1.format(mort * 100)} %</dd></div><div><dt>Poids moyen</dt><dd>${b.avgWeight ? nf0.format(b.avgWeight) + " g" : "—"}</dd></div><div><dt>Vente prévue</dt><dd>${fmtDate(b.target)}</dd></div></dl>
-    <div class="bar ${left <= 0 ? "" : ""}"><i style="width:${pc}%"></i></div><p class="hint" style="margin:6px 0 12px">${left > 0 ? `${left} jours avant la date de vente` : "Date de vente atteinte"}</p>
+  return `<section class="card"><div class="row-h"><div><h2>${esc(b.code)}</h2><span class="hint">${b.mating ? `Portée de ${esc(rname(byId(S.matings, b.mating)?.female))} · ` : ""}${b.cage ? `<span class="tag">${esc(b.cage)}</span>` : ""}</span></div>${b.status === "Quarantaine" ? `<span class="chip bad">Quarantaine</span>` : left <= 0 ? `<span class="chip ok">Prêt à vendre</span>` : `<span class="chip info">J${days} post-sevrage</span>`}</div>
+    <dl class="kv" style="margin:0 0 12px"><div><dt>Effectif</dt><dd class="num">${b.current} / ${b.initial}</dd></div><div><dt>Mortalité</dt><dd class="${mort > 0.1 ? "neg" : ""}">${nf1.format(mort * 100)} %</dd></div><div><dt>Poids moyen</dt><dd>${b.avgWeight ? nf0.format(b.avgWeight) + " g" : "—"}</dd></div><div><dt>Date de vente visée</dt><dd>${fmtDate(b.target)}</dd></div></dl>
+    <div class="bar"><i style="width:${pc}%"></i></div><p class="hint" style="margin:6px 0 12px">${left > 0 ? `${left} jours avant la date de vente prévue` : "Prêt pour la vente"}</p>
     <div class="actions"><button class="btn sm" data-act="bweight" data-id="${b.id}">${ICON.scale}Poids moyen</button><button class="btn sm" data-act="bdeath" data-id="${b.id}">Perte</button><button class="btn sm pri" data-act="sell" data-id="${b.id}">${ICON.coins}Vendre</button><button class="btn sm ghost" data-act="editbatch" data-id="${b.id}" aria-label="Modifier">${ICON.edit}</button></div></section>`;
 }
 
@@ -778,13 +1096,13 @@ VIEWS.stocks = () => {
   const m0 = today().slice(0, 7); const monthSpend = items.filter((i) => i.date.startsWith(m0)).reduce((s, i) => s + (Number(i.price) || 0), 0);
   const last7 = feeds.filter((f) => diff(f.date, today()) < 7).reduce((s, f) => s + Number(f.grams || 0), 0) / 1000;
   const lvl = stock <= 0 ? "bad" : days != null && days < 7 ? "bad" : days != null && days < 14 ? "warn" : "";
-  return `<div class="head"><div><h1>Stocks & aliment</h1><p>Achats, distribution journalière et stock restant</p></div><div class="actions"><button class="btn" data-act="feed" data-v="${rt.grams}">${ICON.grain}Distribution</button><button class="btn pri" data-act="newitem">${ICON.plus}Achat</button></div></div>
-  <div class="tiles"><div class="tile ${lvl}"><span class="l">Aliment en stock</span><span class="v">${nf1.format(stock)} kg</span><span class="s">${days != null ? `≈ ${nf0.format(days)} jours à ${nf1.format(rt.grams / 1000)} kg/j` : "Ajoutez des lapins pour estimer"}</span></div>
-  <div class="tile"><span class="l">Distribué sur 7 jours</span><span class="v">${nf1.format(last7)} kg</span><span class="s">${nf1.format(last7 / 7)} kg par jour</span></div>
-  <div class="tile"><span class="l">Achats du mois</span><span class="v" style="font-size:1.35rem">${fcfa(monthSpend)}</span></div></div>
+  return `<div class="head"><div><h1>Stocks & Alimentation</h1><p>Approvisionnements et distributions journalières</p></div><div class="actions"><button class="btn" data-act="feed" data-v="${rt.grams}">${ICON.grain}Distribution</button><button class="btn pri" data-act="newitem">${ICON.plus}Nouvel achat</button></div></div>
+  <div class="tiles"><div class="tile ${lvl}"><span class="l">Stock d'aliment disponible</span><span class="v">${nf1.format(stock)} kg</span><span class="s">${days != null ? `≈ ${nf0.format(days)} jours d'autonomie` : "Enregistrez vos lapins pour estimer"}</span></div>
+  <div class="tile"><span class="l">Distribué (7 derniers jours)</span><span class="v">${nf1.format(last7)} kg</span><span class="s">${nf1.format(last7 / 7)} kg / jour</span></div>
+  <div class="tile"><span class="l">Dépenses approvisionnement (ce mois)</span><span class="v" style="font-size:1.35rem">${fcfa(monthSpend)}</span></div></div>
   <div class="grid g2">
-    <section class="card"><div class="row-h"><h2>Achats</h2></div>${items.length ? `<div class="list">${items.map((i) => `<div class="li"><span class="ico ${i.cat === "Nourriture" ? "ok" : i.cat === "Médicament" ? "info" : ""}">${ICON[i.cat === "Nourriture" ? "grain" : i.cat === "Médicament" ? "syringe" : "box"]}</span><div class="grow"><div class="t">${esc(i.name)}</div><div class="d">${esc(i.cat)} · ${nf2.format(Number(i.qty) || 0)} ${esc(i.unit)} · ${fmtDate(i.date)}</div></div><b class="num">${fcfa(i.price)}</b><button class="btn sm ghost" data-act="del" data-kind="item" data-id="${i.id}" aria-label="Supprimer">${ICON.trash}</button></div>`).join("")}</div>` : emptyBox("box", "Aucun achat", "Enregistrez vos sacs d'aliment, médicaments et matériel. Une dépense peut être créée en même temps.", `<button class="btn pri" data-act="newitem">${ICON.plus}Achat</button>`)}</section>
-    <section class="card"><div class="row-h"><h2>Journal d'alimentation</h2></div>${feeds.length ? `<div class="list">${feeds.slice(0, 30).map((f) => `<div class="li"><span class="ico">${ICON.grain}</span><div class="grow"><div class="t">${nf1.format(Number(f.grams) / 1000)} kg</div><div class="d">${fmtDate(f.date)}${f.notes ? " · " + esc(f.notes) : ""}</div></div><button class="btn sm ghost" data-act="del" data-kind="feed" data-id="${f.id}" aria-label="Supprimer">${ICON.trash}</button></div>`).join("")}</div>` : emptyBox("grain", "Aucune distribution", "Chaque distribution est déduite du stock d'aliment.")}</section>
+    <section class="card"><div class="row-h"><h2>Achats & Réassorts</h2></div>${items.length ? `<div class="list">${items.map((i) => `<div class="li"><span class="ico ${i.cat === "Nourriture" ? "ok" : i.cat === "Médicament" ? "info" : ""}">${ICON[i.cat === "Nourriture" ? "grain" : i.cat === "Médicament" ? "syringe" : "box"]}</span><div class="grow"><div class="t">${esc(i.name)}</div><div class="d">${esc(i.cat)} · ${nf2.format(Number(i.qty) || 0)} ${esc(i.unit)} · ${fmtDate(i.date)}</div></div><b class="num">${fcfa(i.price)}</b><button class="btn sm ghost" data-act="del" data-kind="item" data-id="${i.id}" aria-label="Supprimer">${ICON.trash}</button></div>`).join("")}</div>` : emptyBox("box", "Aucun approvisionnement enregistré", "Enregistrez vos sacs d'aliments, intrants vétérinaires ou matériel.", `<button class="btn pri" data-act="newitem">${ICON.plus}Enregistrer un achat</button>`)}</section>
+    <section class="card"><div class="row-h"><h2>Journal des distributions d'aliment</h2></div>${feeds.length ? `<div class="list">${feeds.slice(0, 30).map((f) => `<div class="li"><span class="ico">${ICON.grain}</span><div class="grow"><div class="t">${nf1.format(Number(f.grams) / 1000)} kg</div><div class="d">${fmtDate(f.date)}${f.notes ? " · " + esc(f.notes) : ""}</div></div><button class="btn sm ghost" data-act="del" data-kind="feed" data-id="${f.id}" aria-label="Supprimer">${ICON.trash}</button></div>`).join("")}</div>` : emptyBox("grain", "Aucune distribution enregistrée", "Chaque distribution enregistrée se déduit automatiquement du stock total.")}</section>
   </div>`;
 };
 
@@ -794,14 +1112,14 @@ VIEWS.finances = () => {
   let list = S.tx.slice().sort((a, b) => b.date.localeCompare(a.date)); if (ui.txf !== "all") list = list.filter((x) => x.type === ui.txf);
   const byCat = {}; S.tx.filter((x) => x.type === "out").forEach((x) => (byCat[x.cat] = (byCat[x.cat] || 0) + Number(x.amount || 0)));
   const cats = Object.entries(byCat).sort((a, b) => b[1] - a[1]); const maxC = cats[0]?.[1] || 1;
-  return `<div class="head"><div><h1>Finances</h1><p>Recettes et dépenses de l'élevage en francs CFA</p></div><div class="actions"><button class="btn" data-act="newtx" data-v="out">Dépense</button><button class="btn pri" data-act="newtx" data-v="in">${ICON.plus}Recette</button></div></div>
-  <div class="tiles"><div class="tile"><span class="l">Solde total</span><span class="v ${inc - exp >= 0 ? "pos" : "neg"}" style="font-size:1.4rem">${inc - exp >= 0 ? "+" : "−"}${fcfa(Math.abs(inc - exp))}</span></div><div class="tile"><span class="l">Recettes</span><span class="v pos" style="font-size:1.4rem">${fcfa(inc)}</span></div><div class="tile"><span class="l">Dépenses</span><span class="v neg" style="font-size:1.4rem">${fcfa(exp)}</span></div></div>
+  return `<div class="head"><div><h1>Gestion Financière</h1><p>Comptabilité de l'élevage en Francs CFA (FCFA)</p></div><div class="actions"><button class="btn" data-act="newtx" data-v="out">Dépense</button><button class="btn pri" data-act="newtx" data-v="in">${ICON.plus}Recette</button></div></div>
+  <div class="tiles"><div class="tile"><span class="l">Bénéfice net cumulé</span><span class="v ${inc - exp >= 0 ? "pos" : "neg"}" style="font-size:1.4rem">${inc - exp >= 0 ? "+" : "−"}${fcfa(Math.abs(inc - exp))}</span></div><div class="tile"><span class="l">Recettes totales</span><span class="v pos" style="font-size:1.4rem">${fcfa(inc)}</span></div><div class="tile"><span class="l">Dépenses totales</span><span class="v neg" style="font-size:1.4rem">${fcfa(exp)}</span></div></div>
   <div class="grid g2">
-    <section class="card"><div class="row-h"><h2>6 derniers mois</h2><span class="actions"><span class="chip ok">Recettes</span><span class="chip bad">Dépenses</span></span></div>${monthChart()}</section>
-    <section class="card"><div class="row-h"><h2>Dépenses par poste</h2></div>${cats.length ? `<div class="list">${cats.map(([c, v]) => `<div class="li" style="flex-direction:column;align-items:stretch;gap:6px"><div style="display:flex;justify-content:space-between;gap:8px"><span class="t">${esc(c)}</span><b class="num">${fcfa(v)}</b></div><div class="bar"><i style="width:${(v / maxC) * 100}%;background:var(--clay)"></i></div></div>`).join("")}</div>` : `<p class="hint">Aucune dépense enregistrée.</p>`}</section>
+    <section class="card"><div class="row-h"><h2>Évolution (6 derniers mois)</h2><span class="actions"><span class="chip ok">Recettes</span><span class="chip bad">Dépenses</span></span></div>${monthChart()}</section>
+    <section class="card"><div class="row-h"><h2>Répartition des charges</h2></div>${cats.length ? `<div class="list">${cats.map(([c, v]) => `<div class="li" style="flex-direction:column;align-items:stretch;gap:6px"><div style="display:flex;justify-content:space-between;gap:8px"><span class="t">${esc(c)}</span><b class="num">${fcfa(v)}</b></div><div class="bar"><i style="width:${(v / maxC) * 100}%;background:var(--clay)"></i></div></div>`).join("")}</div>` : `<p class="hint">Vos dépenses par poste apparaîtront dès la première saisie.</p>`}</section>
   </div>
-  <section class="card"><div class="row-h"><h2>Opérations</h2><div class="seg" role="group">${[["all", "Toutes"], ["in", "Recettes"], ["out", "Dépenses"]].map(([v, l]) => `<button type="button" data-act="ui" data-k="txf" data-v="${v}" aria-pressed="${ui.txf === v}">${l}</button>`).join("")}</div></div>
-    ${list.length ? `<div class="tablewrap"><table><thead><tr><th>Date</th><th>Libellé</th><th>Poste</th><th class="r">Montant</th><th></th></tr></thead><tbody>${list.map((x) => `<tr><td>${fmtDate(x.date)}</td><td>${esc(x.label || "")}</td><td><span class="chip">${esc(x.cat)}</span></td><td class="r ${x.type === "in" ? "pos" : "neg"}">${x.type === "in" ? "+" : "−"}${fcfa(x.amount)}</td><td class="r"><button class="btn sm ghost" data-act="del" data-kind="tx" data-id="${x.id}" aria-label="Supprimer">${ICON.trash}</button></td></tr>`).join("")}</tbody></table></div>` : emptyBox("coins", "Aucune opération", "Ventes de lapins, achats d'aliment, frais vétérinaires…")}
+  <section class="card"><div class="row-h"><h2>Journal des flux de trésorerie</h2><div class="seg" role="group">${[["all", "Toutes"], ["in", "Recettes"], ["out", "Dépenses"]].map(([v, l]) => `<button type="button" data-act="ui" data-k="txf" data-v="${v}" aria-pressed="${ui.txf === v}">${l}</button>`).join("")}</div></div>
+    ${list.length ? `<div class="tablewrap"><table><thead><tr><th>Date</th><th>Libellé</th><th>Catégorie</th><th class="r">Montant</th><th></th></tr></thead><tbody>${list.map((x) => `<tr><td>${fmtDate(x.date)}</td><td>${esc(x.label || "")}</td><td><span class="chip">${esc(x.cat)}</span></td><td class="r ${x.type === "in" ? "pos" : "neg"}">${x.type === "in" ? "+" : "−"}${fcfa(x.amount)}</td><td class="r"><button class="btn sm ghost" data-act="del" data-kind="tx" data-id="${x.id}" aria-label="Supprimer">${ICON.trash}</button></td></tr>`).join("")}</tbody></table></div>` : emptyBox("coins", "Aucune transaction enregistrée", "Ventes d'animaux, achats d'aliments et intrants vétérinaires.")}
   </section>`;
 };
 function monthChart() {
@@ -810,7 +1128,7 @@ function monthChart() {
   for (let i = 5; i >= 0; i--) { const x = new Date(d.getFullYear(), d.getMonth() - i, 1); months.push({ k: `${x.getFullYear()}-${pad(x.getMonth() + 1)}`, l: MONTHS[x.getMonth()], i: 0, o: 0 }); }
   S.tx.forEach((t) => { const m = months.find((x) => t.date.startsWith(x.k)); if (m) m[t.type === "in" ? "i" : "o"] += Number(t.amount || 0); });
   const max = Math.max(...months.map((m) => Math.max(m.i, m.o)));
-  if (!max) return `<p class="hint">Les barres apparaîtront après vos premières opérations.</p>`;
+  if (!max) return `<p class="hint">Le graphique financier s'affichera dès vos premières entrées/sorties d'argent.</p>`;
   const mag = Math.pow(10, Math.floor(Math.log10(max))); const stepRaw = max / 4; const step = [1, 2, 2.5, 5, 10, 20, 25, 50].map((s) => s * mag / 10).find((s) => s >= stepRaw) || mag;
   const top = Math.ceil(max / step) * step; const Y = (v) => T + (1 - v / top) * (H - T - B); const cw = (W - L - R) / 6, bw = Math.min(22, cw / 3.2);
   const ticks = []; for (let v = 0; v <= top + 1e-6; v += step) ticks.push(v);
@@ -823,13 +1141,13 @@ VIEWS.rappels = () => {
   const open = S.reminders.filter((r) => !r.done).sort((a, b) => a.due.localeCompare(b.due)), closed = S.reminders.filter((r) => r.done).sort((a, b) => b.due.localeCompare(a.due));
   const care = S.treatments.filter((x) => x.next && diff(today(), x.next) >= -14).sort((a, b) => a.next.localeCompare(b.next));
   const herd = S.treatments.filter((x) => !x.rabbit).sort((a, b) => b.date.localeCompare(a.date));
-  return `<div class="head"><div><h1>Rappels & soins</h1><p>Tâches de l'élevage et rappels de traitements</p></div><div class="actions"><button class="btn" data-act="newtreat">${ICON.syringe}Soin collectif</button><button class="btn pri" data-act="newrem">${ICON.plus}Rappel</button></div></div>
+  return `<div class="head"><div><h1>Tâches & Soins Vétérinaires</h1><p>Planning sanitaire et rappels préventifs</p></div><div class="actions"><button class="btn" data-act="newtreat">${ICON.syringe}Soin collectif</button><button class="btn pri" data-act="newrem">${ICON.plus}Nouveau rappel</button></div></div>
   <div class="grid g2">
-    <section class="card"><div class="row-h"><h2>À faire</h2><span class="chip">${open.length}</span></div>${open.length ? `<div class="list">${open.map(remRow).join("")}</div>` : emptyBox("bell", "Aucun rappel", "Nettoyage des cages, commande d'aliment, visite vétérinaire…")}</section>
-    <section class="card"><div class="row-h"><h2>Prochains soins</h2></div>${care.length ? `<div class="list">${care.map((x) => { const n = diff(today(), x.next); return `<div class="li"><span class="ico ${n < 0 ? "bad" : n <= 2 ? "warn" : "info"}">${ICON.syringe}</span><div class="grow"><div class="t">${esc(x.type)} · ${esc(x.product || "")}</div><div class="d">${x.rabbit ? `<a href="#lapin-${x.rabbit}">${esc(rname(x.rabbit))}</a>` : "Tout l'élevage"} · ${fmtDate(x.next)} (${relDay(n)})</div></div></div>`; }).join("")}</div>` : `<p class="hint">Ajoutez une date de rappel lors d'un soin pour la voir ici.</p>`}
-    ${herd.length ? `<h3 style="margin:16px 0 4px">Soins collectifs</h3><div class="list">${herd.map(treatRow).join("")}</div>` : ""}</section>
+    <section class="card"><div class="row-h"><h2>Tâches à traiter</h2><span class="chip">${open.length}</span></div>${open.length ? `<div class="list">${open.map(remRow).join("")}</div>` : emptyBox("bell", "Aucune tâche en attente", "Désinfection, nettoyage des abreuvoirs, réassorts…")}</section>
+    <section class="card"><div class="row-h"><h2>Rappels sanitaires à venir</h2></div>${care.length ? `<div class="list">${care.map((x) => { const n = diff(today(), x.next); return `<div class="li"><span class="ico ${n < 0 ? "bad" : n <= 2 ? "warn" : "info"}">${ICON.syringe}</span><div class="grow"><div class="t">${esc(x.type)} · ${esc(x.product || "")}</div><div class="d">${x.rabbit ? `<a href="#lapin-${x.rabbit}">${esc(rname(x.rabbit))}</a>` : "Tout l'élevage"} · ${fmtDate(x.next)} (${relDay(n)})</div></div></div>`; }).join("")}</div>` : `<p class="hint">Planifiez un rappel lors de la saisie d'un soin pour le voir apparaître ici.</p>`}
+    ${herd.length ? `<h3 style="margin:16px 0 4px">Traitements collectifs du cheptel</h3><div class="list">${herd.map(treatRow).join("")}</div>` : ""}</section>
   </div>
-  ${closed.length ? `<section class="card"><div class="row-h"><h2>Terminés</h2></div><div class="list">${closed.slice(0, 20).map(remRow).join("")}</div></section>` : ""}`;
+  ${closed.length ? `<section class="card"><div class="row-h"><h2>Historique des tâches clôturées</h2></div><div class="list">${closed.slice(0, 20).map(remRow).join("")}</div></section>` : ""}`;
 };
 function remRow(r) {
   const n = diff(today(), r.due);
@@ -838,24 +1156,29 @@ function remRow(r) {
 
 VIEWS.donnees = () => {
   const n = Object.values(S).reduce((s, l) => s + l.length, 0);
-  return `<div class="head"><div><h1>Données & Export PDF</h1><p>${n} fiches enregistrées sur cet appareil</p></div><button class="btn pri" data-act="exportpdf">${ICON.fileText}Télécharger l'inventaire PDF</button></div>
-  <section class="card"><div class="row-h"><h2>Stockage local & Sécurité</h2><span class="chip ok">Actif</span></div>
-    <p>Vos fiches d'élevage sont stockées en sécurité directement dans le stockage local de votre navigateur. Vous pouvez à tout moment télécharger l'inventaire officiel PDF complet ou exporter une sauvegarde JSON.</p></section>
+  return `<div class="head"><div><h1>Données & Export PDF</h1><p>${n} fiches actives dans votre base</p></div><div class="actions"><button class="btn pri" data-act="exportpdf">${ICON.fileText}Générer l'inventaire PDF</button></div></div>
+  <section class="card">
+    <div class="row-h">
+      <h2>Synchronisation & Sécurité des Données</h2>
+      <button class="btn sm" data-act="accountModal">${ICON.cloud}${userSession.isLoggedIn ? "Compte Google Connecté" : "Connexion Compte Google"}</button>
+    </div>
+    <p>Vos données sont protégées et enregistrées instantanément sur cet appareil pour vous garantir un fonctionnement continu avec ou sans connexion Internet. Connectez votre compte Google pour une sauvegarde automatique et permanente dans le Cloud Firebase.</p>
+  </section>
   <div class="grid g2">
-    <section class="card"><h2>Inventaire officiel PDF</h2><p class="hint" style="margin:6px 0 12px">Générez un document PDF professionnel complet avec statistiques du cheptel, liste de reproduction, poids et suivi des gestations.</p><button class="btn pri" data-act="exportpdf">${ICON.fileText}Générer l'inventaire PDF</button></section>
-    <section class="card"><h2>Sauvegarder JSON</h2><p class="hint" style="margin:6px 0 12px">Téléchargez un fichier de sauvegarde pour archiver ou transférer votre élevage sur un autre appareil.</p><button class="btn" data-act="export">${ICON.download}Sauvegarder JSON</button></section>
-    <section class="card"><h2>Restaurer</h2><p class="hint" style="margin:6px 0 12px">Importez un fichier exporté depuis ABV Farm. Les fiches sont ajoutées ou mises à jour.</p><button class="btn" data-act="import">${ICON.upload}Importer un fichier</button></section>
-    <section class="card"><h2>Exemple d'élevage</h2><p class="hint" style="margin:6px 0 12px">Chargez une ferme fictive pour découvrir l'application. Effaçable en un clic.</p><div class="actions"><button class="btn" data-act="loadsample">Charger l'exemple</button><button class="btn ghost" data-act="clearsamples">Effacer l'exemple</button></div></section>
-    <section class="card full"><h2>Tout effacer</h2><p class="hint" style="margin:6px 0 12px">Supprime définitivement toutes les fiches de cet élevage.</p><button class="btn danger" data-act="wipe">${ICON.trash}Effacer l'élevage</button></section>
+    <section class="card"><h2>Application Téléphone (PWA)</h2><p class="hint" style="margin:6px 0 12px">Installez ABV Farm directement sur l'écran d'accueil de votre smartphone ou tablette pour l'ouvrir comme une application native sans ouvrir le navigateur.</p><button class="btn pri" onclick="installPWA()">${ICON.phone}Installer sur mon téléphone</button></section>
+    <section class="card"><h2>Rapport officiel PDF</h2><p class="hint" style="margin:6px 0 12px">Document PDF complet prêt à l'impression : synthèse d'élevage, liste détaillée des lapins, gestations et indicateurs clés.</p><button class="btn pri" data-act="exportpdf">${ICON.fileText}Télécharger l'inventaire PDF</button></section>
+    <section class="card"><h2>Sauvegarde fichier JSON</h2><p class="hint" style="margin:6px 0 12px">Archive locale complète de votre élevage pour sauvegarde externe ou transfert de machine.</p><button class="btn" data-act="export">${ICON.download}Exporter le fichier de sauvegarde</button></section>
+    <section class="card"><h2>Restaurer à partir d'un fichier</h2><p class="hint" style="margin:6px 0 12px">Importez une sauvegarde au format JSON pour restaurer ou fusionner vos données d'élevage.</p><button class="btn" data-act="import">${ICON.upload}Importer une sauvegarde</button></section>
+    <section class="card full"><h2>Réinitialisation du cheptel</h2><p class="hint" style="margin:6px 0 12px">Supprime l'intégralité des fiches de cet élevage. Cette action est irréversible.</p><button class="btn danger" data-act="wipe">${ICON.trash}Réinitialiser l'élevage</button></section>
   </div>`;
 };
 
-/* ---------- PDF Export (Herd inventory + stats) ---------- */
+/* ---------- PDF Export ---------- */
 function exportHerdPDF() {
   try {
     const { jsPDF } = window.jspdf;
     if (!jsPDF) {
-      toast("Module PDF en cours de chargement... Réessayez.");
+      toast("Chargement du générateur PDF... Veuillez patienter.");
       return;
     }
     const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
@@ -872,31 +1195,31 @@ function exportHerdPDF() {
     const bal = monthTx.reduce((s, x) => s + (x.type === "in" ? 1 : -1) * (Number(x.amount) || 0), 0);
 
     // Header banner
-    doc.setFillColor(62, 90, 71); // #3E5A47 sage
+    doc.setFillColor(62, 90, 71);
     doc.rect(0, 0, 210, 32, "F");
 
     doc.setTextColor(255, 255, 255);
-    doc.setFontSize(20);
+    doc.setFontSize(18);
     doc.setFont("helvetica", "bold");
-    doc.text("ABV FARM • INVENTAIRE DU CHEPTEL", 14, 16);
+    doc.text(`${userSession.farmName.toUpperCase()} • INVENTAIRE DU CHEPTEL`, 14, 16);
 
     doc.setFontSize(9);
     doc.setFont("helvetica", "normal");
-    doc.text(`Élevage Cunicole Professionnel  |  Édité le ${fmtDate(today())}`, 14, 25);
+    doc.text(`Registre Cunicole Officiel | Responsable : ${userSession.managerName} | Date : ${fmtDate(today())}`, 14, 25);
 
-    // Key stats summary block
+    // Summary block
     doc.setTextColor(36, 48, 42);
-    doc.setFontSize(13);
+    doc.setFontSize(12);
     doc.setFont("helvetica", "bold");
-    doc.text("1. Synthèse de l'élevage", 14, 42);
+    doc.text("1. Synthèse Globale de l'Élevage", 14, 42);
 
     const statsData = [
-      ["Lapins actifs", `${act.length} sujets (${males} mâles, ${fem} femelles)`],
+      ["Effectif reproducteur actif", `${act.length} sujets (${males} mâles ♂, ${fem} femelles ♀)`],
       ["Reproducteurs aptes (≥ 5 mois)", `${mature} sujets`],
       ["Gestations en cours", `${gest.length} portée(s) attendue(s)`],
       ["Lapins en engraissement", `${fat} lapereaux`],
       ["Stock d'aliment disponible", `${nf1.format(stock)} kg (${rt.grams ? Math.round(stock / (rt.grams / 1000)) : "—"} jours d'autonomie)`],
-      ["Solde financier du mois", `${bal >= 0 ? "+" : "−"}${fcfa(Math.abs(bal))}`]
+      ["Trésorerie mensuelle nette", `${bal >= 0 ? "+" : "−"}${fcfa(Math.abs(bal))}`]
     ];
 
     doc.autoTable({
@@ -904,16 +1227,16 @@ function exportHerdPDF() {
       body: statsData,
       theme: "plain",
       styles: { fontSize: 9.5, cellPadding: 2.2, font: "helvetica" },
-      columnStyles: { 0: { fontStyle: "bold", width: 65, textColor: [91, 104, 98] }, 1: { textColor: [36, 48, 42] } },
+      columnStyles: { 0: { fontStyle: "bold", width: 70, textColor: [91, 104, 98] }, 1: { textColor: [36, 48, 42] } },
       margin: { left: 14, right: 14 }
     });
 
     // Rabbits inventory table
     const startRabbits = doc.lastAutoTable.finalY + 10;
-    doc.setFontSize(13);
+    doc.setFontSize(12);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(36, 48, 42);
-    doc.text(`2. Liste détaillée des lapins (${act.length} actifs)`, 14, startRabbits);
+    doc.text(`2. Fiches détaillées des reproducteurs (${act.length} sujets)`, 14, startRabbits);
 
     const rabbitsRows = act.map((r) => {
       const w = lastWeight(r.id);
@@ -933,21 +1256,21 @@ function exportHerdPDF() {
 
     doc.autoTable({
       startY: startRabbits + 4,
-      head: [["Nom/N°", "Sexe", "Race", "Cage", "Naiss.", "Âge", "Poids", "GMQ", "Statut"]],
-      body: rabbitsRows,
+      head: [["Nom/Code", "Sexe", "Race", "Cage", "Naiss.", "Âge", "Dernier poids", "GMQ", "Statut"]],
+      body: rabbitsRows.length ? rabbitsRows : [["Aucun lapin enregistré", "—", "—", "—", "—", "—", "—", "—", "—"]],
       theme: "striped",
       headStyles: { fillColor: [62, 90, 71], textColor: [255, 255, 255], fontStyle: "bold", fontSize: 8.5 },
-      styles: { fontSize: 8, cellPadding: 2, font: "helvetica" },
+      styles: { fontSize: 8, cellPadding: 2.2, font: "helvetica" },
       margin: { left: 14, right: 14 }
     });
 
-    // Ongoing matings table if any
+    // Matings table
     if (gest.length > 0) {
       const startMatings = doc.lastAutoTable.finalY + 10;
-      doc.setFontSize(13);
+      doc.setFontSize(12);
       doc.setFont("helvetica", "bold");
       doc.setTextColor(36, 48, 42);
-      doc.text("3. Gestations et mises bas attendues", 14, startMatings);
+      doc.text("3. Suivi des gestations actives", 14, startMatings);
 
       const matingsRows = gest.map((m) => {
         const left = diff(today(), m.due);
@@ -967,30 +1290,156 @@ function exportHerdPDF() {
         body: matingsRows,
         theme: "striped",
         headStyles: { fillColor: [185, 95, 69], textColor: [255, 255, 255], fontStyle: "bold", fontSize: 8.5 },
-        styles: { fontSize: 8, cellPadding: 2, font: "helvetica" },
+        styles: { fontSize: 8, cellPadding: 2.2, font: "helvetica" },
         margin: { left: 14, right: 14 }
       });
     }
 
-    // Footer page number
     const pageCount = doc.internal.getNumberOfPages();
     for (let i = 1; i <= pageCount; i++) {
       doc.setPage(i);
       doc.setFontSize(8);
       doc.setTextColor(150, 150, 150);
-      doc.text(`ABV Farm • Page ${i} sur ${pageCount} • Généré automatiquement`, 105, 290, { align: "center" });
+      doc.text(`${userSession.farmName} • Document officiel d'élevage • Page ${i} sur ${pageCount}`, 105, 290, { align: "center" });
     }
 
-    const filename = `ABV_Farm_Inventaire_${today()}.pdf`;
+    const filename = `Inventaire_${userSession.farmName.replace(/\s+/g, '_')}_${today()}.pdf`;
     doc.save(filename);
-    toast("Inventaire PDF téléchargé avec succès !");
+    toast("Inventaire PDF téléchargé !");
   } catch (err) {
-    console.error("PDF generation failed:", err);
+    console.error("PDF generation error:", err);
     toast("Erreur lors de la génération du PDF.");
   }
 }
 
-/* ---------- Modal & forms ---------- */
+/* ---------- Account Modal (Google Auth & Cloud Settings) ---------- */
+function accountModal() {
+  const isLogged = userSession.isLoggedIn;
+  const body = `
+  <div style="display:flex;flex-direction:column;gap:16px">
+    <div style="display:flex;align-items:center;gap:12px;background:var(--surface-2);padding:14px;border-radius:14px">
+      <div style="width:48px;height:48px;border-radius:50%;background:var(--sage);color:#fff;display:grid;place-items:center;font-size:1.3rem;font-weight:700;overflow:hidden">
+        ${userSession.photoUrl ? `<img src="${esc(userSession.photoUrl)}" style="width:100%;height:100%;object-fit:cover" referrerpolicy="no-referrer">` : esc((userSession.farmName || "A").charAt(0).toUpperCase())}
+      </div>
+      <div style="min-width:0;flex:1">
+        <b style="font-size:1.05rem;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(userSession.farmName || "ABV Farm")}</b>
+        <span class="hint">${isLogged ? esc(userSession.email || "Compte Google Connecté") : "Mode local autonome (sans compte Google)"}</span>
+      </div>
+    </div>
+
+    <!-- Sync status banner -->
+    <div class="banner ${isLogged && isOnline ? "ok" : isOnline ? "info" : "warn"}">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span class="dot ${isLogged && isOnline ? "on" : isOnline ? "local" : "offline"}"></span>
+        <span>${isLogged 
+          ? (isOnline ? "Compte Google Cloud actif • Synchronisé en temps réel" : "Mode Hors-Ligne • Enregistrement local garanti")
+          : (isOnline ? "Stockage local actif (Connectez Google pour sauvegarder dans le Cloud)" : "Mode Hors-Ligne (Stockage local garanti)")}</span>
+      </div>
+    </div>
+
+    ${!isLogged ? `
+    <!-- Google Sign-In Card -->
+    <div class="card" style="box-shadow:none;border-color:var(--line);display:flex;flex-direction:column;gap:12px">
+      <h3>Connexion via Compte Google</h3>
+      <p class="hint">Connectez-vous en un clic avec votre compte Google pour sauvegarder automatiquement tout votre élevage dans le Cloud Firebase. Vos données restent accessibles depuis votre téléphone ou votre ordinateur, même hors-ligne.</p>
+      
+      <button type="button" class="btn" id="btnGoogleSignIn" style="background:#FFFFFF;color:#3c4043;border:1.5px solid #dadce0;font-weight:600;display:flex;align-items:center;justify-content:center;gap:10px;padding:11px 16px;width:100%;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.08);cursor:pointer">
+        <svg width="20" height="20" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.616z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/><path fill="#FBBC05" d="M3.964 10.707c-.18-.54-.282-1.117-.282-1.707s.102-1.167.282-1.707V4.961H.957C.347 6.175 0 7.55 0 9s.348 2.825.957 4.039l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.961L3.964 7.293C4.672 5.166 6.656 3.58 9 3.58z"/></svg>
+        <span style="font-size:0.95rem">Continuer avec Google</span>
+      </button>
+    </div>
+    ` : `
+    <!-- Logged in controls -->
+    <div class="card" style="box-shadow:none;border-color:var(--line)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <h3>Compte Google</h3>
+        <span class="chip ok">Connecté</span>
+      </div>
+      <p style="font-size:0.9rem"><b>${esc(userSession.managerName)}</b></p>
+      <p class="hint">${esc(userSession.email)}</p>
+      ${userSession.lastSync ? `<p class="hint" style="margin-top:6px">Dernière synchronisation Cloud : ${userSession.lastSync}</p>` : ""}
+      
+      <div class="actions" style="margin-top:14px;justify-content:space-between">
+        <button class="btn sm pri" id="btnForceSync">${ICON.cloud}Synchroniser maintenant</button>
+        <button class="btn sm danger" id="btnLogout">Déconnexion</button>
+      </div>
+    </div>
+    `}
+
+    <!-- PWA Install Card -->
+    <div class="card" style="box-shadow:none;border-color:var(--line)">
+      <h3 style="margin-bottom:6px">Installer l'application sur smartphone</h3>
+      <p class="hint" style="margin-bottom:12px">Installez ABV Farm sur l'écran d'accueil de votre téléphone pour l'utiliser comme une vraie application sans passer par le navigateur.</p>
+      <button class="btn pri" onclick="installPWA()" style="width:100%">${ICON.phone}Installer sur mon téléphone</button>
+    </div>
+
+    <!-- Farm Profile settings -->
+    <div class="card" style="box-shadow:none;border-color:var(--line)">
+      <h3 style="margin-bottom:10px">Informations de l'exploitation</h3>
+      <div class="field" style="margin-bottom:10px">
+        <label>Nom de votre élevage</label>
+        <input type="text" id="accFarmName" value="${esc(userSession.farmName || "ABV Farm")}">
+      </div>
+      <div class="field">
+        <label>Nom de l'éleveur responsable</label>
+        <input type="text" id="accManagerName" value="${esc(userSession.managerName || "Éleveur ABV")}">
+      </div>
+      <button class="btn sm" id="btnSaveFarm" style="margin-top:10px;align-self:flex-start">Enregistrer</button>
+    </div>
+  </div>`;
+
+  sheet("Compte Google & Application Téléphone", body);
+
+  const btnGoogle = $("#btnGoogleSignIn");
+  if (btnGoogle) {
+    btnGoogle.addEventListener("click", () => {
+      signInWithGoogle();
+    });
+  }
+
+  const btnSaveFarm = $("#btnSaveFarm");
+  if (btnSaveFarm) {
+    btnSaveFarm.addEventListener("click", () => {
+      const f = $("#accFarmName").value.trim();
+      const m = $("#accManagerName").value.trim();
+      saveUserSession({ farmName: f || "ABV Farm", managerName: m || "Éleveur ABV" });
+      toast("Paramètres enregistrés");
+      closeModal();
+    });
+  }
+
+  const btnLogout = $("#btnLogout");
+  if (btnLogout) {
+    btnLogout.addEventListener("click", async () => {
+      if (window.firebaseAuth) {
+        await window.firebaseAuth.signOut().catch(() => {});
+      }
+      saveUserSession({ isLoggedIn: false, email: "", uid: null, photoUrl: null });
+      toast("Vous êtes déconnecté");
+      closeModal();
+    });
+  }
+
+  const btnForceSync = $("#btnForceSync");
+  if (btnForceSync) {
+    btnForceSync.addEventListener("click", async () => {
+      btnForceSync.disabled = true;
+      toast("Synchronisation Cloud en cours…");
+      const all = getLocalData();
+      if (window.firebaseDb && userSession.uid) {
+        for (const [k, doc] of Object.entries(all)) {
+          await window.firebaseDb.collection("users").doc(userSession.uid).collection("cheptel").doc(k).set(doc).catch(() => {});
+        }
+      }
+      userSession.lastSync = new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+      saveUserSession();
+      toast("Base de données Cloud synchronisée !");
+      closeModal();
+    });
+  }
+}
+
+/* ---------- Modals & Forms ---------- */
 function closeModal() { $("#modal").innerHTML = ""; document.body.style.overflow = ""; }
 function sheet(title, body) {
   $("#modal").innerHTML = `<div class="overlay" data-act="overlay"><div class="sheet" role="dialog" aria-modal="true" aria-label="${esc(title)}"><div class="sh"><h2>${esc(title)}</h2><button class="btn ghost sm" data-act="close" aria-label="Fermer">${ICON.x}</button></div>${body}</div></div>`;
@@ -1022,7 +1471,7 @@ function form({ title, fields, values = {}, submit = "Enregistrer", onSubmit, on
   setTimeout(() => fm.querySelector("input:not([type=checkbox]),select")?.focus(), 30);
 }
 function confirmBox(text, label, onYes) {
-  sheet("Confirmer", `<p>${esc(text)}</p><div class="actions" style="justify-content:flex-end"><button class="btn ghost" data-act="close">Annuler</button><button class="btn pri" id="yes" style="background:var(--bad);color:var(--surface)">${esc(label)}</button></div>`);
+  sheet("Confirmer l'opération", `<p>${esc(text)}</p><div class="actions" style="justify-content:flex-end"><button class="btn ghost" data-act="close">Annuler</button><button class="btn pri" id="yes" style="background:var(--bad);color:var(--surface)">${esc(label)}</button></div>`);
   $("#yes").addEventListener("click", async () => { $("#yes").disabled = true; await onYes(); closeModal(); });
 }
 let toastT; function toast(m) { const t = $("#toast"); t.textContent = m; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => (t.hidden = true), 3200); }
@@ -1030,73 +1479,73 @@ const rabOpts = (filter, none = "— Aucun —") => [["", none], ...S.rabbits.fi
 
 function rabbitForm(r) {
   const editing = !!r; r = r || {};
-  form({ title: editing ? `Modifier ${r.name}` : "Nouveau lapin", values: r, submit: editing ? "Enregistrer" : "Ajouter",
+  form({ title: editing ? `Modifier ${r.name}` : "Nouveau reproducteur", values: r, submit: editing ? "Enregistrer" : "Ajouter",
     fields: [
-      { k: "name", label: "Nom ou numéro", req: true, ph: "ex. Caramel, F-12" },
+      { k: "name", label: "Nom ou numéro d'identification", req: true, ph: "ex. Éclair, F-04, B-12" },
       { k: "sex", label: "Sexe", type: "select", opts: [["Female", "♀ Femelle"], ["Male", "♂ Mâle"], ["Indéterminé", "Indéterminé"]], def: "Female" },
       { k: "birth", label: "Date de naissance", type: "date", req: true, def: today() },
-      { k: "breed", label: "Race", ph: "ex. Néo-Zélandais, Californien" },
-      { k: "cage", label: "Cage", ph: "ex. B-04" },
+      { k: "breed", label: "Race / Souche", ph: "ex. Néo-Zélandais, Californien, Papillon" },
+      { k: "cage", label: "Numéro de cage / loge", ph: "ex. Cage 03, Parc A" },
       { k: "weight", label: editing ? "Nouvelle pesée (kg, optionnel)" : "Poids actuel (kg)", type: "number", step: "0.01", min: 0 },
       { k: "father", label: "Père", type: "select", opts: rabOpts((x) => x.sex === "Male" && x.id !== r.id) },
       { k: "mother", label: "Mère", type: "select", opts: rabOpts((x) => x.sex === "Female" && x.id !== r.id) },
-      { k: "notes", label: "Notes", type: "textarea", full: true },
+      { k: "notes", label: "Notes & antécédents", type: "textarea", full: true },
     ],
     onSubmit: async (v) => {
       const w = v.weight; delete v.weight;
       const obj = { ...r, ...v, status: r.status || "Actif" };
       const ok = await save("rabbit", obj); if (!ok) return false;
-      if (w !== "" && w > 0) await save("weight", { rabbit: obj.id, date: today(), kg: w, notes: editing ? "" : "Poids à l'enregistrement" });
-      toast(editing ? "Fiche mise à jour" : `${obj.name} ajouté`); if (!editing) go("lapin-" + obj.id);
+      if (w !== "" && w > 0) await save("weight", { rabbit: obj.id, date: today(), kg: w, notes: editing ? "" : "Poids initial" });
+      toast(editing ? "Fiche mise à jour" : `${obj.name} enregistré`); if (!editing) go("lapin-" + obj.id);
     } });
 }
 function matingForm(preId) {
   const pre = rab(preId); const males = (x) => x.sex === "Male" && isActive(x), females = (x) => x.sex === "Female" && isActive(x);
-  if (!S.rabbits.some(males) || !S.rabbits.some(females)) { toast("Il faut au moins un mâle et une femelle actifs."); return; }
-  form({ title: "Nouvelle saillie", submit: "Enregistrer la saillie",
+  if (!S.rabbits.some(males) || !S.rabbits.some(females)) { toast("Il faut au moins un mâle et une femelle actifs enregistrés."); return; }
+  form({ title: "Enregistrer une saillie", submit: "Valider la saillie",
     values: { male: pre?.sex === "Male" ? pre.id : "", female: pre?.sex === "Female" ? pre.id : "" },
     fields: [
-      { k: "female", label: "Femelle", type: "select", req: true, opts: rabOpts(females, "Choisir…") },
-      { k: "male", label: "Mâle", type: "select", req: true, opts: rabOpts(males, "Choisir…") },
-      { k: "date", label: "Date de la saillie", type: "date", req: true, def: today() },
+      { k: "female", label: "Femelle (Mère)", type: "select", req: true, opts: rabOpts(females, "Sélectionner la femelle…") },
+      { k: "male", label: "Mâle (Père)", type: "select", req: true, opts: rabOpts(males, "Sélectionner le mâle…") },
+      { k: "date", label: "Date de l'accouplement", type: "date", req: true, def: today() },
       { k: "duehint", type: "html" },
       { k: "risk", type: "html" },
       { k: "notes", label: "Notes", type: "textarea", full: true },
     ],
     onInput: (v, fm) => {
       const due = v.date ? addDays(v.date, GESTATION) : null;
-      $("#f_duehint").innerHTML = due ? `<p class="hint">Palpation du ${fmtShort(addDays(v.date, 10))} au ${fmtShort(addDays(v.date, 14))} · boîte à nid le ${fmtShort(addDays(v.date, 28))} · <b>mise bas prévue le ${fmtDate(due)}</b></p>` : "";
-      if (!v.male || !v.female) { $("#f_risk").innerHTML = `<p class="hint">Choisissez les deux reproducteurs pour vérifier la consanguinité.</p>`; return; }
+      $("#f_duehint").innerHTML = due ? `<p class="hint">Palpation : ${fmtShort(addDays(v.date, 10))} au ${fmtShort(addDays(v.date, 14))} · Boîte à nid : ${fmtShort(addDays(v.date, 28))} · <b>Mise bas prévue le ${fmtDate(due)}</b></p>` : "";
+      if (!v.male || !v.female) { $("#f_risk").innerHTML = `<p class="hint">Sélectionnez les deux reproducteurs pour calculer la consanguinité.</p>`; return; }
       const f = offspringF(v.male, v.female), rk = riskOf(f); const fe = rab(v.female), ma = rab(v.male);
       const young = [fe, ma].filter((x) => age(x) < MATURE_DAYS).map((x) => x.name);
-      $("#f_risk").innerHTML = `<div class="risk ${rk.lvl}">${ICON[rk.lvl === "ok" ? "shield" : "alert"].replace("<svg", '<svg width="26" height="26" style="flex:none"')}<div><b class="num">F = ${nf2.format(f)} %</b> · ${rk.label}<div style="font-size:.85rem">${rk.tip}</div></div></div>${young.length ? `<p class="hint" style="margin-top:6px;color:var(--warn)">Attention : ${esc(young.join(", "))} n'a pas encore 5 mois.</p>` : ""}`;
+      $("#f_risk").innerHTML = `<div class="risk ${rk.lvl}">${ICON[rk.lvl === "ok" ? "shield" : "alert"].replace("<svg", '<svg width="26" height="26" style="flex:none"')}<div><b class="num">F = ${nf2.format(f)} %</b> · ${rk.label}<div style="font-size:.85rem">${rk.tip}</div></div></div>${young.length ? `<p class="hint" style="margin-top:6px;color:var(--warn)">Attention : ${esc(young.join(", "))} a moins de 5 mois.</p>` : ""}`;
     },
     onSubmit: async (v) => { const ok = await save("mating", { male: v.male, female: v.female, date: v.date, due: addDays(v.date, GESTATION), status: "Accouplé", notes: v.notes }); if (ok) toast("Saillie enregistrée"); return ok; } });
 }
 function kindleForm(id) {
   const m = byId(S.matings, id); if (!m) return;
-  form({ title: `Mise bas de ${rname(m.female)}`, submit: "Enregistrer la mise bas", values: { birthDate: today() },
-    fields: [{ k: "birthDate", label: "Date de mise bas", type: "date", req: true }, { k: "alive", label: "Nés vivants", type: "number", min: 0, req: true, def: 8 }, { k: "dead", label: "Morts-nés", type: "number", min: 0, def: 0 }, { k: "notes", label: "Notes", type: "textarea", full: true, def: m.notes }],
+  form({ title: `Mise bas de ${rname(m.female)}`, submit: "Enregistrer la portée", values: { birthDate: today() },
+    fields: [{ k: "birthDate", label: "Date de mise bas", type: "date", req: true }, { k: "alive", label: "Nombre de nés vivants", type: "number", min: 0, req: true, def: 8 }, { k: "dead", label: "Nombre de morts-nés", type: "number", min: 0, def: 0 }, { k: "notes", label: "Observations", type: "textarea", full: true, def: m.notes }],
     onSubmit: async (v) => { const ok = await save("mating", { ...m, ...v, status: "Mise bas" }); if (ok) toast(`Mise bas enregistrée : ${v.alive} lapereaux`); return ok; } });
 }
 function weightForm(rid) {
-  form({ title: `Pesée de ${rname(rid)}`, fields: [{ k: "kg", label: "Poids (kg)", type: "number", step: "0.01", min: 0, req: true, def: lastWeight(rid) ?? "" }, { k: "date", label: "Date", type: "date", req: true, def: today() }, { k: "notes", label: "Note", full: true }],
+  form({ title: `Pesée de ${rname(rid)}`, fields: [{ k: "kg", label: "Poids mesuré (kg)", type: "number", step: "0.01", min: 0, req: true, def: lastWeight(rid) ?? "" }, { k: "date", label: "Date de pesée", type: "date", req: true, def: today() }, { k: "notes", label: "Note", full: true }],
     onSubmit: async (v) => { const ok = await save("weight", { rabbit: rid, ...v }); if (ok) toast("Pesée enregistrée"); return ok; } });
 }
 function treatForm(rid) {
-  form({ title: rid ? `Soin pour ${rname(rid)}` : "Soin collectif", fields: [
-      { k: "type", label: "Type", type: "select", opts: TREAT_TYPES }, { k: "product", label: "Produit", req: true, ph: "ex. Ivermectine" },
-      { k: "date", label: "Date", type: "date", req: true, def: today() }, { k: "dosage", label: "Dosage", ph: "ex. 0,5 mL" },
-      { k: "withdrawal", label: "Délai d'attente (jours)", type: "number", min: 0, def: 0, hint: "Pas de vente ni d'abattage pendant ce délai." },
-      { k: "next", label: "Prochain rappel", type: "date" }, { k: "notes", label: "Notes", type: "textarea", full: true }],
+  form({ title: rid ? `Soin pour ${rname(rid)}` : "Soin collectif du cheptel", fields: [
+      { k: "type", label: "Type d'intervention", type: "select", opts: TREAT_TYPES }, { k: "product", label: "Nom du produit / médicament", req: true, ph: "ex. Ivermectine 1%, Vaccin VHD" },
+      { k: "date", label: "Date d'administration", type: "date", req: true, def: today() }, { k: "dosage", label: "Dosage / mode", ph: "ex. 0,5 mL sous-cutané" },
+      { k: "withdrawal", label: "Délai d'attente (jours)", type: "number", min: 0, def: 0, hint: "Aucune vente ni abattage autorisés pendant ce délai." },
+      { k: "next", label: "Date du prochain rappel", type: "date" }, { k: "notes", label: "Notes", type: "textarea", full: true }],
     onSubmit: async (v) => { const ok = await save("treatment", { rabbit: rid || "", ...v, withdrawal: Number(v.withdrawal) || 0 }); if (ok) toast("Soin enregistré"); return ok; } });
 }
 function itemForm() {
-  form({ title: "Nouvel achat", fields: [
-      { k: "name", label: "Article", req: true, ph: "ex. Granulés lapin 25 kg" }, { k: "cat", label: "Catégorie", type: "select", opts: INV_CATS },
+  form({ title: "Enregistrer un achat / approvisionnement", fields: [
+      { k: "name", label: "Désignation de l'article", req: true, ph: "ex. Granulés croissance 25 kg, Vermifuge" }, { k: "cat", label: "Catégorie", type: "select", opts: INV_CATS },
       { k: "qty", label: "Quantité", type: "number", step: "0.01", min: 0, req: true, def: 1 }, { k: "unit", label: "Unité", type: "select", opts: UNITS, def: "sac 25 kg" },
-      { k: "price", label: "Prix total (FCFA)", type: "number", min: 0, def: "" }, { k: "date", label: "Date d'achat", type: "date", req: true, def: today() },
-      { k: "mktx", label: "Ajouter aussi cette dépense aux finances", type: "check", def: true }, { k: "notes", label: "Notes", type: "textarea", full: true }],
+      { k: "price", label: "Coût total (FCFA)", type: "number", min: 0, def: "" }, { k: "date", label: "Date d'achat", type: "date", req: true, def: today() },
+      { k: "mktx", label: "Imputer directement aux dépenses financières", type: "check", def: true }, { k: "notes", label: "Détails fournisseur", type: "textarea", full: true }],
     onSubmit: async (v) => {
       const mk = v.mktx; delete v.mktx; const ok = await save("item", { ...v, price: Number(v.price) || 0 }); if (!ok) return false;
       if (mk && Number(v.price) > 0) await save("tx", { type: "out", cat: v.cat === "Nourriture" ? "Aliment" : v.cat === "Médicament" ? "Santé" : v.cat === "Matériel" ? "Matériel" : "Autre dépense", amount: Number(v.price), date: v.date, label: v.name });
@@ -1104,94 +1553,59 @@ function itemForm() {
     } });
 }
 function feedForm(grams) {
-  form({ title: "Distribution d'aliment", fields: [{ k: "kg", label: "Quantité distribuée (kg)", type: "number", step: "0.1", min: 0, req: true, def: grams ? +(grams / 1000).toFixed(1) : "", hint: grams ? `Ration recommandée : ${nf1.format(grams / 1000)} kg` : "" }, { k: "date", label: "Date", type: "date", req: true, def: today() }, { k: "notes", label: "Note", full: true }],
+  form({ title: "Distribution d'aliment", fields: [{ k: "kg", label: "Quantité totale distribuée (kg)", type: "number", step: "0.1", min: 0, req: true, def: grams ? +(grams / 1000).toFixed(1) : "", hint: grams ? `Ration conseillée pour le cheptel : ${nf1.format(grams / 1000)} kg` : "" }, { k: "date", label: "Date de distribution", type: "date", req: true, def: today() }, { k: "notes", label: "Remarques", full: true }],
     onSubmit: async (v) => { const ok = await save("feed", { grams: Math.round(v.kg * 1000), date: v.date, notes: v.notes }); if (ok) toast(`${nf1.format(v.kg)} kg déduits du stock`); return ok; } });
 }
 function txForm(type) {
-  form({ title: type === "in" ? "Nouvelle recette" : "Nouvelle dépense", fields: [
-      { k: "amount", label: "Montant (FCFA)", type: "number", min: 0, req: true }, { k: "cat", label: "Poste", type: "select", opts: type === "in" ? TX_IN : TX_OUT },
-      { k: "label", label: "Libellé", full: true, ph: type === "in" ? "ex. Vente de 6 lapins de chair" : "ex. Visite vétérinaire" }, { k: "date", label: "Date", type: "date", req: true, def: today() }],
+  form({ title: type === "in" ? "Enregistrer une recette" : "Enregistrer une dépense", fields: [
+      { k: "amount", label: "Montant (FCFA)", type: "number", min: 0, req: true }, { k: "cat", label: "Poste comptable", type: "select", opts: type === "in" ? TX_IN : TX_OUT },
+      { k: "label", label: "Libellé de l'opération", full: true, ph: type === "in" ? "ex. Vente de 8 lapins de chair" : "ex. Achat de mangeoires" }, { k: "date", label: "Date", type: "date", req: true, def: today() }],
     onSubmit: async (v) => { const ok = await save("tx", { ...v, type }); if (ok) toast(type === "in" ? "Recette enregistrée" : "Dépense enregistrée"); return ok; } });
 }
 function batchForm(matingId, b) {
   const m = matingId ? byId(S.matings, matingId) : null; b = b || {};
   const wean = b.weaning || (m?.birthDate ? addDays(m.birthDate, WEANING) : today());
   const litters = [["", "— Aucune —"], ...S.matings.filter((x) => x.status === "Mise bas").map((x) => [x.id, `${rname(x.female)} · ${fmtShort(x.birthDate || x.due)}`])];
-  form({ title: b.id ? `Modifier ${b.code}` : "Nouveau lot d'engraissement", values: { ...b, mating: b.mating ?? matingId ?? "" }, fields: [
+  form({ title: b.id ? `Modifier le lot ${b.code}` : "Nouveau lot en engraissement", values: { ...b, mating: b.mating ?? matingId ?? "" }, fields: [
       { k: "code", label: "Code du lot", req: true, def: `LOT-${today().slice(0, 7)}-${String.fromCharCode(65 + (S.batches.length % 26))}` },
       { k: "mating", label: "Portée d'origine", type: "select", opts: litters },
       { k: "weaning", label: "Date de sevrage", type: "date", req: true, def: wean },
-      { k: "initial", label: "Nombre au sevrage", type: "number", min: 1, req: true, def: m ? Number(m.alive) || "" : "" },
-      { k: "cage", label: "Cage / parc", ph: "ex. Parc 2" }, { k: "avgWeight", label: "Poids moyen (g)", type: "number", min: 0 },
-      { k: "target", label: "Vente prévue", type: "date", def: b.target || addDays(wean, FATTEN_DAYS), hint: `Par défaut : sevrage + ${FATTEN_DAYS} jours` },
+      { k: "initial", label: "Nombre de sujets au sevrage", type: "number", min: 1, req: true, def: m ? Number(m.alive) || "" : "" },
+      { k: "cage", label: "Cage ou parc", ph: "ex. Parc 1, Cage E" }, { k: "avgWeight", label: "Poids moyen estimé (g)", type: "number", min: 0 },
+      { k: "target", label: "Date visée de commercialisation", type: "date", def: b.target || addDays(wean, FATTEN_DAYS) },
       { k: "status", label: "Statut", type: "select", opts: ["Actif", "Quarantaine", "Vendu"], def: "Actif" }],
     onSubmit: async (v) => { const obj = { ...b, ...v, target: v.target || addDays(v.weaning, FATTEN_DAYS), current: b.id ? b.current : v.initial, deaths: b.deaths || 0 }; const ok = await save("batch", obj); if (ok) { toast("Lot enregistré"); go("engraissement"); } return ok; } });
 }
 function sellForm(id) {
   const b = byId(S.batches, id); if (!b) return;
-  form({ title: `Vente — ${b.code}`, submit: "Enregistrer la vente", fields: [{ k: "n", label: "Nombre vendu", type: "number", min: 1, req: true, def: b.current }, { k: "price", label: "Montant total (FCFA)", type: "number", min: 0, req: true }, { k: "date", label: "Date", type: "date", req: true, def: today() }],
+  form({ title: `Vente d'animaux — ${b.code}`, submit: "Enregistrer la vente", fields: [{ k: "n", label: "Nombre d'animaux vendus", type: "number", min: 1, req: true, def: b.current }, { k: "price", label: "Montant total perçu (FCFA)", type: "number", min: 0, req: true }, { k: "date", label: "Date de transaction", type: "date", req: true, def: today() }],
     onSubmit: async (v) => {
       const left = Math.max(0, (Number(b.current) || 0) - v.n);
       const ok = await save("batch", { ...b, current: left, status: left === 0 ? "Vendu" : b.status }); if (!ok) return false;
-      if (v.price > 0) await save("tx", { type: "in", cat: "Vente chair", amount: v.price, date: v.date, label: `Vente ${v.n} lapins — ${b.code}` });
-      toast(left ? `${v.n} vendus, ${left} restants` : "Lot entièrement vendu");
+      if (v.price > 0) await save("tx", { type: "in", cat: "Vente chair", amount: v.price, date: v.date, label: `Vente ${v.n} lapins (${b.code})` });
+      toast(left ? `${v.n} vendus, ${left} restants dans le lot` : "Lot intégralement commercialisé");
     } });
 }
 function remForm() {
-  form({ title: "Nouveau rappel", fields: [{ k: "title", label: "Tâche", req: true, full: true, ph: "ex. Désinfecter les cages" }, { k: "due", label: "Échéance", type: "date", req: true, def: today() }, { k: "prio", label: "Priorité", type: "select", opts: PRIOS, def: "Moyenne" }, { k: "desc", label: "Détails", type: "textarea", full: true }],
-    onSubmit: async (v) => { const ok = await save("reminder", { ...v, done: false }); if (ok) toast("Rappel ajouté"); return ok; } });
+  form({ title: "Planifier une tâche / rappel", fields: [{ k: "title", label: "Objet de la tâche", req: true, full: true, ph: "ex. Désinfecter la batterie de cages B" }, { k: "due", label: "Date d'échéance", type: "date", req: true, def: today() }, { k: "prio", label: "Niveau d'urgence", type: "select", opts: PRIOS, def: "Moyenne" }, { k: "desc", label: "Précisions", type: "textarea", full: true }],
+    onSubmit: async (v) => { const ok = await save("reminder", { ...v, done: false }); if (ok) toast("Rappel planifié"); return ok; } });
 }
 
-/* ---------- Example farm ---------- */
-function sampleDocs() {
-  const t = today(), D = (n) => addDays(t, n), out = [];
-  const R = (id, name, sex, birthOff, breed, cage, father, mother, status = "Actif") => out.push({ kind: "rabbit", id, name, sex, birth: D(birthOff), breed, cage, father, mother, status, notes: "", sample: true });
-  R("ex-g1", "Brutus", "Male", -1500, "Néo-Zélandais", "A-01", "", "", "Vendu"); R("ex-g2", "Perle", "Female", -1450, "Néo-Zélandais", "A-02", "", "", "Mort");
-  R("ex-m1", "Hercule", "Male", -620, "Néo-Zélandais", "A-03", "ex-g1", "ex-g2"); R("ex-m2", "Tonnerre", "Male", -400, "Californien", "A-04", "", "");
-  R("ex-f1", "Caramel", "Female", -560, "Californien", "B-01", "", ""); R("ex-f2", "Noisette", "Female", -520, "Néo-Zélandais", "B-02", "ex-g1", "ex-g2");
-  R("ex-f3", "Vanille", "Female", -330, "Croisé", "B-03", "ex-m2", "ex-f1"); R("ex-f4", "Praline", "Female", -260, "Croisé", "B-04", "ex-m1", "ex-f1");
-  R("ex-f5", "Cannelle", "Female", -210, "Californien", "B-05", "ex-m2", "ex-f2"); R("ex-y1", "Flocon", "Male", -110, "Croisé", "C-01", "ex-m1", "ex-f3");
-  R("ex-y2", "Pistache", "Female", -110, "Croisé", "C-01", "ex-m1", "ex-f3");
-  const W = (r, off, kg) => out.push({ kind: "weight", id: `ex-w-${r}-${-off}`, rabbit: r, date: D(off), kg, notes: "", sample: true });
-  [[-110, 0.06], [-90, 0.42], [-75, 0.78], [-60, 1.12], [-45, 1.55], [-30, 1.98], [-15, 2.31], [0, 2.6]].forEach(([o, k]) => W("ex-y1", o, k));
-  [[-90, 4.1], [-60, 4.3], [-30, 4.25], [-5, 4.4]].forEach(([o, k]) => W("ex-f1", o, k));
-  W("ex-m1", -20, 4.9); W("ex-f3", -12, 3.9); W("ex-f4", -10, 3.6);
-  const M = (id, male, female, off, status, extra = {}) => out.push({ kind: "mating", id, male, female, date: D(off), due: D(off + GESTATION), status, notes: "", sample: true, ...extra });
-  M("ex-s1", "ex-m2", "ex-f4", -12, "Accouplé"); M("ex-s2", "ex-m1", "ex-f5", -29, "Gestation confirmée"); M("ex-s3", "ex-m2", "ex-f3", -20, "Gestation confirmée");
-  M("ex-s4", "ex-m1", "ex-f1", -68, "Mise bas", { birthDate: D(-37), alive: 9, dead: 1 }); M("ex-s5", "ex-m1", "ex-f3", -141, "Mise bas", { birthDate: D(-110), alive: 7, dead: 0 });
-  M("ex-s6", "ex-m2", "ex-f2", -80, "Échoué");
-  out.push({ kind: "batch", id: "ex-b1", code: "LOT-A", mating: "ex-s5", weaning: D(-75), initial: 7, current: 6, deaths: 1, cage: "Parc 1", avgWeight: 2350, target: D(-30 + 0) , status: "Actif", sample: true });
-  out.push({ kind: "treatment", id: "ex-t1", rabbit: "ex-f1", type: "Vermifuge", product: "Ivermectine 1 %", date: D(-4), dosage: "0,2 mL", withdrawal: 28, next: D(86), notes: "", sample: true });
-  out.push({ kind: "treatment", id: "ex-t2", rabbit: "", type: "Vaccin", product: "VHD (RHDV2)", date: D(-178), dosage: "0,5 mL", withdrawal: 0, next: D(2), notes: "Rappel annuel", sample: true });
-  out.push({ kind: "treatment", id: "ex-t3", rabbit: "", type: "Anti-coccidien", product: "Toltrazuril", date: D(-20), dosage: "Eau de boisson", withdrawal: 14, next: "", notes: "", sample: true });
-  const IT = (id, name, cat, qty, unit, price, off) => out.push({ kind: "item", id, name, cat, qty, unit, price, date: D(off), notes: "", sample: true });
-  IT("ex-i1", "Granulés lapin", "Nourriture", 4, "sac 25 kg", 64000, -20); IT("ex-i2", "Granulés lapin", "Nourriture", 2, "sac 25 kg", 32000, -6);
-  IT("ex-i3", "Ivermectine 1 %", "Médicament", 1, "unité", 4500, -5); IT("ex-i4", "Abreuvoirs automatiques", "Matériel", 6, "unité", 9000, -40);
-  for (let i = 1; i <= 18; i++) out.push({ kind: "feed", id: `ex-fd-${i}`, grams: 2900 + ((i * 137) % 400), date: D(-i), notes: "", sample: true });
-  const TX = (id, type, cat, amount, off, label) => out.push({ kind: "tx", id, type, cat, amount, date: D(off), label, sample: true });
-  TX("ex-x1", "in", "Vente chair", 45000, -150, "Vente 9 lapins de chair"); TX("ex-x2", "out", "Aliment", 48000, -140, "Granulés 3 sacs");
-  TX("ex-x3", "in", "Vente reproducteur", 25000, -100, "Vente d'un mâle reproducteur"); TX("ex-x4", "out", "Santé", 12000, -95, "Vaccination VHD");
-  TX("ex-x5", "in", "Vente chair", 52000, -60, "Vente 10 lapins de chair"); TX("ex-x6", "out", "Matériel", 9000, -40, "Abreuvoirs automatiques");
-  TX("ex-x7", "out", "Aliment", 64000, -20, "Granulés lapin"); TX("ex-x8", "in", "Vente fumier", 8000, -12, "Fumier pour maraîcher");
-  TX("ex-x9", "out", "Aliment", 32000, -6, "Granulés lapin"); TX("ex-x10", "out", "Santé", 4500, -5, "Ivermectine 1 %");
-  out.push({ kind: "reminder", id: "ex-r1", title: "Désinfecter les cages de la rangée B", due: D(0), prio: "Moyenne", desc: "Chaux vive + nettoyage des mangeoires", done: false, sample: true });
-  out.push({ kind: "reminder", id: "ex-r2", title: "Commander 4 sacs de granulés", due: D(3), prio: "Haute", desc: "", done: false, sample: true });
-  return out;
-}
-
-/* ---------- Actions ---------- */
+/* ---------- Actions Handler ---------- */
 async function bulk(docs, label) {
-  let n = 0; for (const d of docs) { const { kind, ...rest } = d; if (!KIND[kind]) continue; if (!(await save(kind, rest))) break; n++; if (n % 10 === 0) toast(`${label} : ${n} / ${docs.length}`); }
+  let n = 0; for (const d of docs) { const { kind, ...rest } = d; if (!KIND[kind]) continue; if (!(await save(kind, rest))) break; n++; }
   return n;
 }
+
 const A = {
   close: closeModal,
   overlay: (el, e) => { if (e.target === el) closeModal(); },
-  more: () => sheet("Plus de rubriques", `<div class="morelist">${NAV.filter((n) => !BOTTOM.includes(n.id)).map((n) => `<a class="nav-a" href="#${n.id}" data-act="close">${ICON[n.icon]}<span>${n.label}</span></a>`).join("")}</div>`),
+  more: () => sheet("Navigation", `<div class="morelist">${NAV.filter((n) => !BOTTOM.includes(n.id)).map((n) => `<a class="nav-a" href="#${n.id}" data-act="close">${ICON[n.icon]}<span>${n.label}</span></a>`).join("")}<button class="btn ghost" data-act="accountModal" style="justify-content:flex-start;padding:10px 12px;font-size:1rem;color:var(--ink)">${ICON.cloud}<span>Compte Google & Synchronisation</span></button></div>`),
   ui: (el) => { ui[el.dataset.k] = el.dataset.v; render(); },
+  accountModal: () => accountModal(),
   newrabbit: () => rabbitForm(), editrabbit: (el) => rabbitForm(rab(el.dataset.id)),
-  status: (el) => { const r = rab(el.dataset.id); form({ title: `Statut de ${r.name}`, values: r, fields: [{ k: "status", label: "Statut", type: "select", opts: STATUSES, full: true, hint: "Un lapin vendu, mort, abattu ou donné passe dans « Sortis »." }], onSubmit: async (v) => save("rabbit", { ...r, status: v.status }) }); },
-  delrabbit: (el) => { const r = rab(el.dataset.id); confirmBox(`Supprimer définitivement la fiche de ${r.name} ainsi que ses pesées et soins ? Pour un animal vendu ou mort, changez plutôt son statut.`, "Supprimer", async () => {
+  status: (el) => { const r = rab(el.dataset.id); form({ title: `Statut de ${r.name}`, values: r, fields: [{ k: "status", label: "Statut", type: "select", opts: STATUSES, full: true, hint: "Un animal vendu, abattu ou décédé passe dans la rubrique « Sortis »." }], onSubmit: async (v) => save("rabbit", { ...r, status: v.status }) }); },
+  delrabbit: (el) => { const r = rab(el.dataset.id); confirmBox(`Supprimer définitivement la fiche de ${r.name} ainsi que ses pesées et soins ? Pour un animal vendu ou décédé, modifiez plutôt son statut.`, "Supprimer", async () => {
     for (const w of S.weights.filter((x) => x.rabbit === r.id)) await removeDoc("weight", w.id);
     for (const x of S.treatments.filter((x) => x.rabbit === r.id)) await removeDoc("treatment", x.id);
     if (await removeDoc("rabbit", r.id)) { toast("Fiche supprimée"); go("lapins"); } }); },
@@ -1200,26 +1614,23 @@ const A = {
   newweight: (el) => weightForm(el.dataset.id), newtreat: (el) => treatForm(el.dataset.id),
   newitem: () => itemForm(), feed: (el) => feedForm(Number(el.dataset.v) || 0), newtx: (el) => txForm(el.dataset.v),
   newbatch: (el) => batchForm(el.dataset.id), editbatch: (el) => batchForm(null, byId(S.batches, el.dataset.id)), sell: (el) => sellForm(el.dataset.id),
-  bdeath: (el) => { const b = byId(S.batches, el.dataset.id); form({ title: `Perte — ${b.code}`, fields: [{ k: "n", label: "Nombre de lapereaux morts", type: "number", min: 1, req: true, def: 1 }], onSubmit: async (v) => { const ok = await save("batch", { ...b, current: Math.max(0, b.current - v.n), deaths: (Number(b.deaths) || 0) + v.n }); if (ok) toast("Perte enregistrée"); return ok; } }); },
-  bweight: (el) => { const b = byId(S.batches, el.dataset.id); form({ title: `Poids moyen — ${b.code}`, fields: [{ k: "avgWeight", label: "Poids moyen (g)", type: "number", min: 0, req: true, def: b.avgWeight || "" }], onSubmit: async (v) => save("batch", { ...b, avgWeight: v.avgWeight }) }); },
+  bdeath: (el) => { const b = byId(S.batches, el.dataset.id); form({ title: `Perte sur le lot ${b.code}`, fields: [{ k: "n", label: "Nombre de lapereaux décédés", type: "number", min: 1, req: true, def: 1 }], onSubmit: async (v) => { const ok = await save("batch", { ...b, current: Math.max(0, b.current - v.n), deaths: (Number(b.deaths) || 0) + v.n }); if (ok) toast("Perte enregistrée"); return ok; } }); },
+  bweight: (el) => { const b = byId(S.batches, el.dataset.id); form({ title: `Poids moyen du lot ${b.code}`, fields: [{ k: "avgWeight", label: "Poids moyen mesuré (g)", type: "number", min: 0, req: true, def: b.avgWeight || "" }], onSubmit: async (v) => save("batch", { ...b, avgWeight: v.avgWeight }) }); },
   newrem: () => remForm(),
   remtoggle: async (el) => { const r = byId(S.reminders, el.dataset.id); if (r) await save("reminder", { ...r, done: !r.done }); },
-  remdone: async (el) => { const r = byId(S.reminders, el.dataset.id); if (r && (await save("reminder", { ...r, done: true }))) toast("Rappel terminé"); },
-  del: (el) => { const k = el.dataset.kind, id = el.dataset.id; confirmBox("Supprimer cet enregistrement ?", "Supprimer", async () => { if (await removeDoc(k, id)) toast("Supprimé"); }); },
-  loadsample: async () => { const docs = sampleDocs(); toast("Chargement de l'exemple…"); const n = await bulk(docs, "Exemple"); if (n) { toast(`Exemple chargé (${n} fiches)`); go("accueil"); } },
-  clearsamples: () => confirmBox("Effacer toutes les données d'exemple ? Vos propres fiches sont conservées.", "Effacer", async () => {
-    for (const [kind, key] of Object.entries(KIND)) for (const x of S[key].filter((x) => x.sample)) await removeDoc(kind, x.id);
-    toast("Exemple effacé"); }),
-  wipe: () => confirmBox("Effacer TOUT l'élevage ? Cette action est définitive. Exportez d'abord une sauvegarde si besoin.", "Tout effacer", async () => {
+  remdone: async (el) => { const r = byId(S.reminders, el.dataset.id); if (r && (await save("reminder", { ...r, done: true }))) toast("Tâche clôturée"); },
+  del: (el) => { const k = el.dataset.kind, id = el.dataset.id; confirmBox("Supprimer définitivement cet enregistrement ?", "Supprimer", async () => { if (await removeDoc(k, id)) toast("Supprimé"); }); },
+  wipe: () => confirmBox("Réinitialiser l'intégralité du cheptel ? Toutes vos données d'élevage seront effacées.", "Tout réinitialiser", async () => {
     for (const [kind, key] of Object.entries(KIND)) for (const x of S[key].slice()) await removeDoc(kind, x.id);
-    toast("Élevage effacé"); }),
+    localStorage.removeItem(LS_DATA_KEY);
+    toast("Élevage réinitialisé");
+    render();
+  }),
   exportpdf: () => exportHerdPDF(),
   export: async () => {
     const docs = []; for (const [kind, key] of Object.entries(KIND)) S[key].forEach((x) => { const { kind: _k, ...rest } = x; docs.push({ kind, ...rest }); });
-    const data = JSON.stringify({ app: "ABV Farm", version: 1, exported: today(), docs }, null, 1);
+    const data = JSON.stringify({ app: "ABV Farm", version: 2, exported: today(), farm: userSession.farmName, docs }, null, 1);
     const filename = `abvfarm-sauvegarde-${today()}.json`;
-    
-    // Download file directly
     const blob = new Blob([data], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -1229,15 +1640,22 @@ const A = {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    toast("Fichier de sauvegarde téléchargé");
+    toast("Fichier de sauvegarde exporté");
   },
   import: () => $("#importFile").click(),
 };
 
 $("#importFile").addEventListener("change", async (e) => {
   const f = e.target.files[0]; e.target.value = ""; if (!f) return;
-  try { const j = JSON.parse(await f.text()); if (!Array.isArray(j.docs)) throw new Error("format"); toast("Import en cours…"); const n = await bulk(j.docs, "Import"); toast(`${n} fiches importées`); }
-  catch (err) { toast("Fichier invalide : choisissez une sauvegarde ABV Farm (.json)."); }
+  try {
+    const j = JSON.parse(await f.text());
+    if (!Array.isArray(j.docs)) throw new Error("Format invalide");
+    toast("Restauration en cours…");
+    const n = await bulk(j.docs, "Import");
+    toast(`${n} fiche(s) importée(s) avec succès`);
+  } catch (err) {
+    toast("Fichier invalide : choisissez une sauvegarde ABV Farm (.json)");
+  }
 });
 
 document.addEventListener("click", (e) => {
@@ -1250,8 +1668,11 @@ document.addEventListener("click", (e) => {
 
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && $("#modal").innerHTML) closeModal(); });
 
-render();
-boot();
+// Boot application
+const initialDocs = Object.values(getLocalData());
+ingest(initialDocs);
+updateUserUI();
+initFirebaseSync();
 </script>
 
 </body>

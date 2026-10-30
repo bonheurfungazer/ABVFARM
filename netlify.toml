@@ -1,7 +1,13 @@
 [build]
   # Dossier contenant la version Web prête à être déployée
   publish = "public"
+  functions = "netlify/functions"
   command = ""
+
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/api/:splat"
+  status = 200
 
 [[redirects]]
   from = "/*"

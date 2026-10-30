@@ -1,4 +1,4 @@
-const CACHE_NAME = "abv-farm-pwa-v6";
+const CACHE_NAME = "abv-farm-pwa-v8";
 const ASSETS_TO_CACHE = [
   "./",
   "./index.html",

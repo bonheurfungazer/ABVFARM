@@ -3411,7 +3411,46 @@ function remForm() {
 
 /* ---------- Actions Handler ---------- */
 async function bulk(docs, label) {
-  let n = 0; for (const d of docs) { const { kind, ...rest } = d; if (!KIND[kind]) continue; if (!(await save(kind, rest))) break; n++; }
+  let n = 0;
+  const all = getLocalData();
+  const batchDocsToCloud = [];
+
+  for (const d of docs) {
+    const { kind, ...rest } = d;
+    if (!KIND[kind]) continue;
+    const obj = { ...rest };
+    if (!obj.id) obj.id = uid();
+    const doc = { ...obj, kind, updatedAt: new Date().toISOString() };
+    all[kind + "-" + obj.id] = doc;
+    if (userSession.isLoggedIn && isOnline && window.firebaseDb && userSession.uid) {
+      batchDocsToCloud.push(doc);
+    }
+    n++;
+  }
+
+  setLocalData(all);
+  ingest(Object.values(all));
+
+  if (batchDocsToCloud.length > 0 && window.firebaseDb && userSession.uid) {
+    (async () => {
+      try {
+        const userRef = window.firebaseDb.collection("users").doc(userSession.uid).collection("cheptel");
+        for (let i = 0; i < batchDocsToCloud.length; i += 450) {
+          const chunk = batchDocsToCloud.slice(i, i + 450);
+          const batch = window.firebaseDb.batch();
+          chunk.forEach(doc => {
+            batch.set(userRef.doc(doc.kind + "-" + doc.id), doc);
+          });
+          await batch.commit();
+        }
+        userSession.lastSync = new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+        saveUserSession();
+      } catch (err) {
+        console.warn("Cloud bulk push notice:", err);
+      }
+    })();
+  }
+
   return n;
 }
 
@@ -3532,135 +3571,181 @@ const A = {
 };
 
 function parseBackupToDocs(j) {
-  if (Array.isArray(j.docs)) return j.docs;
-  const docs = [];
+  let docs = [];
   const tsToDate = (ts) => {
     if (!ts) return "";
     try {
+      if (typeof ts === "string" && ts.includes("-")) return ts.slice(0, 10);
       const d = new Date(Number(ts));
       return isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10);
     } catch (e) { return ""; }
   };
 
-  (j.rabbits || []).forEach((r) => {
-    docs.push({
-      kind: "rabbit",
-      id: String(r.id),
-      name: r.name || "Inconnu",
-      sex: r.sex === "Female" ? "Female" : (r.sex === "Male" ? "Male" : "Indéterminé"),
-      birth: tsToDate(r.dateOfBirth) || today(),
-      breed: r.breed || "",
-      cage: r.cageNumber || "",
-      status: r.status || (r.isActive !== false ? "Actif" : "Inactif"),
-      notes: r.notes || "",
-      father: r.fatherId ? String(r.fatherId) : "",
-      mother: r.motherId ? String(r.motherId) : "",
-      photo: r.imageUri || ""
+  const sanitizeStatus = (st, notes = "", name = "") => {
+    const valid = ["Actif", "Vendu", "Mort", "Abattu", "Externe", "Donné"];
+    if (valid.includes(st)) return st;
+    const txt = ((notes || "") + " " + (name || "")).toLowerCase();
+    if (txt.includes("mort") || txt.includes("décéd") || txt.includes("crevé") || txt.includes("perte")) return "Mort";
+    if (txt.includes("vendu") || txt.includes("vente")) return "Vendu";
+    if (txt.includes("abatt") || txt.includes("boucherie")) return "Abattu";
+    if (txt.includes("externe")) return "Externe";
+    if (txt.includes("donné") || txt.includes("cadeau")) return "Donné";
+    return "Actif";
+  };
+
+  if (Array.isArray(j.docs) && j.docs.length > 0) {
+    docs = j.docs.map(d => {
+      if (d.kind === "rabbit") {
+        return {
+          ...d,
+          status: sanitizeStatus(d.status, d.notes, d.name),
+          birth: tsToDate(d.birth || d.dateOfBirth) || today(),
+          father: d.father ? String(d.father) : (d.fatherId ? String(d.fatherId) : ""),
+          mother: d.mother ? String(d.mother) : (d.motherId ? String(d.motherId) : ""),
+          photo: d.photo || d.imageUri || ""
+        };
+      }
+      return d;
     });
+  } else {
+    (j.rabbits || []).forEach((r) => {
+      docs.push({
+        kind: "rabbit",
+        id: String(r.id),
+        name: r.name || "Inconnu",
+        sex: r.sex === "Female" ? "Female" : (r.sex === "Male" ? "Male" : "Indéterminé"),
+        birth: tsToDate(r.dateOfBirth || r.birth) || today(),
+        breed: r.breed || "",
+        cage: r.cageNumber || r.cage || "",
+        status: sanitizeStatus(r.status, r.notes, r.name),
+        notes: r.notes || "",
+        father: r.fatherId ? String(r.fatherId) : (r.father ? String(r.father) : ""),
+        mother: r.motherId ? String(r.motherId) : (r.mother ? String(r.mother) : ""),
+        photo: r.imageUri || r.photo || ""
+      });
+    });
+
+    (j.matingRecords || []).forEach((m) => {
+      docs.push({
+        kind: "mating",
+        id: String(m.id),
+        male: String(m.maleId || m.male || ""),
+        female: String(m.femaleId || m.female || ""),
+        date: tsToDate(m.matingDate || m.date) || today(),
+        due: tsToDate(m.expectedBirthDate || m.due) || today(),
+        status: m.status || "Accouplé",
+        notes: m.notes || ""
+      });
+    });
+
+    (j.weightRecords || []).forEach((w) => {
+      docs.push({
+        kind: "weight",
+        id: String(w.id),
+        rabbit: String(w.rabbitId || w.rabbit || ""),
+        kg: Number(w.weight || w.kg) || 0,
+        date: tsToDate(w.recordDate || w.date) || today(),
+        notes: w.notes || ""
+      });
+    });
+
+    (j.treatmentRecords || []).forEach((t) => {
+      docs.push({
+        kind: "treatment",
+        id: String(t.id),
+        rabbit: t.rabbitId || t.rabbit ? String(t.rabbitId || t.rabbit) : "",
+        type: t.type || "Autre soin",
+        product: t.designation || t.product || "",
+        date: tsToDate(t.date) || today(),
+        dosage: t.dosage || "",
+        notes: t.notes || "",
+        next: tsToDate(t.nextDueDate || t.next),
+        withdrawal: Number(t.withdrawalDays || t.withdrawal) || 0
+      });
+    });
+
+    (j.inventoryItems || []).forEach((item) => {
+      docs.push({
+        kind: "item",
+        id: String(item.id),
+        name: item.name || "",
+        cat: item.category || item.cat || "Autre",
+        qty: Number(item.quantity || item.qty) || 0,
+        unit: item.unit || "unité",
+        price: Number(item.totalPrice || item.price) || 0,
+        date: tsToDate(item.purchaseDate || item.date) || today(),
+        notes: item.notes || ""
+      });
+    });
+
+    (j.dailyFeedLogs || []).forEach((f) => {
+      docs.push({
+        kind: "feed",
+        id: String(f.id),
+        grams: Number(f.quantityGrams || f.grams) || 0,
+        date: tsToDate(f.feedDate || f.date) || today(),
+        notes: f.notes || ""
+      });
+    });
+
+    (j.reminders || []).forEach((rem) => {
+      docs.push({
+        kind: "reminder",
+        id: String(rem.id),
+        title: rem.title || "",
+        desc: rem.description || rem.desc || "",
+        due: tsToDate(rem.dueDate || rem.due) || today(),
+        prio: rem.priority || rem.prio || "Moyenne",
+        done: !!(rem.isCompleted || rem.done)
+      });
+    });
+
+    (j.fatteningBatches || []).forEach((b) => {
+      docs.push({
+        kind: "batch",
+        id: String(b.id),
+        code: b.batchCode || b.code || `LOT-${b.id}`,
+        mating: b.matingRecordId || b.mating ? String(b.matingRecordId || b.mating) : "",
+        weaning: tsToDate(b.weaningDate || b.weaning) || today(),
+        initial: Number(b.initialCount || b.initial) || 0,
+        current: Number(b.currentCount || b.current) || 0,
+        deaths: Number(b.mortalityCount || b.deaths) || 0,
+        cage: b.cageLocation || b.cage || "",
+        avgWeight: Number(b.averageWeightGrams || b.avgWeight) || 0,
+        target: tsToDate(b.targetSaleDate || b.target) || today(),
+        status: b.status || "Actif"
+      });
+    });
+
+    (j.financialTransactions || []).forEach((tx) => {
+      docs.push({
+        kind: "tx",
+        id: String(tx.id),
+        type: tx.type === "INCOME" || tx.type === "in" ? "in" : "out",
+        cat: tx.category || tx.cat || "Autre",
+        amount: Number(tx.amountFcfa || tx.amount) || 0,
+        label: tx.description || tx.label || "",
+        date: tsToDate(tx.date) || today()
+      });
+    });
+  }
+
+  // De-duplicate rabbit names if any duplicate exists
+  const nameCounts = {};
+  docs.forEach(d => {
+    if (d.kind === "rabbit" && d.name) {
+      nameCounts[d.name] = (nameCounts[d.name] || 0) + 1;
+    }
   });
 
-  (j.matingRecords || []).forEach((m) => {
-    docs.push({
-      kind: "mating",
-      id: String(m.id),
-      male: String(m.maleId),
-      female: String(m.femaleId),
-      date: tsToDate(m.matingDate) || today(),
-      due: tsToDate(m.expectedBirthDate) || today(),
-      status: m.status || "Accouplé",
-      notes: m.notes || ""
-    });
-  });
-
-  (j.weightRecords || []).forEach((w) => {
-    docs.push({
-      kind: "weight",
-      id: String(w.id),
-      rabbit: String(w.rabbitId),
-      kg: Number(w.weight) || 0,
-      date: tsToDate(w.recordDate) || today(),
-      notes: w.notes || ""
-    });
-  });
-
-  (j.treatmentRecords || []).forEach((t) => {
-    docs.push({
-      kind: "treatment",
-      id: String(t.id),
-      rabbit: t.rabbitId ? String(t.rabbitId) : "",
-      type: t.type || "Autre soin",
-      product: t.designation || "",
-      date: tsToDate(t.date) || today(),
-      dosage: t.dosage || "",
-      notes: t.notes || "",
-      next: tsToDate(t.nextDueDate),
-      withdrawal: Number(t.withdrawalDays) || 0
-    });
-  });
-
-  (j.inventoryItems || []).forEach((item) => {
-    docs.push({
-      kind: "item",
-      id: String(item.id),
-      name: item.name || "",
-      cat: item.category || "Autre",
-      qty: Number(item.quantity) || 0,
-      unit: item.unit || "unité",
-      price: Number(item.totalPrice) || 0,
-      date: tsToDate(item.purchaseDate) || today(),
-      notes: item.notes || ""
-    });
-  });
-
-  (j.dailyFeedLogs || []).forEach((f) => {
-    docs.push({
-      kind: "feed",
-      id: String(f.id),
-      grams: Number(f.quantityGrams) || 0,
-      date: tsToDate(f.feedDate) || today(),
-      notes: f.notes || ""
-    });
-  });
-
-  (j.reminders || []).forEach((rem) => {
-    docs.push({
-      kind: "reminder",
-      id: String(rem.id),
-      title: rem.title || "",
-      desc: rem.description || "",
-      due: tsToDate(rem.dueDate) || today(),
-      prio: rem.priority || "Moyenne",
-      done: !!rem.isCompleted
-    });
-  });
-
-  (j.fatteningBatches || []).forEach((b) => {
-    docs.push({
-      kind: "batch",
-      id: String(b.id),
-      code: b.batchCode || `LOT-${b.id}`,
-      mating: b.matingRecordId ? String(b.matingRecordId) : "",
-      weaning: tsToDate(b.weaningDate) || today(),
-      initial: Number(b.initialCount) || 0,
-      current: Number(b.currentCount) || 0,
-      deaths: Number(b.mortalityCount) || 0,
-      cage: b.cageLocation || "",
-      avgWeight: Number(b.averageWeightGrams) || 0,
-      target: tsToDate(b.targetSaleDate) || today(),
-      status: b.status || "Actif"
-    });
-  });
-
-  (j.financialTransactions || []).forEach((tx) => {
-    docs.push({
-      kind: "tx",
-      id: String(tx.id),
-      type: tx.type === "INCOME" || tx.type === "in" ? "in" : "out",
-      cat: tx.category || "Autre",
-      amount: Number(tx.amountFcfa) || 0,
-      label: tx.description || "",
-      date: tsToDate(tx.date) || today()
-    });
+  const nameSeen = {};
+  docs.forEach(d => {
+    if (d.kind === "rabbit" && d.name) {
+      if (nameCounts[d.name] > 1) {
+        nameSeen[d.name] = (nameSeen[d.name] || 0) + 1;
+        d.name = `${d.name} (${nameSeen[d.name]})`;
+      }
+    }
   });
 
   return docs;

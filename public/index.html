@@ -570,9 +570,17 @@ function saveUserSession(session) {
   updateUserUI();
 }
 
+function getUserDataKey() {
+  if (userSession && userSession.isLoggedIn && userSession.uid) {
+    return "abvfarm_data_user_" + userSession.uid;
+  }
+  return "abvfarm_data_guest";
+}
+
 function getLocalData() {
   try {
-    return JSON.parse(localStorage.getItem(LS_DATA_KEY) || "{}");
+    const key = getUserDataKey();
+    return JSON.parse(localStorage.getItem(key) || "{}");
   } catch (e) {
     return {};
   }
@@ -580,7 +588,8 @@ function getLocalData() {
 
 function setLocalData(all) {
   try {
-    localStorage.setItem(LS_DATA_KEY, JSON.stringify(all));
+    const key = getUserDataKey();
+    localStorage.setItem(key, JSON.stringify(all));
   } catch (e) {
     console.warn("Storage notice:", e);
   }
@@ -692,21 +701,25 @@ function handleUserAuthenticated(user, msg) {
   saveUserSession(userSession);
   if (msg) toast(msg);
 
+  // Ingest existing user-isolated local data first
+  const userLocalData = getLocalData();
+  ingest(Object.values(userLocalData));
+
   // Listen to user's Cloud herd data in real-time
-  window.firebaseDb.collection("users").doc(user.uid).collection("cheptel").onSnapshot((snap) => {
-    cloudSyncActive = true;
-    const cloudDocs = snap.docs.map((d) => d.data());
-    if (cloudDocs.length > 0) {
+  if (window.firebaseDb && user.uid) {
+    window.firebaseDb.collection("users").doc(user.uid).collection("cheptel").onSnapshot((snap) => {
+      cloudSyncActive = true;
+      const cloudDocs = snap.docs.map((d) => d.data());
       const all = getLocalData();
       cloudDocs.forEach((d) => { all[d.kind + "-" + d.id] = d; });
       setLocalData(all);
       ingest(Object.values(all));
-    }
-    userSession.lastSync = new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
-    updateUserUI();
-  }, (err) => {
-    console.warn("Snapshot notice:", err);
-  });
+      userSession.lastSync = new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+      updateUserUI();
+    }, (err) => {
+      console.warn("Snapshot notice:", err);
+    });
+  }
 }
 
 // Network events
@@ -1094,7 +1107,7 @@ function route() {
   return { name: NAV.some((n) => n.id === h) ? h : "accueil" };
 }
 function go(h) { if (location.hash.slice(1) === h) render(); else location.hash = h; }
-window.addEventListener("hashchange", () => { render(); window.scrollTo(0, 0); });
+window.addEventListener("hashchange", () => { closeModal(); render(); window.scrollTo(0, 0); });
 
 function renderNav() {
   const r = route(); const cur = r.name === "lapin" ? "lapins" : r.name;
@@ -1396,45 +1409,40 @@ VIEWS.lapins = () => {
     </div>
   </div>
 
-  <!-- SECTION DÉDIÉE : Répartition & Effectif par tranche d'âge -->
-  <section class="card" style="padding:16px;background:var(--surface)">
-    <div class="row-h" style="margin-bottom:10px">
+  <!-- SECTION COLLAPSIBLE : Répartition & Effectif par tranche d'âge -->
+  <details class="card" style="padding:12px 16px;background:var(--surface)" ${ui.ageBracket && ui.ageBracket !== 'all' ? "open" : ""}>
+    <summary style="cursor:pointer;font-weight:700;display:flex;justify-content:space-between;align-items:center;user-select:none">
       <div style="display:flex;align-items:center;gap:8px">
         ${ICON.tree}
-        <h2>Répartition & Effectif par Âge</h2>
+        <span>📊 Répartition par tranche d'âge</span>
+        <span class="chip sm ok">${baseList.length} lapins</span>
       </div>
-      <div class="actions">
-        ${ui.ageBracket && ui.ageBracket !== 'all' ? `
-          <button class="btn sm ghost" data-act="ui" data-k="ageBracket" data-v="all" style="color:var(--bad);font-size:0.78rem">
-            ${ICON.x} Voir tous les âges
-          </button>
-        ` : ""}
-        <span class="chip ok">${baseList.length} lapins analysés</span>
+      <span class="hint" style="font-size:0.8rem">Afficher / Masquer ▸</span>
+    </summary>
+    <div style="margin-top:12px">
+      <p class="hint" style="margin-bottom:10px">Cliquez sur une tranche d'âge pour filtrer la liste :</p>
+      <div class="grid g3" style="gap:10px">
+        ${ageDistribution.map((st) => {
+          const isSelected = ui.ageBracket === st.id;
+          return `
+          <div class="tile" style="cursor:pointer;border-color:${isSelected ? 'var(--sage)' : 'var(--line)'};background:${isSelected ? 'var(--sage-soft)' : 'var(--surface-2)'};padding:8px 10px;border-radius:10px;transition:all .15s ease" data-act="ui" data-k="ageBracket" data-v="${isSelected ? 'all' : st.id}" title="Filtrer pour ${esc(st.label)}">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start">
+              <b style="font-size:0.85rem;color:${isSelected ? 'var(--sage-soft-ink)' : 'inherit'}">${esc(st.label)}</b>
+              <span class="v" style="font-size:1.2rem;color:${isSelected ? 'var(--sage)' : st.count ? 'var(--ink)' : 'var(--muted)'}">${st.count}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;font-size:0.72rem;color:var(--muted);margin-top:2px">
+              <span>${esc(st.desc)}</span>
+              ${st.count ? `<span style="font-weight:700">${st.males}♂ ${st.females}♀</span>` : "<span>0</span>"}
+            </div>
+            <div class="bar" style="margin-top:4px;height:4px">
+              <i style="width:${st.percent}%;background:${isSelected ? 'var(--sage)' : 'var(--clay)'}"></i>
+            </div>
+          </div>
+          `;
+        }).join("")}
       </div>
     </div>
-    <p class="hint" style="margin-bottom:12px">Cliquez sur une tranche d'âge pour filtrer automatiquement la liste des animaux :</p>
-    
-    <div class="grid g3" style="gap:10px">
-      ${ageDistribution.map((st) => {
-        const isSelected = ui.ageBracket === st.id;
-        return `
-        <div class="tile" style="cursor:pointer;border-color:${isSelected ? 'var(--sage)' : 'var(--line)'};background:${isSelected ? 'var(--sage-soft)' : 'var(--surface-2)'};padding:10px 12px;border-radius:12px;transition:all .15s ease" data-act="ui" data-k="ageBracket" data-v="${isSelected ? 'all' : st.id}" title="Filtrer pour ${esc(st.label)}">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start">
-            <b style="font-size:0.9rem;color:${isSelected ? 'var(--sage-soft-ink)' : 'inherit'}">${esc(st.label)}</b>
-            <span class="v" style="font-size:1.35rem;color:${isSelected ? 'var(--sage)' : st.count ? 'var(--ink)' : 'var(--muted)'}">${st.count}</span>
-          </div>
-          <div style="display:flex;justify-content:space-between;font-size:0.75rem;color:var(--muted);margin-top:4px">
-            <span>${esc(st.desc)}</span>
-            ${st.count ? `<span style="font-weight:700">${st.males} ♂ · ${st.females} ♀</span>` : "<span>0 lapin</span>"}
-          </div>
-          <div class="bar" style="margin-top:6px;height:5px">
-            <i style="width:${st.percent}%;background:${isSelected ? 'var(--sage)' : 'var(--clay)'}"></i>
-          </div>
-        </div>
-        `;
-      }).join("")}
-    </div>
-  </section>
+  </details>
 
   <!-- Puces d'état rapides (Chips bar) -->
   <div class="chip-bar" role="toolbar" aria-label="Filtres rapides d'élevage">
@@ -1517,39 +1525,44 @@ VIEWS.lapins = () => {
     ` : ""}
   </div>
 
-  <!-- PANNEAU : Filtrage précis selon Âge donné et Poids donné -->
-  <section class="card" style="padding:14px 16px;background:var(--surface-2);border-color:var(--line)">
-    <div class="row-h" style="margin-bottom:8px">
-      <h3 style="font-size:0.92rem;display:flex;align-items:center;gap:6px">
+  <!-- PANNEAU COLLAPSIBLE : Filtrage précis selon Âge donné et Poids donné -->
+  <details class="card" style="padding:12px 16px;background:var(--surface-2);border-color:var(--line)" ${(ui.minAgeM !== "" || ui.maxAgeM !== "" || ui.minWeight !== "" || ui.maxWeight !== "") ? "open" : ""}>
+    <summary style="cursor:pointer;font-weight:700;display:flex;justify-content:space-between;align-items:center;user-select:none">
+      <div style="display:flex;align-items:center;gap:6px;font-size:0.9rem">
         ${ICON.scale}
-        <span>Filtre précis par âge & poids donnés</span>
-      </h3>
+        <span>⚖️ Filtres précis (Âge & Poids)</span>
+        ${(ui.minAgeM !== "" || ui.maxAgeM !== "" || ui.minWeight !== "" || ui.maxWeight !== "") ? `<span class="chip warn sm">Actif</span>` : ""}
+      </div>
+      <span class="hint" style="font-size:0.8rem">Afficher / Masquer ▸</span>
+    </summary>
+    <div style="margin-top:10px">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(130px, 1fr));gap:10px">
+        <div class="field">
+          <label style="font-size:0.75rem">Âge min (mois)</label>
+          <input type="number" id="inpMinAge" step="0.5" min="0" placeholder="ex. 3" value="${esc(ui.minAgeM || '')}" style="padding:6px 9px;font-size:0.85rem">
+        </div>
+        <div class="field">
+          <label style="font-size:0.75rem">Âge max (mois)</label>
+          <input type="number" id="inpMaxAge" step="0.5" min="0" placeholder="ex. 6" value="${esc(ui.maxAgeM || '')}" style="padding:6px 9px;font-size:0.85rem">
+        </div>
+        <div class="field">
+          <label style="font-size:0.75rem">Poids min (kg)</label>
+          <input type="number" id="inpMinWeight" step="0.1" min="0" placeholder="ex. 2.2" value="${esc(ui.minWeight || '')}" style="padding:6px 9px;font-size:0.85rem">
+        </div>
+        <div class="field">
+          <label style="font-size:0.75rem">Poids max (kg)</label>
+          <input type="number" id="inpMaxWeight" step="0.1" min="0" placeholder="ex. 4.0" value="${esc(ui.maxWeight || '')}" style="padding:6px 9px;font-size:0.85rem">
+        </div>
+      </div>
       ${(ui.minAgeM !== "" || ui.maxAgeM !== "" || ui.minWeight !== "" || ui.maxWeight !== "") ? `
-        <button class="btn sm ghost" data-act="resetCustomMetrics" style="color:var(--bad);padding:3px 8px;font-size:0.76rem">
-          Effacer âge/poids
-        </button>
-      ` : `<span class="hint" style="font-size:0.75rem">Saisissez les seuils souhaités</span>`}
+        <div style="margin-top:8px;text-align:right">
+          <button class="btn sm ghost" data-act="resetCustomMetrics" style="color:var(--bad);padding:2px 6px;font-size:0.76rem">
+            Effacer âge/poids
+          </button>
+        </div>
+      ` : ""}
     </div>
-
-    <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(130px, 1fr));gap:10px">
-      <div class="field">
-        <label style="font-size:0.75rem">Âge minimum (mois)</label>
-        <input type="number" id="inpMinAge" step="0.5" min="0" placeholder="ex. 3" value="${esc(ui.minAgeM || '')}" style="padding:6px 9px;font-size:0.85rem">
-      </div>
-      <div class="field">
-        <label style="font-size:0.75rem">Âge maximum (mois)</label>
-        <input type="number" id="inpMaxAge" step="0.5" min="0" placeholder="ex. 6" value="${esc(ui.maxAgeM || '')}" style="padding:6px 9px;font-size:0.85rem">
-      </div>
-      <div class="field">
-        <label style="font-size:0.75rem">Poids minimum (kg)</label>
-        <input type="number" id="inpMinWeight" step="0.1" min="0" placeholder="ex. 2.2" value="${esc(ui.minWeight || '')}" style="padding:6px 9px;font-size:0.85rem">
-      </div>
-      <div class="field">
-        <label style="font-size:0.75rem">Poids maximum (kg)</label>
-        <input type="number" id="inpMaxWeight" step="0.1" min="0" placeholder="ex. 4.0" value="${esc(ui.maxWeight || '')}" style="padding:6px 9px;font-size:0.85rem">
-      </div>
-    </div>
-  </section>
+  </details>
 
   <!-- Résumé du filtrage -->
   <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.82rem;color:var(--muted);padding:0 2px">
@@ -2119,8 +2132,12 @@ function accountModal() {
         await window.firebaseAuth.signOut().catch(() => {});
       }
       saveUserSession({ isLoggedIn: false, email: "", uid: null, photoUrl: null });
-      toast("Vous êtes déconnecté");
+      ready = false;
+      S = blank();
+      ingest(Object.values(getLocalData()));
+      toast("Vous êtes déconnecté. Mode invité actif.");
       closeModal();
+      render();
     });
   }
 
@@ -2312,7 +2329,10 @@ function rabbitForm(r) {
       const obj = { ...r, ...v, status: r.status || "Actif" };
       const ok = await save("rabbit", obj); if (!ok) return false;
       if (w !== "" && w > 0) await save("weight", { rabbit: obj.id, date: today(), kg: w, notes: editing ? "" : "Poids initial" });
-      toast(editing ? "Fiche mise à jour" : `${obj.name} enregistré`); if (!editing) go("lapin-" + obj.id);
+      closeModal();
+      toast(editing ? "Fiche mise à jour" : `${obj.name} enregistré`);
+      if (!editing) go("lapin-" + obj.id);
+      return true;
     } });
 }
 function matingForm(preId) {

@@ -399,7 +399,7 @@ div[data-layer*="netlify"] {
 
   <!-- Mobile Top Header Bar -->
   <header class="mobile-header">
-    <div class="mobile-brand">
+    <div class="mobile-brand" data-act="accountModal" style="cursor:pointer" title="Gérer le compte et la synchronisation">
       <img src="abvnewlogo.jpg" alt="Logo ABV Farm" class="brand-logo sm" onerror="this.style.display='none';">
       <div>
         <b>ABV Farm</b>
@@ -407,6 +407,14 @@ div[data-layer*="netlify"] {
       </div>
     </div>
     <div class="actions">
+      <button class="btn sm ghost" data-act="alertsCenterModal" style="position:relative;padding:6px 8px" title="Alertes">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+        <span id="headerAlertBadge" class="badge-dot" style="display:none">0</span>
+      </button>
+      <button class="btn sm ghost" data-act="accountModal" id="mobileAccountBtn" style="padding:4px 8px;gap:6px" title="Compte & Synchronisation">
+        <div class="user-avatar sm" id="userAvatarHeader" style="width:26px;height:26px;font-size:0.75rem;border-radius:50%;background:var(--sage);color:#fff;display:grid;place-items:center;font-weight:700">A</div>
+        <span style="font-size:0.8rem">Compte</span>
+      </button>
       <button class="btn sm pri" data-act="newrabbit">+ Lapin</button>
     </div>
   </header>
@@ -875,6 +883,7 @@ window.addEventListener("offline", () => {
 function updateUserUI() {
   const nameEl = $("#userName");
   const avatarEl = $("#userAvatar");
+  const avatarHeaderEl = $("#userAvatarHeader");
   const syncEl = $("#userSyncStatus");
   const mobSub = $("#mobileSyncSub");
 
@@ -887,6 +896,13 @@ function updateUserUI() {
       avatarEl.innerHTML = `<img src="${esc(userSession.photoUrl)}" alt="Avatar" referrerpolicy="no-referrer">`;
     } else {
       avatarEl.textContent = initial;
+    }
+  }
+  if (avatarHeaderEl) {
+    if (userSession.photoUrl) {
+      avatarHeaderEl.innerHTML = `<img src="${esc(userSession.photoUrl)}" alt="Avatar" style="width:100%;height:100%;border-radius:50%;object-fit:cover" referrerpolicy="no-referrer">`;
+    } else {
+      avatarHeaderEl.textContent = initial;
     }
   }
 
@@ -2335,17 +2351,6 @@ VIEWS.donnees = () => {
     <p>Vos données sont protégées et enregistrées instantanément sur cet appareil pour vous garantir un fonctionnement continu avec ou sans connexion Internet. Connectez votre compte par Email ou Google pour une sauvegarde automatique et permanente dans le Cloud Firebase.</p>
   </section>
   <div class="grid g2">
-    <section class="card full" style="border-left:4px solid var(--hero);background:linear-gradient(to right,rgba(62,90,71,0.08),transparent)">
-      <div class="row-h">
-        <h2>📦 Ancienne sauvegarde extraite</h2>
-        <span class="badge" style="background:var(--hero);color:var(--hero-ink);font-weight:600">145 fiches prêtes</span>
-      </div>
-      <p class="hint" style="margin:6px 0 14px">Vos 48 lapins, 8 saillies, 63 distributions d'aliments, pesées, soins et stocks ont été extraits et convertis en JSON universel compatible avec cette nouvelle application.</p>
-      <div class="actions">
-        <a href="abvfarm_backup_restored.json" download="abvfarm_sauvegarde.json" class="btn pri" style="text-decoration:none">${ICON.download}Télécharger le fichier JSON</a>
-        <button class="btn" data-act="importRestoredDirect">${ICON.refresh}Importer directement dans l'application</button>
-      </div>
-    </section>
     <section class="card"><h2>Application Téléphone (PWA)</h2><p class="hint" style="margin:6px 0 12px">Installez ABV Farm directement sur l'écran d'accueil de votre smartphone ou tablette pour l'ouvrir comme une application native sans ouvrir le navigateur.</p><button class="btn pri" onclick="installPWA()">${ICON.phone}Installer sur mon téléphone</button></section>
     <section class="card"><h2>Rapport officiel PDF</h2><p class="hint" style="margin:6px 0 12px">Document PDF complet prêt à l'impression : synthèse d'élevage, liste détaillée des lapins, gestations et indicateurs clés.</p><button class="btn pri" data-act="exportpdf">${ICON.fileText}Télécharger l'inventaire PDF</button></section>
     <section class="card"><h2>Sauvegarde fichier JSON</h2><p class="hint" style="margin:6px 0 12px">Archive locale complète de votre élevage pour sauvegarde externe ou transfert de machine.</p><button class="btn" data-act="export">${ICON.download}Exporter le fichier de sauvegarde</button></section>

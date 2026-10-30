@@ -644,21 +644,28 @@ class FarmViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         
-        // 2. Fetch mother
+        // 2. Fetch mother & father
         val mother = repository.getRabbitById(record.femaleId)
-        val breedToUse = mother?.breed ?: "Inconnu"
+        val father = repository.getRabbitById(record.maleId)
+        val breedToUse = mother?.breed ?: father?.breed ?: "Inconnu"
         
         val birthCalendar = java.util.Calendar.getInstance().apply { timeInMillis = birthDate }
         val birthYear = birthCalendar.get(java.util.Calendar.YEAR) % 100
-        
         val maxId = repository.getMaxRabbitId() ?: 0
         
-        // 3. Insert kits
+        // Retrieve all existing rabbit names in the farm for collision-free proper naming
+        val allRabbits = repository.getAllRabbits()
+        val existingNames = allRabbits.map { it.name }.toSet()
+        val usedInThisBatch = mutableSetOf<String>()
+
+        // 3. Insert kits with distinct, charming proper names (no more generic 'Lapereau 1, 2')
         for (i in 1..offspringCount) {
             val sequentialNumber = maxId + i
             val code = String.format(java.util.Locale.US, "ABV-%02d-%03d", birthYear, sequentialNumber)
+            val kitProperName = com.example.utils.RabbitNameGenerator.generateUniqueKitName(existingNames, usedInThisBatch)
+
             val baby = Rabbit(
-                name = String.format(java.util.Locale.US, "Lapereau n°%d (Portée %s)", i, code),
+                name = kitProperName,
                 sex = "Indéterminé",
                 dateOfBirth = birthDate,
                 breed = breedToUse,
@@ -666,7 +673,7 @@ class FarmViewModel(application: Application) : AndroidViewModel(application) {
                 weight = 0.1, // Birth standard kitten weight
                 fatherId = record.maleId,
                 motherId = record.femaleId,
-                notes = "Sexe indéterminé à la naissance. À sexer et nommer après 4-6 semaines.",
+                notes = "Matricule: $code • Portée de ${mother?.name ?: "Mère n/c"} × ${father?.name ?: "Père n/c"}. Sexe indéterminé à la naissance.",
                 isActive = true
             )
             val kitId = repository.insertRabbit(baby)
@@ -1494,6 +1501,44 @@ class FarmViewModel(application: Application) : AndroidViewModel(application) {
                 e.printStackTrace()
                 false
             }
+        }
+    }
+
+    /**
+     * Exports full database as a clean .json file without photo archives.
+     */
+    suspend fun exportBackupJsonFile(context: android.content.Context): android.net.Uri? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        try {
+            val jsonString = exportBackupJson()
+            val backupsDir = java.io.File(context.filesDir, "backups").apply { if (!exists()) mkdirs() }
+            val dateStr = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.getDefault()).format(java.util.Date())
+            val jsonFile = java.io.File(backupsDir, "ABVFarm_Backup_$dateStr.json")
+            jsonFile.writeText(jsonString, Charsets.UTF_8)
+            androidx.core.content.FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                jsonFile
+            )
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
+    /**
+     * Restores backup from a standalone .json file.
+     */
+    suspend fun restoreBackupJsonFile(context: android.content.Context, jsonUri: android.net.Uri): Boolean = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        try {
+            val jsonString = context.contentResolver.openInputStream(jsonUri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+            if (!jsonString.isNullOrEmpty()) {
+                restoreBackupRaw(jsonString)
+            } else {
+                false
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
         }
     }
 }

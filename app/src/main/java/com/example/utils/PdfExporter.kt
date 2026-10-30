@@ -7,6 +7,7 @@ import android.graphics.pdf.PdfDocument
 import android.net.Uri
 import android.widget.Toast
 import androidx.core.content.FileProvider
+import com.example.R
 import com.example.data.MatingRecord
 import com.example.data.PhotoRecord
 import com.example.data.Rabbit
@@ -110,6 +111,13 @@ object PdfExporter {
             isAntiAlias = true
         }
 
+        // Load ABVFarm official logo
+        val logoBitmap: Bitmap? = try {
+            BitmapFactory.decodeResource(context.resources, R.drawable.abvnewlogo)
+        } catch (_: Exception) {
+            null
+        }
+
         fun drawFooter(c: Canvas, pNum: Int) {
             c.drawLine(MARGIN_X, 800f, MARGIN_X + CONTENT_WIDTH, 800f, paintBorder)
             c.drawText("Ferme ABV Sarl • Fiche Officielle d'Élevage & Carnet Zootechnique", MARGIN_X, 816f, paintFooter)
@@ -124,13 +132,34 @@ object PdfExporter {
                 style = Paint.Style.FILL
             }
             c.drawRect(0f, 0f, PAGE_WIDTH.toFloat(), 40f, pHeader)
+
+            var headTextX = MARGIN_X
+            if (logoBitmap != null) {
+                try {
+                    val iconSize = 24f
+                    val iconLeft = MARGIN_X
+                    val iconTop = 8f
+                    val path = Path().apply {
+                        addRoundRect(RectF(iconLeft, iconTop, iconLeft + iconSize, iconTop + iconSize), 5f, 5f, Path.Direction.CW)
+                    }
+                    c.save()
+                    c.clipPath(path)
+                    val scaledIcon = Bitmap.createScaledBitmap(logoBitmap, iconSize.toInt(), iconSize.toInt(), true)
+                    c.drawBitmap(scaledIcon, iconLeft, iconTop, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+                    c.restore()
+                    headTextX = MARGIN_X + iconSize + 8f
+                } catch (_: Exception) {
+                    headTextX = MARGIN_X
+                }
+            }
+
             val pHeadText = Paint().apply {
                 color = Color.WHITE
-                textSize = 10f
+                textSize = 9.5f
                 isFakeBoldText = true
                 isAntiAlias = true
             }
-            c.drawText("FICHE D'ÉLEVAGE : ${rabbit.name.uppercase()} (#${rabbit.id}) - Race ${rabbit.breed}", MARGIN_X, 25f, pHeadText)
+            c.drawText("ABV FARM • FICHE D'ÉLEVAGE : ${rabbit.name.uppercase()} (#${rabbit.id}) - Race ${rabbit.breed}", headTextX, 25f, pHeadText)
         }
 
         fun ensureSpace(neededHeight: Float): Float {
@@ -153,43 +182,60 @@ object PdfExporter {
         }
         canvas.drawRect(0f, 107f, PAGE_WIDTH.toFloat(), 110f, pAccent)
 
-        // Draw Avatar photo if available
-        var avatarDrawn = false
-        val avatarUriStr = rabbit.imageUri
-        if (!avatarUriStr.isNullOrEmpty()) {
+        // Draw Official ABVFarm Logo prominently on the header banner
+        var logoDrawn = false
+        if (logoBitmap != null) {
             try {
-                val uri = Uri.parse(avatarUriStr)
-                val inputStream = context.contentResolver.openInputStream(uri)
-                val bitmap = BitmapFactory.decodeStream(inputStream)
-                inputStream?.close()
-                if (bitmap != null) {
-                    val avatarSize = 75f
-                    val left = MARGIN_X
-                    val top = 18f
-                    val rect = RectF(left, top, left + avatarSize, top + avatarSize)
-                    val pPhotoBg = Paint().apply {
-                        color = Color.WHITE
-                        style = Paint.Style.FILL
-                    }
-                    canvas.drawRoundRect(rect, 12f, 12f, pPhotoBg)
+                val logoSize = 74f
+                val left = MARGIN_X
+                val top = 18f
+                val rect = RectF(left, top, left + logoSize, top + logoSize)
 
-                    // Scaled bitmap
-                    val pBmp = Paint().apply { isAntiAlias = true }
-                    val scaled = Bitmap.createScaledBitmap(bitmap, (avatarSize - 4).toInt(), (avatarSize - 4).toInt(), true)
-                    canvas.drawBitmap(scaled, left + 2, top + 2, pBmp)
-                    avatarDrawn = true
+                // White backdrop card
+                val pLogoBg = Paint().apply {
+                    color = Color.WHITE
+                    style = Paint.Style.FILL
                 }
+                canvas.drawRoundRect(rect, 14f, 14f, pLogoBg)
+
+                // Clip and draw scaled logo inside
+                val path = Path().apply {
+                    addRoundRect(RectF(left + 2f, top + 2f, left + logoSize - 2f, top + logoSize - 2f), 12f, 12f, Path.Direction.CW)
+                }
+                canvas.save()
+                canvas.clipPath(path)
+                val scaled = Bitmap.createScaledBitmap(logoBitmap, (logoSize - 4).toInt(), (logoSize - 4).toInt(), true)
+                canvas.drawBitmap(scaled, left + 2f, top + 2f, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+                canvas.restore()
+
+                // Fine gold border accent around logo
+                val pLogoBorder = Paint().apply {
+                    color = colorAccent
+                    style = Paint.Style.STROKE
+                    strokeWidth = 1.5f
+                    isAntiAlias = true
+                }
+                canvas.drawRoundRect(rect, 14f, 14f, pLogoBorder)
+                logoDrawn = true
             } catch (_: Exception) {
-                avatarDrawn = false
+                logoDrawn = false
             }
         }
 
-        val textStartX = if (avatarDrawn) MARGIN_X + 88f else MARGIN_X
-        canvas.drawText(rabbit.name.uppercase(), textStartX, 44f, paintTitle)
+        val textStartX = if (logoDrawn) MARGIN_X + 86f else MARGIN_X
+
+        val paintBrandTag = Paint().apply {
+            color = colorAccent
+            textSize = 8.5f
+            isFakeBoldText = true
+            isAntiAlias = true
+        }
+        canvas.drawText("ABV FARM  •  ÉLEVAGE CUNICOLE PROFESSIONNEL", textStartX, 32f, paintBrandTag)
+        canvas.drawText(rabbit.name.uppercase(), textStartX, 52f, paintTitle)
 
         val genderText = if (rabbit.sex == "Male") "Reproducteur ♂ (Mâle)" else "Reproductrice ♀ (Femelle)"
-        canvas.drawText("$genderText  •  Identifiant ID: #${rabbit.id}  •  Cage: ${rabbit.cageNumber.ifEmpty { "Non assignée" }}", textStartX, 64f, paintSub)
-        canvas.drawText("Date d'édition : ${df.format(Date())}  •  Statut : ${if (rabbit.isActive) "Actif dans le cheptel" else rabbit.status}", textStartX, 82f, paintSub)
+        canvas.drawText("$genderText  •  Identifiant ID: #${rabbit.id}  •  Cage: ${rabbit.cageNumber.ifEmpty { "Non assignée" }}", textStartX, 70f, paintSub)
+        canvas.drawText("Date d'édition : ${df.format(Date())}  •  Statut : ${if (rabbit.isActive) "Actif dans le cheptel" else rabbit.status}", textStartX, 86f, paintSub)
 
         var currentY = 135f
 
@@ -554,8 +600,28 @@ object PdfExporter {
             color = Color.parseColor("#F9FBF9")
             style = Paint.Style.FILL
         }
-        canvas.drawRoundRect(MARGIN_X, stampTop, MARGIN_X + CONTENT_WIDTH, stampTop + 50f, 8f, 8f, pStampBox)
-        canvas.drawRoundRect(MARGIN_X, stampTop, MARGIN_X + CONTENT_WIDTH, stampTop + 50f, 8f, 8f, paintBorder)
+        canvas.drawRoundRect(MARGIN_X, stampTop, MARGIN_X + CONTENT_WIDTH, stampTop + 54f, 8f, 8f, pStampBox)
+        canvas.drawRoundRect(MARGIN_X, stampTop, MARGIN_X + CONTENT_WIDTH, stampTop + 54f, 8f, 8f, paintBorder)
+
+        var stampTextX = MARGIN_X + 12f
+        if (logoBitmap != null) {
+            try {
+                val stampLogoSize = 38f
+                val stampLogoLeft = MARGIN_X + 10f
+                val stampLogoTop = stampTop + 8f
+                val path = Path().apply {
+                    addRoundRect(RectF(stampLogoLeft, stampLogoTop, stampLogoLeft + stampLogoSize, stampLogoTop + stampLogoSize), 6f, 6f, Path.Direction.CW)
+                }
+                canvas.save()
+                canvas.clipPath(path)
+                val scaledStamp = Bitmap.createScaledBitmap(logoBitmap, stampLogoSize.toInt(), stampLogoSize.toInt(), true)
+                canvas.drawBitmap(scaledStamp, stampLogoLeft, stampLogoTop, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+                canvas.restore()
+                stampTextX = MARGIN_X + stampLogoSize + 20f
+            } catch (_: Exception) {
+                stampTextX = MARGIN_X + 12f
+            }
+        }
 
         val pStampText = Paint().apply {
             color = colorPrimary
@@ -563,13 +629,13 @@ object PdfExporter {
             isFakeBoldText = true
             isAntiAlias = true
         }
-        canvas.drawText("DOCUMENT OFFICIEL CERTIFIÉ CONFORME PAR L'ÉLEVEUR", MARGIN_X + 12f, stampTop + 20f, pStampText)
+        canvas.drawText("DOCUMENT OFFICIEL CERTIFIÉ CONFORME PAR L'ÉLEVAGE ABV FARM", stampTextX, stampTop + 20f, pStampText)
         val pStampSub = Paint().apply {
             color = colorGray
             textSize = 8f
             isAntiAlias = true
         }
-        canvas.drawText("Certifié conforme aux registres de la Ferme ABV Sarl le ${df.format(Date())}. Tout droit réservé.", MARGIN_X + 12f, stampTop + 36f, pStampSub)
+        canvas.drawText("Certifié conforme aux registres de la Ferme ABV Sarl le ${df.format(Date())}. Tout droit réservé.", stampTextX, stampTop + 36f, pStampSub)
 
         drawFooter(canvas, pageNumber)
         pdfDocument.finishPage(page)

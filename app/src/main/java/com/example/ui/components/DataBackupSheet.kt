@@ -53,7 +53,7 @@ fun DataBackupBottomSheet(
     var pendingRestoreUri by remember { mutableStateOf<Uri?>(null) }
     var showRestoreConfirmDialog by remember { mutableStateOf(false) }
 
-    val zipPickerLauncher = rememberLauncherForActivityResult(
+    val jsonPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         if (uri != null) {
@@ -332,36 +332,36 @@ fun DataBackupBottomSheet(
                 }
             }
 
-            // ACTION CARD 1: Full ZIP Backup
+            // ACTION CARD 1: Full JSON Backup (lightweight, standard, no zip/photos)
             DataActionCard(
-                icon = Icons.Rounded.FolderZip,
+                icon = Icons.Rounded.Code,
                 iconTint = MaterialTheme.colorScheme.primary,
                 iconBackground = MaterialTheme.colorScheme.primaryContainer,
-                badge = "COMPLÈTE",
+                badge = "JSON STANDARD",
                 badgeColor = MaterialTheme.colorScheme.primary,
-                title = "Sauvegarde Totale (Archive ZIP)",
-                description = "Archive contenant toute la base de données (lapins, généalogies, pesées, soins, finances) ainsi que toutes les photos enregistrées.",
-                actionLabel = "Créer & Partager l'archive ZIP",
+                title = "Sauvegarde Complète (Fichier JSON)",
+                description = "Exportation propre et complète de toutes les tables (lapins, généalogies, saillies, pesées, soins, bandes d'engraissement, finances, inventaire, rappels) dans un fichier JSON.",
+                actionLabel = "Exporter la Sauvegarde JSON",
                 isLoading = isProcessing,
                 onClick = {
                     if (isProcessing) return@DataActionCard
                     isProcessing = true
-                    processingMessage = "Génération de l'archive ZIP..."
+                    processingMessage = "Génération du fichier de sauvegarde JSON..."
                     scope.launch {
                         try {
-                            val zipUri = viewModel.exportBackupZip(context)
+                            val jsonUri = viewModel.exportBackupJsonFile(context)
                             isProcessing = false
-                            if (zipUri != null) {
+                            if (jsonUri != null) {
                                 val sendIntent = Intent().apply {
                                     action = Intent.ACTION_SEND
-                                    putExtra(Intent.EXTRA_STREAM, zipUri)
-                                    type = "application/zip"
+                                    putExtra(Intent.EXTRA_STREAM, jsonUri)
+                                    type = "application/json"
                                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                                 }
-                                val shareIntent = Intent.createChooser(sendIntent, "Sauvegarde ABVFarm (ZIP + Photos)")
+                                val shareIntent = Intent.createChooser(sendIntent, "Sauvegarde ABVFarm (Fichier JSON)")
                                 context.startActivity(shareIntent)
                             } else {
-                                Toast.makeText(context, "Échec de l'exportation ZIP", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "Échec de l'exportation JSON", Toast.LENGTH_SHORT).show()
                             }
                         } catch (e: Exception) {
                             isProcessing = false
@@ -410,21 +410,21 @@ fun DataBackupBottomSheet(
                 }
             )
 
-            // ACTION CARD 3: Restore Backup
+            // ACTION CARD 3: Restore JSON Backup
             DataActionCard(
                 icon = Icons.Rounded.CloudDownload,
                 iconTint = MaterialTheme.colorScheme.secondary,
                 iconBackground = MaterialTheme.colorScheme.secondaryContainer,
                 badge = "RESTAURATION",
                 badgeColor = MaterialTheme.colorScheme.secondary,
-                title = "Restaurer une Sauvegarde",
-                description = "Importez un fichier ZIP généré précédemment pour récupérer l'ensemble des données et photos de votre élevage.",
-                actionLabel = "Sélectionner un fichier .zip",
+                title = "Restaurer une Sauvegarde JSON",
+                description = "Importez un fichier .json généré précédemment pour restaurer instantanément l'ensemble de vos données d'élevage.",
+                actionLabel = "Sélectionner un fichier .json",
                 isOutlined = true,
                 isLoading = isProcessing,
                 onClick = {
                     if (!isProcessing) {
-                        zipPickerLauncher.launch("*/*")
+                        jsonPickerLauncher.launch("*/*")
                     }
                 }
             )
@@ -480,7 +480,7 @@ fun DataBackupBottomSheet(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        text = "Cette action va remplacer les données actuelles de l'application par le contenu du fichier sélectionné (lapins, pesées, soins, saillies et photos).",
+                        text = "Cette action va remplacer les données actuelles de l'application par le contenu du fichier JSON sélectionné (lapins, pesées, soins, saillies, finances, stocks).",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurface
                     )
@@ -500,15 +500,15 @@ fun DataBackupBottomSheet(
                         pendingRestoreUri = null
                         if (uriToRestore != null) {
                             isProcessing = true
-                            processingMessage = "Restauration des données et photos en cours..."
+                            processingMessage = "Restauration des données JSON en cours..."
                             scope.launch {
-                                val success = viewModel.restoreBackupZip(context, uriToRestore)
+                                val success = viewModel.restoreBackupJsonFile(context, uriToRestore)
                                 isProcessing = false
                                 if (success) {
-                                    Toast.makeText(context, "Données et photos restaurées avec succès ! 🎉", Toast.LENGTH_LONG).show()
+                                    Toast.makeText(context, "Données d'élevage restaurées avec succès ! 🎉", Toast.LENGTH_LONG).show()
                                     onDismissRequest()
                                 } else {
-                                    Toast.makeText(context, "Échec : fichier ZIP invalide ou corrompu.", Toast.LENGTH_LONG).show()
+                                    Toast.makeText(context, "Échec : fichier JSON invalide ou corrompu.", Toast.LENGTH_LONG).show()
                                 }
                             }
                         }

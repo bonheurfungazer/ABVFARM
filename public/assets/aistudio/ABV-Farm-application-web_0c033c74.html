@@ -1,0 +1,1069 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style></head><body>
+<title>ABV Farm</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Figtree:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap">
+<style>
+/* Layout: app shell — sidebar on wide screens, bottom tab bar on phones; content column of cards built from the farm's real records */
+:root {
+  --bg: #F6F5EF;
+  --surface: #FFFFFF;
+  --surface-2: #EFEDE5;
+  --ink: #24302A;
+  --muted: #5B6862;
+  --line: #DCD8CD;
+  --sage: #3E5A47;
+  --sage-ink: #FFFFFF;
+  --sage-soft: #E2EDE4;
+  --sage-soft-ink: #233527;
+  --clay: #B95F45;
+  --clay-soft: #F6E3DB;
+  --ok: #1E6B34;   --ok-soft: #E3F1E5;
+  --warn: #9A5208; --warn-soft: #FFF1D9;
+  --bad: #B3261E;  --bad-soft: #FDE5E2;
+  --info: #0B629A; --info-soft: #E1F0FA;
+  --male: #1F5FA6; --male-soft: #E0ECF8;
+  --female: #A92F63; --female-soft: #F9E3ED;
+  --hero: #3E5A47; --hero-ink: #F3F7F2;
+  --shadow: 0 1px 2px rgba(36,48,42,.06), 0 4px 14px rgba(36,48,42,.05);
+  --f-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --f-body: "Figtree", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --r-s: 8px; --r-m: 14px; --r-l: 20px;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #101512; --surface: #18201B; --surface-2: #212A25; --ink: #E4ECE6; --muted: #A2B3A9; --line: #2E3B34;
+  --sage: #7CB88F; --sage-ink: #0E2416; --sage-soft: #233A2B; --sage-soft-ink: #D3EBDB;
+  --clay: #EC9E86; --clay-soft: #46271E;
+  --ok: #8FD19E; --ok-soft: #1B3423; --warn: #F4B567; --warn-soft: #3A2911; --bad: #FFB0A6; --bad-soft: #4A1D1A;
+  --info: #8CCBF7; --info-soft: #0F2D43; --male: #A3CBF3; --male-soft: #16283A; --female: #F4AACB; --female-soft: #35192A;
+  --hero: #2C553B; --hero-ink: #EEF6F0; --shadow: 0 1px 2px rgba(0,0,0,.3);
+  color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --bg: #101512; --surface: #18201B; --surface-2: #212A25; --ink: #E4ECE6; --muted: #A2B3A9; --line: #2E3B34;
+  --sage: #7CB88F; --sage-ink: #0E2416; --sage-soft: #233A2B; --sage-soft-ink: #D3EBDB;
+  --clay: #EC9E86; --clay-soft: #46271E;
+  --ok: #8FD19E; --ok-soft: #1B3423; --warn: #F4B567; --warn-soft: #3A2911; --bad: #FFB0A6; --bad-soft: #4A1D1A;
+  --info: #8CCBF7; --info-soft: #0F2D43; --male: #A3CBF3; --male-soft: #16283A; --female: #F4AACB; --female-soft: #35192A;
+  --hero: #2C553B; --hero-ink: #EEF6F0; --shadow: 0 1px 2px rgba(0,0,0,.3);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { background: var(--bg); color: var(--ink); font: 15px/1.5 var(--f-body); }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+h1, h2, h3 { font-family: var(--f-display); margin: 0; text-wrap: balance; letter-spacing: -.01em; }
+h1 { font-size: 1.75rem; font-weight: 800; }
+h2 { font-size: 1.15rem; font-weight: 700; }
+h3 { font-size: 1rem; font-weight: 700; }
+p { margin: 0; }
+button, input, select, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2.5px solid var(--sage); outline-offset: 2px; }
+.num, .tab { font-variant-numeric: tabular-nums; }
+
+.shell { display: grid; grid-template-columns: 1fr; min-height: 100%; }
+.side { display: none; }
+main { min-width: 0; padding-block: 20px 110px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.wrap { max-width: 1080px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+@media (min-width: 900px) {
+  .shell { grid-template-columns: 236px 1fr; }
+  .side { display: flex; flex-direction: column; gap: 4px; position: sticky; top: env(safe-area-inset-top, 0px); height: 100vh; padding: 22px 14px; padding-left: max(14px, env(safe-area-inset-left, 0px)); border-right: 1px solid var(--line); background: var(--surface); }
+  main { padding-block: 28px 48px; padding-right: max(28px, env(safe-area-inset-right, 0px)); padding-left: 28px; }
+  .bottom { display: none !important; }
+}
+.brand { display: flex; align-items: center; gap: 10px; padding: 4px 8px 18px; }
+.brand-mark { width: 38px; height: 38px; border-radius: 12px; background: var(--hero); color: var(--hero-ink); display: grid; place-items: center; flex: none; }
+.brand b { font-family: var(--f-display); font-size: 1.15rem; display: block; line-height: 1.1; }
+.brand small { color: var(--muted); font-size: .75rem; }
+.nav-a { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 12px; color: var(--muted); text-decoration: none; font-weight: 600; }
+.nav-a:hover { background: var(--surface-2); color: var(--ink); }
+.nav-a[aria-current="page"] { background: var(--sage-soft); color: var(--sage-soft-ink); }
+.nav-a svg { width: 20px; height: 20px; flex: none; }
+.side .sync { margin-top: auto; font-size: .78rem; color: var(--muted); padding: 10px 12px; display: flex; gap: 8px; align-items: center; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+.dot.on { background: var(--ok); } .dot.local { background: var(--warn); }
+
+.bottom { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: grid; grid-template-columns: repeat(5, 1fr); background: var(--surface); border-top: 1px solid var(--line); padding: 6px max(6px, env(safe-area-inset-right, 0px)) calc(6px + env(safe-area-inset-bottom, 0px)) max(6px, env(safe-area-inset-left, 0px)); }
+.bottom a, .bottom button { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 4px 0; text-decoration: none; color: var(--muted); font-size: .7rem; font-weight: 600; background: none; border: 0; cursor: pointer; }
+.bottom .pill { width: 54px; height: 30px; display: grid; place-items: center; border-radius: 15px; }
+.bottom [aria-current="page"] { color: var(--ink); }
+.bottom [aria-current="page"] .pill { background: var(--sage-soft); color: var(--sage-soft-ink); }
+.bottom svg { width: 21px; height: 21px; }
+
+.head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.head p { color: var(--muted); margin-top: 2px; }
+.eyebrow { font-size: .72rem; text-transform: uppercase; letter-spacing: .08em; font-weight: 700; color: var(--muted); }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-l); padding: 18px; box-shadow: var(--shadow); min-width: 0; }
+.card > .row-h { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+.grid { display: grid; gap: 14px; }
+.g2 { grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); }
+.g3 { grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr)); }
+.tiles { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.tile { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-m); padding: 14px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.tile .v { font-family: var(--f-display); font-size: 1.6rem; font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.tile .l { font-size: .78rem; color: var(--muted); font-weight: 600; }
+.tile .s { font-size: .78rem; color: var(--muted); }
+.tile.warn { background: var(--warn-soft); border-color: transparent; } .tile.warn .v { color: var(--warn); }
+.tile.bad { background: var(--bad-soft); border-color: transparent; } .tile.bad .v { color: var(--bad); }
+
+.hero { background: var(--hero); color: var(--hero-ink); border-radius: var(--r-l); padding: 22px; display: grid; gap: 16px; grid-template-columns: 1fr; position: relative; overflow: hidden; }
+.hero h1 { font-size: 1.9rem; }
+.hero p, .hero .head p { color: inherit; opacity: .86; max-width: 60ch; }
+.hero .meta { display: flex; gap: 8px; flex-wrap: wrap; }
+.hero .chip { background: rgba(255,255,255,.14); color: var(--hero-ink); }
+.hero svg.ears { position: absolute; right: -10px; bottom: -18px; width: 170px; opacity: .13; pointer-events: none; }
+
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border-radius: 12px; padding: 9px 14px; font-weight: 700; font-size: .9rem; border: 1px solid var(--line); background: var(--surface); cursor: pointer; text-decoration: none; white-space: nowrap; }
+.btn:hover { background: var(--surface-2); }
+.btn.pri { background: var(--sage); color: var(--sage-ink); border-color: transparent; }
+.btn.pri:hover { filter: brightness(1.08); }
+.btn.clay { background: var(--clay); color: var(--surface); border-color: transparent; }
+.btn.ghost { border-color: transparent; background: transparent; color: var(--muted); }
+.btn.ghost:hover { background: var(--surface-2); color: var(--ink); }
+.btn.danger { color: var(--bad); }
+.btn.sm { padding: 6px 10px; font-size: .8rem; border-radius: 10px; }
+.btn svg { width: 17px; height: 17px; }
+.hero .btn { background: var(--hero-ink); color: var(--hero); border-color: transparent; }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.chip { display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; padding: 2px 9px; font-size: .74rem; font-weight: 700; background: var(--surface-2); color: var(--muted); white-space: nowrap; }
+.chip.ok { background: var(--ok-soft); color: var(--ok); }
+.chip.warn { background: var(--warn-soft); color: var(--warn); }
+.chip.bad { background: var(--bad-soft); color: var(--bad); }
+.chip.info { background: var(--info-soft); color: var(--info); }
+.chip.m { background: var(--male-soft); color: var(--male); }
+.chip.f { background: var(--female-soft); color: var(--female); }
+.chip.clay { background: var(--clay-soft); color: var(--clay); }
+.tag { font-family: var(--f-mono); font-size: .72rem; font-weight: 700; letter-spacing: .02em; border: 1.5px solid currentColor; border-radius: 5px; padding: 0 5px; color: var(--muted); white-space: nowrap; }
+
+.list { display: flex; flex-direction: column; }
+.li { display: flex; align-items: center; gap: 12px; padding: 11px 0; border-top: 1px solid var(--line); min-width: 0; }
+.li:first-child { border-top: 0; }
+.li .grow { flex: 1; min-width: 0; }
+.li .t { font-weight: 600; }
+.li .d { font-size: .82rem; color: var(--muted); }
+.ico { width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center; flex: none; background: var(--surface-2); color: var(--muted); }
+.ico svg { width: 19px; height: 19px; }
+.ico.ok { background: var(--ok-soft); color: var(--ok); } .ico.warn { background: var(--warn-soft); color: var(--warn); }
+.ico.bad { background: var(--bad-soft); color: var(--bad); } .ico.info { background: var(--info-soft); color: var(--info); }
+.ico.m { background: var(--male-soft); color: var(--male); } .ico.f { background: var(--female-soft); color: var(--female); }
+.ico.clay { background: var(--clay-soft); color: var(--clay); }
+
+.rcard { display: flex; flex-direction: column; gap: 10px; text-decoration: none; color: inherit; border-radius: var(--r-l); padding: 16px; border: 1px solid transparent; transition: transform .15s ease; min-width: 0; }
+.rcard:hover { transform: translateY(-2px); }
+.rcard.m { background: var(--male-soft); } .rcard.f { background: var(--female-soft); } .rcard.u { background: var(--surface-2); }
+.rcard.off { background: var(--surface); border-color: var(--line); opacity: .85; }
+.rcard .top { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
+.rcard .nm { font-family: var(--f-display); font-weight: 800; font-size: 1.2rem; line-height: 1.15; overflow-wrap: anywhere; }
+.rcard.m .nm, .rcard.m .sx { color: var(--male); } .rcard.f .nm, .rcard.f .sx { color: var(--female); }
+.rcard .facts { display: flex; gap: 14px; font-size: .82rem; color: var(--muted); flex-wrap: wrap; }
+.rcard .facts b { color: var(--ink); font-weight: 700; }
+.sx { font-size: 1.3rem; line-height: 1; font-weight: 800; }
+
+.toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.seg { display: inline-flex; background: var(--surface-2); border-radius: 12px; padding: 3px; gap: 2px; flex-wrap: wrap; }
+.seg button { border: 0; background: transparent; padding: 6px 11px; border-radius: 9px; font-weight: 600; font-size: .84rem; cursor: pointer; color: var(--muted); }
+.seg button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
+.search { flex: 1 1 200px; min-width: 0; display: flex; align-items: center; gap: 8px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 0 12px; }
+.search input { border: 0; background: transparent; padding: 9px 0; width: 100%; outline: none; }
+.search svg { width: 17px; height: 17px; color: var(--muted); flex: none; }
+
+/* Gestation track: 31 days with the farm's milestones (palpation J10–14, nest box J28, kindling J31) */
+.gest { display: flex; flex-direction: column; gap: 8px; }
+.track { position: relative; height: 10px; border-radius: 6px; background: var(--surface-2); margin: 16px 0 18px; }
+.track .fill { position: absolute; inset: 0 auto 0 0; border-radius: 6px; background: var(--clay); }
+.track .zone { position: absolute; top: 0; bottom: 0; background: var(--info); opacity: .28; }
+.track .mk { position: absolute; top: -5px; width: 2px; height: 20px; background: var(--ink); opacity: .45; }
+.track .mk span, .track .zone span { position: absolute; top: 22px; transform: translateX(-50%); font-size: .66rem; color: var(--muted); white-space: nowrap; font-weight: 600; }
+.track .zone span { top: -18px; left: 50%; }
+.track .now { position: absolute; top: -4px; width: 18px; height: 18px; border-radius: 50%; background: var(--surface); border: 3px solid var(--clay); transform: translateX(-50%); }
+.gest .gl { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+.chart { width: 100%; height: auto; display: block; }
+.chart text { fill: var(--muted); font-size: 11px; font-family: var(--f-body); }
+.chart .grid-l { stroke: var(--line); stroke-width: 1; }
+@media (max-width: 600px) { .chart text { font-size: 19px; } }
+.empty { text-align: center; padding: 28px 12px; color: var(--muted); display: flex; flex-direction: column; gap: 10px; align-items: center; }
+.empty svg { width: 46px; height: 46px; opacity: .55; }
+.empty b { color: var(--ink); font-family: var(--f-display); font-size: 1.05rem; }
+.banner { display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; background: var(--info-soft); color: var(--info); border-radius: var(--r-m); padding: 10px 14px; font-size: .88rem; font-weight: 600; }
+.banner.warn { background: var(--warn-soft); color: var(--warn); }
+
+.kv { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px 18px; }
+.kv div { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.kv dt { font-size: .74rem; color: var(--muted); font-weight: 600; }
+.kv dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+
+.ped { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; align-items: center; overflow-x: auto; }
+.ped .col { display: flex; flex-direction: column; gap: 8px; justify-content: space-around; height: 100%; }
+.pb { border-radius: 10px; padding: 8px 10px; font-size: .82rem; background: var(--surface-2); min-width: 0; text-decoration: none; color: inherit; display: block; }
+.pb.m { background: var(--male-soft); } .pb.f { background: var(--female-soft); }
+.pb b { display: block; overflow-wrap: anywhere; } .pb small { color: var(--muted); }
+.pb.none { border: 1.5px dashed var(--line); background: transparent; color: var(--muted); }
+
+.risk { border-radius: var(--r-m); padding: 12px 14px; display: flex; gap: 10px; align-items: center; }
+.risk.ok { background: var(--ok-soft); color: var(--ok); } .risk.warn { background: var(--warn-soft); color: var(--warn); } .risk.bad { background: var(--bad-soft); color: var(--bad); }
+.risk b { font-family: var(--f-display); font-size: 1.25rem; }
+
+.tablewrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: .88rem; }
+th { text-align: left; font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+td { padding: 9px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+td.r, th.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pos { color: var(--ok); font-weight: 700; } .neg { color: var(--bad); font-weight: 700; }
+.bar { height: 8px; border-radius: 5px; background: var(--surface-2); overflow: hidden; }
+.bar i { display: block; height: 100%; background: var(--sage); border-radius: 5px; }
+.bar.warn i { background: var(--warn); } .bar.bad i { background: var(--bad); }
+
+dialog { border: 0; padding: 0; background: transparent; max-width: 100vw; max-height: 100vh; }
+.overlay { position: fixed; inset: 0; z-index: 50; background: rgba(10,16,12,.45); display: flex; align-items: flex-end; justify-content: center; }
+@media (min-width: 640px) { .overlay { align-items: center; padding: 24px; } }
+.sheet { background: var(--surface); color: var(--ink); width: 100%; max-width: 560px; max-height: 92vh; overflow-y: auto; border-radius: 22px 22px 0 0; padding: 20px max(18px, env(safe-area-inset-right, 0px)) calc(20px + env(safe-area-inset-bottom, 0px)) max(18px, env(safe-area-inset-left, 0px)); display: flex; flex-direction: column; gap: 14px; animation: up .22s ease; }
+@media (min-width: 640px) { .sheet { border-radius: 22px; padding: 22px; } }
+@keyframes up { from { transform: translateY(24px); opacity: .4; } }
+.sheet .sh { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.form .full { grid-column: 1 / -1; }
+@media (max-width: 460px) { .form { grid-template-columns: 1fr; } }
+.field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.field label { font-size: .8rem; font-weight: 700; color: var(--muted); }
+.field input, .field select, .field textarea { width: 100%; border: 1.5px solid var(--line); border-radius: 11px; background: var(--bg); padding: 9px 11px; min-width: 0; }
+.field input:focus, .field select:focus, .field textarea:focus { border-color: var(--sage); outline: none; }
+.field textarea { min-height: 70px; resize: vertical; }
+.check { display: flex; gap: 8px; align-items: center; font-weight: 600; font-size: .88rem; }
+.check input { width: 18px; height: 18px; accent-color: var(--sage); }
+.hint { font-size: .78rem; color: var(--muted); }
+.morelist { display: grid; gap: 6px; }
+.toast { position: fixed; left: 50%; bottom: calc(86px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 60; background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: 12px; font-weight: 600; font-size: .9rem; box-shadow: var(--shadow); max-width: calc(100vw - 32px); }
+@media (min-width: 900px) { .toast { bottom: 28px; } }
+.loading { display: grid; place-items: center; min-height: 50vh; color: var(--muted); gap: 10px; }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+
+<div class="shell">
+  <aside class="side" aria-label="Navigation principale">
+    <div class="brand">
+      <div class="brand-mark"><svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true"><path d="M8.2 2.5c1.3-.3 2.3 1.5 2.4 4.4.1 1.4 0 2.6-.2 3.4.5-.2 1-.2 1.6-.2s1.1 0 1.6.2c-.2-.8-.3-2-.2-3.4.1-2.9 1.1-4.7 2.4-4.4 1.4.4 1.6 3 .6 5.9-.4 1.1-.9 2.1-1.4 2.8 1.9 1 3.1 2.8 3.1 4.9 0 3.2-2.7 5.4-6.1 5.4s-6.1-2.2-6.1-5.4c0-2.1 1.2-3.9 3.1-4.9-.5-.7-1-1.7-1.4-2.8-1-2.9-.8-5.5.6-5.9Z"/></svg></div>
+      <div><b>ABV Farm</b><small>Gestion d'élevage cunicole</small></div>
+    </div>
+    <nav id="sidenav"></nav>
+    <div class="sync" id="sync"><span class="dot"></span><span>Connexion…</span></div>
+  </aside>
+  <main id="main"><div class="loading"><span>Chargement de votre élevage…</span></div></main>
+</div>
+<nav class="bottom" id="bottomnav" aria-label="Navigation"></nav>
+<div id="modal"></div>
+<div id="toast" class="toast" hidden></div>
+<input type="file" id="importFile" accept="application/json,.json" hidden>
+
+<script>
+"use strict";
+/* ---------- Icons ---------- */
+const I = (p) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`;
+const ICON = {
+  home: I('<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M10 21v-6h4v6"/>'),
+  rabbit: I('<path d="M9 9c-1.5-2-2.2-6 0-6.5S11 6 11 9"/><path d="M15 9c1.5-2 2.2-6 0-6.5S13 6 13 9"/><ellipse cx="12" cy="15" rx="6" ry="5.5"/><path d="M10 14h.01M14 14h.01"/>'),
+  heart: I('<path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10Z"/>'),
+  box: I('<path d="M3 7.5 12 3l9 4.5v9L12 21l-9-4.5Z"/><path d="M3 7.5 12 12l9-4.5M12 12v9"/>'),
+  coins: I('<ellipse cx="9" cy="7" rx="6" ry="3"/><path d="M3 7v5c0 1.7 2.7 3 6 3s6-1.3 6-3V7"/><path d="M9 15v2c0 1.7 2.7 3 6 3s6-1.3 6-3v-5c0-1.6-2.4-2.9-5.5-3"/>'),
+  bell: I('<path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4Z"/><path d="M10 20a2 2 0 0 0 4 0"/>'),
+  layers: I('<path d="m12 3 9 5-9 5-9-5Z"/><path d="m3 13 9 5 9-5"/>'),
+  data: I('<ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6M4 11.5v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>'),
+  more: I('<circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/>'),
+  plus: I('<path d="M12 5v14M5 12h14"/>'),
+  search: I('<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>'),
+  scale: I('<path d="M5 20h14l-1.5-11h-11Z"/><circle cx="12" cy="5" r="2"/><path d="m12 13 2-2"/>'),
+  syringe: I('<path d="m18 2 4 4M16 4l4 4M14 6l4 4-9 9H5v-4Z"/><path d="m10 10 2 2M7 13l2 2"/>'),
+  edit: I('<path d="M4 20h4L19 9l-4-4L4 16Z"/><path d="m14 6 4 4"/>'),
+  trash: I('<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>'),
+  back: I('<path d="M15 18 9 12l6-6"/>'),
+  check: I('<path d="m5 12 5 5L20 7"/>'),
+  x: I('<path d="M6 6l12 12M18 6 6 18"/>'),
+  alert: I('<path d="M12 3 2 20h20Z"/><path d="M12 10v4M12 17h.01"/>'),
+  grain: I('<path d="M12 21V9"/><path d="M12 9c-3 0-4-2.5-4-5 2.5 0 4 1.5 4 5Zm0 0c3 0 4-2.5 4-5-2.5 0-4 1.5-4 5Z"/><path d="M12 15c-3 0-4-2.5-4-5 2.5 0 4 1.5 4 5Zm0 0c3 0 4-2.5 4-5-2.5 0-4 1.5-4 5Z"/>'),
+  nest: I('<path d="M3 13c0 4 4 7 9 7s9-3 9-7"/><path d="M3 13h18"/><path d="M7 13c0-3 2-5 5-5s5 2 5 5"/>'),
+  hand: I('<path d="M8 13V5.5a1.5 1.5 0 0 1 3 0V12M11 11.5V4a1.5 1.5 0 0 1 3 0v8M14 11.5V5.5a1.5 1.5 0 0 1 3 0V14c0 4-2.5 7-6.5 7S5 18 4 15l-1.2-3a1.5 1.5 0 0 1 2.7-1.3L8 14"/>'),
+  baby: I('<circle cx="12" cy="8" r="4"/><path d="M5 21c0-4 3-7 7-7s7 3 7 7"/>'),
+  cal: I('<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>'),
+  download: I('<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>'),
+  upload: I('<path d="M12 20V9M7 14l5-5 5 5M5 4h14"/>'),
+  tree: I('<rect x="9" y="3" width="6" height="5" rx="1"/><rect x="3" y="16" width="6" height="5" rx="1"/><rect x="15" y="16" width="6" height="5" rx="1"/><path d="M12 8v4M6 16v-4h12v4"/>'),
+  shield: I('<path d="M12 3 4 6v6c0 4.5 3.4 8 8 9 4.6-1 8-4.5 8-9V6Z"/>'),
+};
+
+/* ---------- Utils ---------- */
+const $ = (s, r = document) => r.querySelector(s);
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+const pad = (n) => String(n).padStart(2, "0");
+const iso = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const today = () => iso(new Date());
+const parse = (s) => new Date(String(s).slice(0, 10) + "T00:00:00");
+const addDays = (s, n) => { const d = parse(s); d.setDate(d.getDate() + n); return iso(d); };
+const diff = (a, b) => Math.round((parse(b) - parse(a)) / 864e5); // days from a to b
+const MONTHS = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."];
+const fmtDate = (s) => { if (!s) return "—"; const d = parse(s); return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`; };
+const fmtShort = (s) => { const d = parse(s); return `${d.getDate()} ${MONTHS[d.getMonth()]}`; };
+const nf0 = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 });
+const nf1 = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 });
+const nf2 = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 2 });
+const fcfa = (n) => nf0.format(Math.round(n || 0)) + " F";
+const relDay = (n) => n === 0 ? "aujourd'hui" : n === 1 ? "demain" : n === -1 ? "hier" : n > 0 ? `dans ${n} j` : `il y a ${-n} j`;
+function ageLabel(days) {
+  if (days < 0) return "—";
+  if (days < 60) return `${days} j`;
+  if (days < 365) return `${Math.floor(days / 30.44)} mois`;
+  const y = Math.floor(days / 365.25), m = Math.floor((days - y * 365.25) / 30.44);
+  return `${y} an${y > 1 ? "s" : ""}${m ? ` ${m} m` : ""}`;
+}
+
+/* ---------- Farm rules (same as the Android app) ---------- */
+const GESTATION = 31, MATURE_DAYS = 150, WEANING = 35, FATTEN_DAYS = 45;
+const STATUSES = ["Actif", "Vendu", "Mort", "Abattu", "Externe", "Donné"];
+const MATING_ST = ["Accouplé", "Gestation confirmée", "Mise bas", "Échoué"];
+const TREAT_TYPES = ["Vaccin", "Vermifuge", "Anti-coccidien", "Vitamines", "Antibiotique", "Autre soin"];
+const INV_CATS = ["Nourriture", "Médicament", "Matériel", "Autre"];
+const UNITS = ["kg", "sac 25 kg", "sac 50 kg", "g", "L", "unité", "boîte"];
+const TX_IN = ["Vente chair", "Vente reproducteur", "Vente fumier", "Autre recette"];
+const TX_OUT = ["Aliment", "Santé", "Matériel", "Main-d'œuvre", "Autre dépense"];
+const PRIOS = ["Haute", "Moyenne", "Basse"];
+
+/* ---------- State & storage ---------- */
+const KIND = { rabbit: "rabbits", mating: "matings", weight: "weights", treatment: "treatments", item: "inventory", feed: "feed", tx: "tx", batch: "batches", reminder: "reminders" };
+let S = blank();
+function blank() { const o = {}; Object.values(KIND).forEach((k) => (o[k] = [])); return o; }
+let mode = "loading"; // cloud | local | loading
+let backend = null, readOnly = false, downloads = null, ready = false;
+
+function ingest(docs) {
+  const s = blank();
+  for (const d of docs) { const k = KIND[d.kind]; if (k) s[k].push(d); }
+  S = s; ready = true; render();
+}
+const LS_KEY = "abvfarm-web-v1";
+function localBackend() {
+  let all = {};
+  try { all = JSON.parse(localStorage.getItem(LS_KEY) || "{}"); } catch (e) { all = {}; }
+  const persist = () => { try { localStorage.setItem(LS_KEY, JSON.stringify(all)); } catch (e) {} };
+  const emit = () => ingest(Object.values(all));
+  setTimeout(emit, 0);
+  return {
+    async save(kind, obj) { all[kind + "-" + obj.id] = { ...obj, kind }; persist(); emit(); },
+    async remove(kind, id) { delete all[kind + "-" + id]; persist(); emit(); },
+  };
+}
+function cloudBackend(db, userId) {
+  const col = db.collection("data/users/" + userId);
+  col.onSnapshot((snap) => ingest(snap.docs.map((d) => d.data())), (e) => { toast("Synchronisation interrompue. Rechargez la page."); console.warn(e); });
+  return {
+    async save(kind, obj) { await col.doc(kind + "-" + obj.id).set({ ...obj, kind }); },
+    async remove(kind, id) { await col.doc(kind + "-" + id).delete(); },
+  };
+}
+async function save(kind, obj) {
+  if (readOnly) { toast("Lecture seule : vous ne pouvez pas modifier cet élevage."); return false; }
+  if (!obj.id) obj.id = uid();
+  try { await backend.save(kind, obj); return true; }
+  catch (e) { return fail(e); }
+}
+async function removeDoc(kind, id) {
+  if (readOnly) { toast("Lecture seule : vous ne pouvez pas modifier cet élevage."); return false; }
+  try { await backend.remove(kind, id); return true; } catch (e) { return fail(e); }
+}
+function fail(e) {
+  if (e && e.code === "invalid_argument") { readOnly = true; toast("Enregistrement refusé : ce lien est en lecture seule."); }
+  else if (e && e.code === "quota_exceeded") toast("Stockage plein. Supprimez d'anciens enregistrements puis réessayez.");
+  else toast("Enregistrement impossible pour le moment. Réessayez.");
+  console.warn(e); return false;
+}
+
+async function boot() {
+  let db = null, userId = null;
+  try {
+    const [d, u, dl] = await Promise.all([window.claude?.use?.("db"), window.claude?.use?.("user"), window.claude?.use?.("downloads")]);
+    db = d || null; downloads = dl || null;
+    userId = u ? await u.id() : null;
+  } catch (e) { db = null; }
+  if (db && userId) { mode = "cloud"; backend = cloudBackend(db, userId); }
+  else { mode = "local"; backend = localBackend(); }
+  renderSync();
+}
+
+/* ---------- Derived data ---------- */
+const byId = (list, id) => list.find((x) => x.id === id);
+const rab = (id) => byId(S.rabbits, id);
+const isActive = (r) => r && (r.status || "Actif") === "Actif";
+const age = (r) => r?.birth ? diff(r.birth, today()) : -1;
+const sexCls = (r) => r?.sex === "Male" ? "m" : r?.sex === "Female" ? "f" : "u";
+const sexSym = (r) => r?.sex === "Male" ? "♂" : r?.sex === "Female" ? "♀" : "?";
+const rname = (id) => rab(id)?.name || "Inconnu";
+function weightsOf(id) { return S.weights.filter((w) => w.rabbit === id).sort((a, b) => a.date.localeCompare(b.date)); }
+function lastWeight(id) { const w = weightsOf(id); return w.length ? w[w.length - 1].kg : null; }
+function gmq(id) { const w = weightsOf(id); if (w.length < 2) return null; const a = w[0], b = w[w.length - 1]; const d = diff(a.date, b.date); return d > 0 ? ((b.kg - a.kg) * 1000) / d : null; }
+function kgOf(it) {
+  const q = Number(it.qty) || 0;
+  switch (it.unit) { case "sac 25 kg": return q * 25; case "sac 50 kg": return q * 50; case "g": return q / 1000; case "kg": return q; default: return 0; }
+}
+function feedStock() {
+  const bought = S.inventory.filter((i) => i.cat === "Nourriture").reduce((s, i) => s + kgOf(i), 0);
+  const used = S.feed.reduce((s, f) => s + (Number(f.grams) || 0), 0) / 1000;
+  return Math.max(0, bought - used);
+}
+function underWithdrawal(id) {
+  const t = today();
+  return S.treatments.filter((x) => x.rabbit === id && Number(x.withdrawal) > 0 && addDays(x.date, Number(x.withdrawal)) > t)
+    .map((x) => addDays(x.date, Number(x.withdrawal))).sort().pop() || null;
+}
+/* Daily ration per category — recommendation used by the app */
+function ration() {
+  const t = today(); const c = { mal: 0, fem: 0, gest: 0, lact: 0, y1: 0, y2: 0 };
+  S.rabbits.filter(isActive).forEach((r) => {
+    const a = age(r);
+    if (a < 30) return; if (a < 60) { c.y1++; return; } if (a < 120) { c.y2++; return; }
+    if (r.sex === "Male") { c.mal++; return; }
+    const lact = S.matings.some((m) => m.female === r.id && m.status === "Mise bas" && m.birthDate && diff(m.birthDate, t) <= 40);
+    const gest = S.matings.some((m) => m.female === r.id && ["Accouplé", "Gestation confirmée"].includes(m.status) && diff(t, m.due) >= -3);
+    if (lact) c.lact++; else if (gest) c.gest++; else c.fem++;
+  });
+  const fat = S.batches.filter((b) => b.status === "Actif").reduce((s, b) => s + (Number(b.current) || 0), 0);
+  const g = c.mal * 120 + c.fem * 120 + c.gest * 180 + c.lact * 280 + c.y1 * 50 + c.y2 * 90 + fat * 110;
+  return { grams: g, c, fat };
+}
+
+/* Wright inbreeding via additive relationship; older animal resolved first */
+function makeKinship() {
+  const memoA = new Map(), memoF = new Map();
+  const older = (x, y) => { const a = rab(x), b = rab(y); const da = a?.birth || "9999", dbb = b?.birth || "9999"; return da === dbb ? (x < y) : da < dbb; };
+  function F(x, depth) { if (!x) return 0; if (memoF.has(x)) return memoF.get(x); const r = rab(x); const v = r ? 0.5 * A(r.father, r.mother, depth + 1) : 0; memoF.set(x, v); return v; }
+  function A(x, y, depth = 0) {
+    if (!x || !y || depth > 12) return 0;
+    if (x === y) return 1 + F(x, depth);
+    const key = x < y ? x + "|" + y : y + "|" + x;
+    if (memoA.has(key)) return memoA.get(key);
+    let a = x, b = y; if (!older(a, b)) { a = y; b = x; } // b is the younger: expand its parents
+    const rb = rab(b);
+    const v = rb ? 0.5 * (A(a, rb.father, depth + 1) + A(a, rb.mother, depth + 1)) : 0;
+    memoA.set(key, v); return v;
+  }
+  return { A, F };
+}
+function offspringF(male, female) { if (!male || !female) return 0; return 0.5 * makeKinship().A(male, female) * 100; }
+function riskOf(f) {
+  if (f <= 0.0001) return { lvl: "ok", label: "Aucune parenté connue", tip: "Accouplement sûr." };
+  if (f < 6.25) return { lvl: "warn", label: "Risque faible", tip: "Parenté éloignée. Acceptable avec surveillance." };
+  if (f <= 12.5) return { lvl: "bad", label: "Risque élevé", tip: "Équivaut à des demi-frères/sœurs. À éviter." };
+  return { lvl: "bad", label: "Risque critique", tip: "Parenté très proche (frère/sœur, parent/enfant). Déconseillé." };
+}
+
+/* ---------- Alerts ---------- */
+function alerts() {
+  const t = today(), out = [];
+  for (const m of S.matings) {
+    const d = diff(m.date, t), toBirth = diff(t, m.due), f = rname(m.female);
+    if (m.status === "Accouplé" && d >= 10 && d <= 14) out.push({ sev: "info", icon: "hand", title: `Palper ${f}`, sub: `J${d} après saillie — fenêtre de palpation J10 à J14`, act: [["Gestation confirmée", "mst", m.id, "Gestation confirmée"], ["Vide", "mst", m.id, "Échoué"]] });
+    if (["Accouplé", "Gestation confirmée"].includes(m.status) && toBirth >= 1 && toBirth <= 3) out.push({ sev: "warn", icon: "nest", title: `Boîte à nid pour ${f}`, sub: `Mise bas prévue ${relDay(toBirth)} (${fmtShort(m.due)})` });
+    if (["Accouplé", "Gestation confirmée"].includes(m.status) && toBirth <= 0 && toBirth >= -6) out.push({ sev: "bad", icon: "baby", title: `Mise bas attendue : ${f}`, sub: toBirth === 0 ? "Prévue aujourd'hui" : `En retard de ${-toBirth} j`, act: [["Enregistrer la mise bas", "kindle", m.id]] });
+    if (m.status === "Mise bas" && m.birthDate) {
+      const a = diff(m.birthDate, t);
+      if (a >= WEANING - 2 && a <= WEANING + 10 && !S.batches.some((b) => b.mating === m.id)) out.push({ sev: "info", icon: "layers", title: `Sevrer la portée de ${f}`, sub: `Lapereaux âgés de ${a} j`, act: [["Créer un lot", "newbatch", m.id]] });
+    }
+  }
+  for (const x of S.treatments) if (x.next) { const n = diff(t, x.next); if (n <= 2 && n >= -14) out.push({ sev: n < 0 ? "bad" : "warn", icon: "syringe", title: `${x.type} : ${x.product || "rappel"}`, sub: `${x.rabbit ? rname(x.rabbit) : "Tout l'élevage"} — ${relDay(n)}` }); }
+  for (const b of S.batches) if (b.status === "Actif") { const n = diff(t, b.target); if (n <= 3) out.push({ sev: "ok", icon: "coins", title: `Lot ${b.code} prêt à la vente`, sub: n < 0 ? `Date cible dépassée de ${-n} j` : `Date cible ${relDay(n)}`, act: [["Vendre", "sell", b.id]] }); }
+  for (const r of S.reminders) if (!r.done && r.due <= t) out.push({ sev: r.prio === "Haute" ? "bad" : "warn", icon: "bell", title: r.title, sub: `Rappel — ${relDay(diff(t, r.due))}`, act: [["Fait", "remdone", r.id]] });
+  const stock = feedStock(), rg = ration().grams;
+  if (S.inventory.length && stock < 10) out.push({ sev: stock <= 0 ? "bad" : "warn", icon: "grain", title: stock <= 0 ? "Stock d'aliment épuisé" : `Stock d'aliment faible : ${nf1.format(stock)} kg`, sub: rg ? `Environ ${nf1.format(stock / (rg / 1000))} jours de ration` : "Pensez à réapprovisionner", act: [["Ajouter un achat", "newitem"]] });
+  const order = { bad: 0, warn: 1, info: 2, ok: 3 };
+  return out.sort((a, b) => order[a.sev] - order[b.sev]);
+}
+
+/* ---------- Routing ---------- */
+const NAV = [
+  { id: "accueil", label: "Accueil", icon: "home" },
+  { id: "lapins", label: "Lapins", icon: "rabbit" },
+  { id: "saillies", label: "Saillies", icon: "heart" },
+  { id: "engraissement", label: "Engraissement", icon: "layers" },
+  { id: "stocks", label: "Stocks & aliment", icon: "box" },
+  { id: "finances", label: "Finances", icon: "coins" },
+  { id: "rappels", label: "Rappels & soins", icon: "bell" },
+  { id: "donnees", label: "Données", icon: "data" },
+];
+const BOTTOM = ["accueil", "lapins", "saillies", "rappels"];
+let ui = { q: "", sex: "all", st: "actifs", txf: "all" };
+function route() {
+  const h = decodeURIComponent(location.hash.slice(1));
+  if (h.startsWith("lapin-")) return { name: "lapin", id: h.slice(6) };
+  return { name: NAV.some((n) => n.id === h) ? h : "accueil" };
+}
+function go(h) { if (location.hash.slice(1) === h) render(); else location.hash = h; }
+window.addEventListener("hashchange", () => { render(); window.scrollTo(0, 0); });
+
+function renderNav() {
+  const r = route(); const cur = r.name === "lapin" ? "lapins" : r.name;
+  $("#sidenav").innerHTML = NAV.map((n) => `<a class="nav-a" href="#${n.id}" ${cur === n.id ? 'aria-current="page"' : ""}>${ICON[n.icon]}<span>${n.label}</span></a>`).join("");
+  const inMore = !BOTTOM.includes(cur);
+  $("#bottomnav").innerHTML = BOTTOM.map((id) => { const n = NAV.find((x) => x.id === id); return `<a href="#${id}" ${cur === id ? 'aria-current="page"' : ""}><span class="pill">${ICON[n.icon]}</span>${n.id === "rappels" ? "Rappels" : n.label}</a>`; }).join("")
+    + `<button type="button" data-act="more" ${inMore ? 'aria-current="page"' : ""}><span class="pill">${ICON.more}</span>Plus</button>`;
+}
+function renderSync() {
+  const el = $("#sync"); if (!el) return;
+  el.innerHTML = mode === "cloud" ? `<span class="dot on"></span><span>Synchronisé sur votre compte</span>` : mode === "local" ? `<span class="dot local"></span><span>Enregistré sur cet appareil</span>` : `<span class="dot"></span><span>Connexion…</span>`;
+}
+function render() {
+  renderNav(); renderSync();
+  if (!ready) return;
+  const r = route(); const v = VIEWS[r.name] || VIEWS.accueil;
+  $("#main").innerHTML = `<div class="wrap">${sampleBanner()}${v(r)}</div>`;
+  afterRender();
+}
+let afterHooks = [];
+function afterRender() { const h = afterHooks; afterHooks = []; h.forEach((f) => f()); }
+function sampleBanner() {
+  const n = Object.values(S).reduce((s, l) => s + l.filter((x) => x.sample).length, 0);
+  let b = n ? `<div class="banner"><span>Vous voyez des données d'exemple (${n} fiches). Elles ne sont pas les vôtres.</span><button class="btn sm" data-act="clearsamples">Effacer les exemples</button></div>` : "";
+  if (mode === "local") b += `<div class="banner warn"><span>Mode hors compte : vos données restent dans ce navigateur. Exportez-les régulièrement depuis « Données ».</span></div>`;
+  return b;
+}
+
+/* ---------- Small renderers ---------- */
+const emptyBox = (icon, title, text, btn) => `<div class="empty">${ICON[icon]}<b>${title}</b><span>${text}</span>${btn || ""}</div>`;
+const statusChip = (s) => { s = s || "Actif"; const c = s === "Actif" ? "ok" : s === "Vendu" ? "info" : s === "Mort" ? "bad" : s === "Abattu" ? "clay" : ""; return `<span class="chip ${c}">${esc(s)}</span>`; };
+const mstChip = (s) => { const c = s === "Mise bas" ? "ok" : s === "Gestation confirmée" ? "info" : s === "Échoué" ? "bad" : "warn"; return `<span class="chip ${c}">${esc(s)}</span>`; };
+const prioChip = (p) => `<span class="chip ${p === "Haute" ? "bad" : p === "Moyenne" ? "warn" : ""}">${esc(p || "Moyenne")}</span>`;
+const sevIco = (a) => `<span class="ico ${a.sev}">${ICON[a.icon]}</span>`;
+function gestTrack(m) {
+  const d = Math.max(0, Math.min(GESTATION, diff(m.date, today())));
+  const pc = (x) => (x / GESTATION) * 100;
+  return `<div class="track" role="img" aria-label="Jour ${d} sur ${GESTATION} de gestation">
+    <div class="fill" style="width:${pc(d)}%"></div>
+    <div class="zone" style="left:${pc(10)}%;width:${pc(4)}%"><span>Palpation</span></div>
+    <div class="mk" style="left:${pc(28)}%"><span>Nid J28</span></div>
+    <div class="mk" style="left:calc(100% - 2px)"><span style="transform:translateX(-90%)">J31</span></div>
+    <div class="now" style="left:${pc(d)}%"></div></div>`;
+}
+function gestCard(m) {
+  const d = diff(m.date, today()), left = diff(today(), m.due);
+  return `<div class="gest"><div class="gl"><div><b>${esc(rname(m.female))}</b> <span class="hint">× ${esc(rname(m.male))}</span></div>${mstChip(m.status)}</div>
+    ${gestTrack(m)}
+    <div class="gl"><span class="hint num">J${Math.max(0, d)} · mise bas ${left >= 0 ? relDay(left) : `en retard de ${-left} j`} (${fmtShort(m.due)})</span>
+    <div class="actions">${m.status === "Accouplé" && d >= 9 ? `<button class="btn sm" data-act="mst" data-id="${m.id}" data-v="Gestation confirmée">Gestation confirmée</button>` : ""}
+    ${d >= 26 ? `<button class="btn sm pri" data-act="kindle" data-id="${m.id}">Mise bas</button>` : ""}
+    <button class="btn sm ghost" data-act="mst" data-id="${m.id}" data-v="Échoué">Échec</button></div></div></div>`;
+}
+
+/* ---------- Views ---------- */
+const VIEWS = {};
+VIEWS.accueil = () => {
+  const act = S.rabbits.filter(isActive);
+  if (!S.rabbits.length) return `
+    <section class="hero"><div><span class="eyebrow" style="color:inherit;opacity:.8">ABV Farm</span><h1>Bienvenue dans votre élevage</h1>
+    <p>Enregistrez vos lapins, suivez chaque gestation jour par jour, contrôlez la consanguinité avant d'accoupler, et gardez un œil sur l'aliment et la caisse.</p></div>
+    <div class="actions"><button class="btn" data-act="newrabbit">${ICON.plus}Ajouter mon premier lapin</button><button class="btn" style="background:transparent;color:var(--hero-ink);border-color:rgba(255,255,255,.4)" data-act="loadsample">Voir un exemple d'élevage</button></div>${earsSvg()}</section>
+    <div class="grid g3">${[["rabbit", "Fiches lapins", "Race, cage, parents, pesées et soins."], ["heart", "Saillies & gestations", "Palpation J10–14, nid J28, mise bas J31."], ["tree", "Généalogie", "Coefficient de consanguinité calculé avant chaque saillie."], ["layers", "Engraissement", "Lots, mortalité, poids moyen et date de vente."], ["grain", "Aliment", "Ration du jour calculée et stock restant."], ["coins", "Finances", "Recettes et dépenses en FCFA."]].map(([i, t, d]) => `<div class="card" style="display:flex;gap:12px"><span class="ico">${ICON[i]}</span><div><h3>${t}</h3><p class="hint">${d}</p></div></div>`).join("")}</div>`;
+  const males = act.filter((r) => r.sex === "Male").length, fem = act.filter((r) => r.sex === "Female").length;
+  const mature = act.filter((r) => age(r) >= MATURE_DAYS).length;
+  const gest = S.matings.filter((m) => ["Accouplé", "Gestation confirmée"].includes(m.status)).sort((a, b) => a.due.localeCompare(b.due));
+  const fat = S.batches.filter((b) => b.status === "Actif").reduce((s, b) => s + (Number(b.current) || 0), 0);
+  const stock = feedStock(); const rt = ration(); const autonomy = rt.grams ? stock / (rt.grams / 1000) : null;
+  const m0 = today().slice(0, 7); const monthTx = S.tx.filter((x) => x.date.startsWith(m0));
+  const bal = monthTx.reduce((s, x) => s + (x.type === "in" ? 1 : -1) * (Number(x.amount) || 0), 0);
+  const al = alerts();
+  const fedToday = S.feed.filter((f) => f.date === today()).reduce((s, f) => s + Number(f.grams || 0), 0);
+  const h = new Date().getHours(); const hello = h < 12 ? "Bonjour" : h < 18 ? "Bon après-midi" : "Bonsoir";
+  return `
+  <section class="hero"><div class="head" style="align-items:flex-start"><div><span class="eyebrow" style="color:inherit;opacity:.8">${esc(fmtDate(today()))}</span><h1>${hello} !</h1>
+    <p>${al.length ? `${al.length} action${al.length > 1 ? "s" : ""} à faire dans l'élevage aujourd'hui.` : "Rien d'urgent aujourd'hui. L'élevage est à jour."}</p></div>
+    <div class="actions"><button class="btn" data-act="newrabbit">${ICON.plus}Lapin</button><button class="btn" data-act="newmating">${ICON.heart}Saillie</button></div></div>
+    <div class="meta"><span class="chip">${act.length} lapins actifs</span><span class="chip">${gest.length} gestation${gest.length > 1 ? "s" : ""}</span><span class="chip">${fat} en engraissement</span></div>${earsSvg()}</section>
+  <div class="tiles">
+    <div class="tile"><span class="l">Lapins actifs</span><span class="v">${act.length}</span><span class="s">${males} ♂ · ${fem} ♀</span></div>
+    <div class="tile"><span class="l">Reproducteurs</span><span class="v">${mature}</span><span class="s">âgés de 5 mois et plus</span></div>
+    <div class="tile"><span class="l">Gestations</span><span class="v">${gest.length}</span><span class="s">${gest[0] ? `prochaine ${relDay(diff(today(), gest[0].due))}` : "aucune en cours"}</span></div>
+    <div class="tile ${stock <= 0 && S.inventory.length ? "bad" : stock < 10 && S.inventory.length ? "warn" : ""}"><span class="l">Stock d'aliment</span><span class="v">${nf1.format(stock)} kg</span><span class="s">${autonomy != null ? `≈ ${nf0.format(autonomy)} jours de ration` : "—"}</span></div>
+    <div class="tile"><span class="l">Solde du mois</span><span class="v ${bal >= 0 ? "pos" : "neg"}" style="font-size:1.35rem">${bal >= 0 ? "+" : "−"}${fcfa(Math.abs(bal))}</span><span class="s">${monthTx.length} opération${monthTx.length > 1 ? "s" : ""}</span></div>
+  </div>
+  <div class="grid g2">
+    <section class="card"><div class="row-h"><h2>À faire aujourd'hui</h2><span class="chip ${al.some((a) => a.sev === "bad") ? "bad" : al.length ? "warn" : "ok"}">${al.length}</span></div>
+      ${al.length ? `<div class="list">${al.slice(0, 8).map((a) => `<div class="li">${sevIco(a)}<div class="grow"><div class="t">${esc(a.title)}</div><div class="d">${esc(a.sub)}</div>${a.act ? `<div class="actions" style="margin-top:6px">${a.act.map(([l, act, id, v]) => `<button class="btn sm" data-act="${act}" ${id ? `data-id="${id}"` : ""} ${v ? `data-v="${esc(v)}"` : ""}>${esc(l)}</button>`).join("")}</div>` : ""}</div></div>`).join("")}</div>` : emptyBox("check", "Tout est à jour", "Les palpations, nids, mises bas, soins et rappels apparaîtront ici le jour venu.")}
+    </section>
+    <section class="card"><div class="row-h"><h2>Ration du jour</h2><span class="chip ${fedToday ? "ok" : "warn"}">${fedToday ? `${nf1.format(fedToday / 1000)} kg distribués` : "Pas encore nourris"}</span></div>
+      <div style="display:flex;align-items:baseline;gap:8px"><span style="font-family:var(--f-display);font-size:2.2rem;font-weight:800" class="num">${nf1.format(rt.grams / 1000)}</span><span class="hint">kg recommandés</span></div>
+      <div class="list" style="margin:8px 0 12px">${[["Mâles adultes", rt.c.mal, 120], ["Femelles au repos", rt.c.fem, 120], ["Femelles gestantes", rt.c.gest, 180], ["Femelles allaitantes", rt.c.lact, 280], ["Jeunes 1–2 mois", rt.c.y1, 50], ["Jeunes 2–4 mois", rt.c.y2, 90], ["Lapins en engraissement", rt.fat, 110]].filter((x) => x[1]).map(([l, n, g]) => `<div class="li" style="padding:6px 0"><div class="grow d">${l} <span class="num">× ${n}</span></div><span class="num hint">${g} g</span><b class="num" style="min-width:64px;text-align:right">${nf1.format((n * g) / 1000)} kg</b></div>`).join("") || `<p class="hint">Ajoutez des lapins pour calculer la ration.</p>`}</div>
+      <button class="btn pri" data-act="feed" data-v="${rt.grams}">${ICON.grain}Enregistrer la distribution</button>
+    </section>
+  </div>
+  <section class="card"><div class="row-h"><h2>Gestations en cours</h2><a class="btn sm ghost" href="#saillies">Tout voir</a></div>
+    ${gest.length ? `<div class="grid g2">${gest.slice(0, 6).map(gestCard).join("")}</div>` : emptyBox("heart", "Aucune gestation", "Enregistrez une saillie pour suivre la palpation, le nid et la mise bas.", `<button class="btn pri" data-act="newmating">${ICON.plus}Nouvelle saillie</button>`)}
+  </section>`;
+};
+function earsSvg() { return `<svg class="ears" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8.2 2.5c1.3-.3 2.3 1.5 2.4 4.4.1 1.4 0 2.6-.2 3.4.5-.2 1-.2 1.6-.2s1.1 0 1.6.2c-.2-.8-.3-2-.2-3.4.1-2.9 1.1-4.7 2.4-4.4 1.4.4 1.6 3 .6 5.9-.4 1.1-.9 2.1-1.4 2.8 1.9 1 3.1 2.8 3.1 4.9 0 3.2-2.7 5.4-6.1 5.4s-6.1-2.2-6.1-5.4c0-2.1 1.2-3.9 3.1-4.9-.5-.7-1-1.7-1.4-2.8-1-2.9-.8-5.5.6-5.9Z"/></svg>`; }
+
+VIEWS.lapins = () => {
+  const q = ui.q.trim().toLowerCase();
+  let list = S.rabbits.filter((r) => ui.st === "actifs" ? isActive(r) : !isActive(r));
+  if (ui.sex !== "all") list = list.filter((r) => r.sex === ui.sex);
+  if (q) list = list.filter((r) => [r.name, r.cage, r.breed].some((v) => String(v || "").toLowerCase().includes(q)));
+  list.sort((a, b) => (a.name || "").localeCompare(b.name || "", "fr"));
+  const seg = (k, opts) => `<div class="seg" role="group">${opts.map(([v, l]) => `<button type="button" data-act="ui" data-k="${k}" data-v="${v}" aria-pressed="${ui[k] === v}">${l}</button>`).join("")}</div>`;
+  const nArch = S.rabbits.filter((r) => !isActive(r)).length;
+  afterHooks.push(() => { const i = $("#q"); if (i) { i.addEventListener("input", () => { ui.q = i.value; const pos = i.selectionStart; render(); const j = $("#q"); j.focus(); j.setSelectionRange(pos, pos); }); } });
+  return `<div class="head"><div><h1>Mes lapins</h1><p>${S.rabbits.filter(isActive).length} actifs · ${nArch} sortis de l'élevage</p></div><button class="btn pri" data-act="newrabbit">${ICON.plus}Ajouter un lapin</button></div>
+  <div class="toolbar"><label class="search">${ICON.search}<input id="q" type="search" placeholder="Nom, cage ou race" value="${esc(ui.q)}" aria-label="Rechercher"></label>
+  ${seg("sex", [["all", "Tous"], ["Male", "♂ Mâles"], ["Female", "♀ Femelles"], ["Indéterminé", "Indét."]])}${seg("st", [["actifs", "Actifs"], ["archives", "Sortis"]])}</div>
+  ${list.length ? `<div class="grid g3">${list.map(rabbitCard).join("")}</div>` : `<div class="card">${emptyBox("rabbit", S.rabbits.length ? "Aucun lapin ne correspond" : "Aucun lapin enregistré", S.rabbits.length ? "Modifiez la recherche ou les filtres." : "Commencez par vos reproducteurs : nom, sexe, date de naissance et cage.", S.rabbits.length ? "" : `<button class="btn pri" data-act="newrabbit">${ICON.plus}Ajouter un lapin</button>`)}</div>`}`;
+};
+function rabbitCard(r) {
+  const a = age(r), w = lastWeight(r.id), wd = underWithdrawal(r.id);
+  const gest = S.matings.find((m) => m.female === r.id && ["Accouplé", "Gestation confirmée"].includes(m.status));
+  return `<a class="rcard ${isActive(r) ? sexCls(r) : "off"}" href="#lapin-${r.id}">
+    <div class="top"><div style="min-width:0"><div class="nm">${esc(r.name)}</div><div class="hint">${esc(r.breed || "Race inconnue")}</div></div><span class="sx">${sexSym(r)}</span></div>
+    <div class="facts"><span>Âge <b>${ageLabel(a)}</b></span><span>Poids <b>${w != null ? nf2.format(w) + " kg" : "—"}</b></span></div>
+    <div class="actions">${r.cage ? `<span class="tag">CAGE ${esc(r.cage)}</span>` : ""}${!isActive(r) ? statusChip(r.status) : ""}${isActive(r) && a >= MATURE_DAYS ? `<span class="chip ok">Reproducteur</span>` : ""}${gest ? `<span class="chip clay">Gestante · J${diff(gest.date, today())}</span>` : ""}${wd ? `<span class="chip bad">Délai d'attente</span>` : ""}</div></a>`;
+}
+
+VIEWS.lapin = ({ id }) => {
+  const r = rab(id);
+  if (!r) return `<a class="btn ghost" href="#lapins">${ICON.back}Mes lapins</a><div class="card">${emptyBox("rabbit", "Ce lapin n'existe plus", "Il a peut-être été supprimé.")}</div>`;
+  const a = age(r), ws = weightsOf(id), g = gmq(id), wd = underWithdrawal(id);
+  const tr = S.treatments.filter((x) => x.rabbit === id).sort((x, y) => y.date.localeCompare(x.date));
+  const mts = S.matings.filter((m) => m.male === id || m.female === id).sort((x, y) => y.date.localeCompare(x.date));
+  const kids = S.rabbits.filter((k) => k.father === id || k.mother === id);
+  const done = mts.filter((m) => m.status === "Mise bas"), failed = mts.filter((m) => m.status === "Échoué");
+  const born = done.reduce((s, m) => s + (Number(m.alive) || 0), 0);
+  const rate = done.length + failed.length ? Math.round((done.length / (done.length + failed.length)) * 100) : null;
+  const matur = a >= MATURE_DAYS ? ["ok", "Apte à la reproduction", `Âge ≥ 5 mois (${ageLabel(a)}).`] : a >= 90 ? ["warn", "Sub-adulte", `Maturité dans ${MATURE_DAYS - a} jours.`] : ["info", "Jeune en croissance", `Reproduction possible à partir de 5 mois.`];
+  const F = r.father && r.mother ? makeKinship().F(id) * 100 : 0;
+  return `<div class="head"><a class="btn ghost" href="#lapins">${ICON.back}Mes lapins</a>
+    <div class="actions"><button class="btn" data-act="editrabbit" data-id="${id}">${ICON.edit}Modifier</button><button class="btn" data-act="status" data-id="${id}">Statut</button><button class="btn ghost danger" data-act="delrabbit" data-id="${id}" aria-label="Supprimer">${ICON.trash}</button></div></div>
+  <section class="rcard ${isActive(r) ? sexCls(r) : "off"}" style="padding:22px;cursor:default">
+    <div class="top"><div style="min-width:0"><span class="eyebrow">${r.sex === "Male" ? "Mâle" : r.sex === "Female" ? "Femelle" : "Sexe indéterminé"} · ${esc(r.breed || "Race inconnue")}</span><div class="nm" style="font-size:2rem">${esc(r.name)}</div></div><span class="sx" style="font-size:2.2rem">${sexSym(r)}</span></div>
+    <div class="actions">${statusChip(r.status)}${r.cage ? `<span class="tag">CAGE ${esc(r.cage)}</span>` : ""}<span class="chip ${matur[0]}">${matur[1]}</span>${wd ? `<span class="chip bad">Délai d'attente jusqu'au ${fmtShort(wd)}</span>` : ""}${F > 0 ? `<span class="chip warn">Consanguinité F = ${nf1.format(F)} %</span>` : ""}</div>
+    <div class="actions"><button class="btn sm" data-act="newweight" data-id="${id}">${ICON.scale}Pesée</button><button class="btn sm" data-act="newtreat" data-id="${id}">${ICON.syringe}Soin</button>${isActive(r) && r.sex !== "Indéterminé" ? `<button class="btn sm" data-act="newmating" data-id="${id}">${ICON.heart}Saillie</button>` : ""}</div>
+  </section>
+  ${wd ? `<div class="banner warn"><span>${ICON.alert.replace("<svg", '<svg width="18" height="18"')} Ne pas vendre ni abattre avant le ${fmtDate(wd)} (délai d'attente après traitement).</span></div>` : ""}
+  <div class="grid g2">
+    <section class="card"><div class="row-h"><h2>Informations</h2></div><dl class="kv" style="margin:0">
+      <div><dt>Naissance</dt><dd>${fmtDate(r.birth)}</dd></div><div><dt>Âge</dt><dd>${ageLabel(a)}</dd></div>
+      <div><dt>Dernier poids</dt><dd>${ws.length ? nf2.format(ws[ws.length - 1].kg) + " kg" : "—"}</dd></div><div><dt>Gain moyen (GMQ)</dt><dd class="${g == null ? "" : g >= 0 ? "pos" : "neg"}">${g == null ? "—" : `${g >= 0 ? "+" : ""}${nf1.format(g)} g/j`}</dd></div>
+      <div><dt>Maturité</dt><dd>${matur[2]}</dd></div><div><dt>Cage</dt><dd>${esc(r.cage || "—")}</dd></div>
+    </dl>${r.notes ? `<p class="hint" style="margin-top:12px">${esc(r.notes)}</p>` : ""}</section>
+    <section class="card"><div class="row-h"><h2>Généalogie</h2><span class="hint">3 générations</span></div>${pedigree(r)}</section>
+  </div>
+  <section class="card"><div class="row-h"><h2>Courbe de poids</h2><button class="btn sm" data-act="newweight" data-id="${id}">${ICON.plus}Pesée</button></div>
+    ${ws.length >= 2 ? weightChart(ws) : ""}
+    ${ws.length ? `<div class="tablewrap"><table><thead><tr><th>Date</th><th class="r">Poids</th><th class="r">Écart</th><th>Note</th><th></th></tr></thead><tbody>${ws.slice().reverse().map((w, i, arr) => { const prev = arr[i + 1]; const dlt = prev ? w.kg - prev.kg : null; return `<tr><td>${fmtDate(w.date)}</td><td class="r"><b>${nf2.format(w.kg)} kg</b></td><td class="r ${dlt == null ? "" : dlt >= 0 ? "pos" : "neg"}">${dlt == null ? "—" : (dlt >= 0 ? "+" : "") + nf0.format(dlt * 1000) + " g"}</td><td class="hint">${esc(w.notes || "")}</td><td class="r"><button class="btn sm ghost" data-act="del" data-kind="weight" data-id="${w.id}" aria-label="Supprimer la pesée">${ICON.trash}</button></td></tr>`; }).join("")}</tbody></table></div>` : emptyBox("scale", "Aucune pesée", "Pesez régulièrement pour suivre la croissance et le gain moyen quotidien.")}
+  </section>
+  <div class="grid g2">
+    <section class="card"><div class="row-h"><h2>Soins & traitements</h2><button class="btn sm" data-act="newtreat" data-id="${id}">${ICON.plus}Soin</button></div>
+      ${tr.length ? `<div class="list">${tr.map(treatRow).join("")}</div>` : emptyBox("syringe", "Aucun soin", "Vaccins, vermifuges et traitements avec leur délai d'attente.")}</section>
+    <section class="card"><div class="row-h"><h2>Reproduction</h2></div>
+      ${mts.length ? `<div class="tiles" style="margin-bottom:12px"><div class="tile"><span class="l">Portées</span><span class="v">${done.length}</span></div><div class="tile"><span class="l">Nés vivants</span><span class="v">${born}</span><span class="s">${done.length ? nf1.format(born / done.length) + " par portée" : ""}</span></div><div class="tile"><span class="l">Réussite</span><span class="v">${rate == null ? "—" : rate + " %"}</span></div></div>
+      <div class="list">${mts.map((m) => `<div class="li"><span class="ico ${m.status === "Mise bas" ? "ok" : m.status === "Échoué" ? "bad" : "clay"}">${ICON.heart}</span><div class="grow"><div class="t">× ${esc(rname(m.male === id ? m.female : m.male))}</div><div class="d">Saillie ${fmtDate(m.date)}${m.status === "Mise bas" ? ` · ${Number(m.alive) || 0} vivants, ${Number(m.dead) || 0} morts-nés` : ` · prévue ${fmtShort(m.due)}`}</div></div>${mstChip(m.status)}</div>`).join("")}</div>` : emptyBox("heart", "Aucune saillie", "L'historique de reproduction apparaîtra ici.")}
+      ${kids.length ? `<h3 style="margin:14px 0 6px">Descendants (${kids.length})</h3><div class="actions">${kids.map((k) => `<a class="chip ${sexCls(k) === "u" ? "" : sexCls(k)}" href="#lapin-${k.id}" style="text-decoration:none">${sexSym(k)} ${esc(k.name)}</a>`).join("")}</div>` : ""}
+    </section>
+  </div>`;
+};
+function pb(id, role) {
+  const r = id ? rab(id) : null;
+  if (!r) return `<div class="pb none"><b>${role}</b><small>Non renseigné</small></div>`;
+  return `<a class="pb ${sexCls(r)}" href="#lapin-${r.id}"><small>${role}</small><b>${esc(r.name)}</b><small>${esc(r.breed || "")}</small></a>`;
+}
+function pedigree(r) {
+  const f = rab(r.father), m = rab(r.mother);
+  return `<div class="ped"><div class="col"><div class="pb ${sexCls(r)}"><small>Sujet</small><b>${esc(r.name)}</b></div></div>
+    <div class="col">${pb(r.father, "Père")}${pb(r.mother, "Mère")}</div>
+    <div class="col">${pb(f?.father, "Grand-père pat.")}${pb(f?.mother, "Grand-mère pat.")}${pb(m?.father, "Grand-père mat.")}${pb(m?.mother, "Grand-mère mat.")}</div></div>`;
+}
+function weightChart(ws) {
+  const W = 640, H = 210, L = 44, R = 14, T = 14, B = 28;
+  const xs = ws.map((w) => parse(w.date).getTime()), ys = ws.map((w) => w.kg);
+  let y0 = Math.min(...ys), y1 = Math.max(...ys); const span = y1 - y0 || 1;
+  const step = span > 3 ? 1 : span > 1.2 ? 0.5 : span > 0.5 ? 0.25 : 0.1;
+  y0 = Math.max(0, Math.floor(y0 / step) * step); y1 = Math.ceil(y1 / step) * step; if (y1 === y0) y1 = y0 + step;
+  const x0 = Math.min(...xs), x1 = Math.max(...xs) || x0 + 1;
+  const X = (t) => L + ((t - x0) / (x1 - x0 || 1)) * (W - L - R), Y = (v) => T + (1 - (v - y0) / (y1 - y0)) * (H - T - B);
+  const ticks = []; for (let v = y0; v <= y1 + 1e-9; v += step) ticks.push(+v.toFixed(2));
+  const pts = ws.map((w, i) => [X(xs[i]), Y(w.kg)]);
+  const line = pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
+  const area = line + ` L${pts[pts.length - 1][0].toFixed(1)} ${Y(y0)} L${pts[0][0].toFixed(1)} ${Y(y0)} Z`;
+  const last = pts[pts.length - 1];
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Évolution du poids">
+    ${ticks.map((v) => `<line class="grid-l" x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}"/><text x="${L - 8}" y="${Y(v) + 4}" text-anchor="end">${nf2.format(v)}</text>`).join("")}
+    <text x="${L}" y="${H - 8}">${fmtShort(ws[0].date)}</text><text x="${W - R}" y="${H - 8}" text-anchor="end">${fmtShort(ws[ws.length - 1].date)}</text>
+    <path d="${area}" fill="var(--sage)" fill-opacity=".14"/><path d="${line}" fill="none" stroke="var(--sage)" stroke-width="2.5" stroke-linejoin="round"/>
+    ${pts.map((p) => `<circle cx="${p[0]}" cy="${p[1]}" r="3" fill="var(--surface)" stroke="var(--sage)" stroke-width="2"/>`).join("")}
+    <circle cx="${last[0]}" cy="${last[1]}" r="6" fill="var(--sage)"/><text x="${Math.min(last[0], W - R - 4)}" y="${Math.max(last[1] - 12, 12)}" text-anchor="end" style="fill:var(--ink);font-weight:700">${nf2.format(ws[ws.length - 1].kg)} kg</text></svg>`;
+}
+function treatRow(x) {
+  const wEnd = Number(x.withdrawal) > 0 ? addDays(x.date, Number(x.withdrawal)) : null; const active = wEnd && wEnd > today();
+  const cls = x.type === "Vaccin" ? "info" : x.type === "Antibiotique" ? "bad" : x.type === "Vitamines" ? "warn" : "ok";
+  return `<div class="li"><span class="ico ${cls}">${ICON.syringe}</span><div class="grow"><div class="t">${esc(x.type)} · ${esc(x.product || "")}</div><div class="d">${fmtDate(x.date)}${x.dosage ? " · " + esc(x.dosage) : ""}${x.rabbit ? "" : " · tout l'élevage"}${x.next ? ` · rappel ${fmtShort(x.next)}` : ""}</div>
+    ${wEnd ? `<div class="d ${active ? "neg" : "pos"}">${active ? `Délai d'attente jusqu'au ${fmtDate(wEnd)}` : `Délai d'attente terminé (${x.withdrawal} j)`}</div>` : ""}</div>
+    <button class="btn sm ghost" data-act="del" data-kind="treatment" data-id="${x.id}" aria-label="Supprimer le soin">${ICON.trash}</button></div>`;
+}
+
+VIEWS.saillies = () => {
+  const cur = S.matings.filter((m) => ["Accouplé", "Gestation confirmée"].includes(m.status)).sort((a, b) => a.due.localeCompare(b.due));
+  const past = S.matings.filter((m) => !["Accouplé", "Gestation confirmée"].includes(m.status)).sort((a, b) => b.date.localeCompare(a.date));
+  const done = past.filter((m) => m.status === "Mise bas"); const born = done.reduce((s, m) => s + (Number(m.alive) || 0), 0);
+  const rate = past.length ? Math.round((done.length / past.length) * 100) : null;
+  return `<div class="head"><div><h1>Saillies & gestations</h1><p>Gestation de ${GESTATION} jours · palpation J10–14 · boîte à nid J28</p></div><button class="btn pri" data-act="newmating">${ICON.plus}Nouvelle saillie</button></div>
+  <div class="tiles"><div class="tile"><span class="l">En cours</span><span class="v">${cur.length}</span></div><div class="tile"><span class="l">Portées enregistrées</span><span class="v">${done.length}</span></div><div class="tile"><span class="l">Nés vivants</span><span class="v">${born}</span><span class="s">${done.length ? nf1.format(born / done.length) + " par portée" : "—"}</span></div><div class="tile"><span class="l">Taux de réussite</span><span class="v">${rate == null ? "—" : rate + " %"}</span></div></div>
+  <section class="card"><div class="row-h"><h2>Gestations en cours</h2></div>${cur.length ? `<div class="grid g2">${cur.map(gestCard).join("")}</div>` : emptyBox("heart", "Aucune gestation en cours", "Choisissez un mâle et une femelle : la consanguinité est vérifiée avant d'enregistrer.", `<button class="btn pri" data-act="newmating">${ICON.plus}Nouvelle saillie</button>`)}</section>
+  <section class="card"><div class="row-h"><h2>Historique</h2></div>${past.length ? `<div class="tablewrap"><table><thead><tr><th>Femelle</th><th>Mâle</th><th>Saillie</th><th>Statut</th><th class="r">Vivants</th><th class="r">Morts-nés</th><th class="r">F</th><th></th></tr></thead><tbody>
+    ${past.map((m) => `<tr><td><a href="#lapin-${m.female}">${esc(rname(m.female))}</a></td><td><a href="#lapin-${m.male}">${esc(rname(m.male))}</a></td><td>${fmtDate(m.date)}</td><td>${mstChip(m.status)}</td><td class="r">${m.status === "Mise bas" ? Number(m.alive) || 0 : "—"}</td><td class="r">${m.status === "Mise bas" ? Number(m.dead) || 0 : "—"}</td><td class="r">${nf1.format(offspringF(m.male, m.female))} %</td><td class="r"><button class="btn sm ghost" data-act="del" data-kind="mating" data-id="${m.id}" aria-label="Supprimer">${ICON.trash}</button></td></tr>`).join("")}</tbody></table></div>` : `<p class="hint">Les saillies terminées (mise bas ou échec) s'afficheront ici.</p>`}</section>`;
+};
+
+VIEWS.engraissement = () => {
+  const act = S.batches.filter((b) => b.status !== "Vendu"), old = S.batches.filter((b) => b.status === "Vendu");
+  const heads = act.reduce((s, b) => s + (Number(b.current) || 0), 0);
+  const ini = S.batches.reduce((s, b) => s + (Number(b.initial) || 0), 0), dead = S.batches.reduce((s, b) => s + (Number(b.deaths) || 0), 0);
+  return `<div class="head"><div><h1>Engraissement</h1><p>Lots de lapereaux du sevrage (J${WEANING}) à la vente (environ +${FATTEN_DAYS} j)</p></div><button class="btn pri" data-act="newbatch">${ICON.plus}Nouveau lot</button></div>
+  <div class="tiles"><div class="tile"><span class="l">Lots actifs</span><span class="v">${act.length}</span></div><div class="tile"><span class="l">Lapereaux</span><span class="v">${heads}</span></div><div class="tile ${ini && dead / ini > 0.1 ? "warn" : ""}"><span class="l">Mortalité cumulée</span><span class="v">${ini ? nf1.format((dead / ini) * 100) + " %" : "—"}</span><span class="s">${dead} sur ${ini}</span></div></div>
+  ${act.length ? `<div class="grid g2">${act.map(batchCard).join("")}</div>` : `<div class="card">${emptyBox("layers", "Aucun lot actif", "Créez un lot au sevrage d'une portée pour suivre effectif, mortalité et poids.", `<button class="btn pri" data-act="newbatch">${ICON.plus}Nouveau lot</button>`)}</div>`}
+  ${old.length ? `<section class="card"><div class="row-h"><h2>Lots vendus</h2></div><div class="list">${old.map((b) => `<div class="li"><span class="ico">${ICON.layers}</span><div class="grow"><div class="t">${esc(b.code)}</div><div class="d">Sevré le ${fmtDate(b.weaning)} · ${b.initial} au départ · ${b.deaths || 0} pertes</div></div><button class="btn sm ghost" data-act="del" data-kind="batch" data-id="${b.id}" aria-label="Supprimer">${ICON.trash}</button></div>`).join("")}</div></section>` : ""}`;
+};
+function batchCard(b) {
+  const days = diff(b.weaning, today()), total = Math.max(1, diff(b.weaning, b.target)), left = diff(today(), b.target);
+  const pc = Math.max(0, Math.min(100, (days / total) * 100)); const mort = b.initial ? (Number(b.deaths) || 0) / b.initial : 0;
+  return `<section class="card"><div class="row-h"><div><h2>${esc(b.code)}</h2><span class="hint">${b.mating ? `Portée de ${esc(rname(byId(S.matings, b.mating)?.female))} · ` : ""}${b.cage ? `<span class="tag">${esc(b.cage)}</span>` : ""}</span></div>${b.status === "Quarantaine" ? `<span class="chip bad">Quarantaine</span>` : left <= 0 ? `<span class="chip ok">Prêt à vendre</span>` : `<span class="chip info">J${days} après sevrage</span>`}</div>
+    <dl class="kv" style="margin:0 0 12px"><div><dt>Effectif</dt><dd class="num">${b.current} / ${b.initial}</dd></div><div><dt>Mortalité</dt><dd class="${mort > 0.1 ? "neg" : ""}">${nf1.format(mort * 100)} %</dd></div><div><dt>Poids moyen</dt><dd>${b.avgWeight ? nf0.format(b.avgWeight) + " g" : "—"}</dd></div><div><dt>Vente prévue</dt><dd>${fmtDate(b.target)}</dd></div></dl>
+    <div class="bar ${left <= 0 ? "" : ""}"><i style="width:${pc}%"></i></div><p class="hint" style="margin:6px 0 12px">${left > 0 ? `${left} jours avant la date de vente` : "Date de vente atteinte"}</p>
+    <div class="actions"><button class="btn sm" data-act="bweight" data-id="${b.id}">${ICON.scale}Poids moyen</button><button class="btn sm" data-act="bdeath" data-id="${b.id}">Perte</button><button class="btn sm pri" data-act="sell" data-id="${b.id}">${ICON.coins}Vendre</button><button class="btn sm ghost" data-act="editbatch" data-id="${b.id}" aria-label="Modifier">${ICON.edit}</button></div></section>`;
+}
+
+VIEWS.stocks = () => {
+  const stock = feedStock(), rt = ration(), days = rt.grams ? stock / (rt.grams / 1000) : null;
+  const items = S.inventory.slice().sort((a, b) => b.date.localeCompare(a.date));
+  const feeds = S.feed.slice().sort((a, b) => b.date.localeCompare(a.date));
+  const m0 = today().slice(0, 7); const monthSpend = items.filter((i) => i.date.startsWith(m0)).reduce((s, i) => s + (Number(i.price) || 0), 0);
+  const last7 = feeds.filter((f) => diff(f.date, today()) < 7).reduce((s, f) => s + Number(f.grams || 0), 0) / 1000;
+  const lvl = stock <= 0 ? "bad" : days != null && days < 7 ? "bad" : days != null && days < 14 ? "warn" : "";
+  return `<div class="head"><div><h1>Stocks & aliment</h1><p>Achats, distribution journalière et stock restant</p></div><div class="actions"><button class="btn" data-act="feed" data-v="${rt.grams}">${ICON.grain}Distribution</button><button class="btn pri" data-act="newitem">${ICON.plus}Achat</button></div></div>
+  <div class="tiles"><div class="tile ${lvl}"><span class="l">Aliment en stock</span><span class="v">${nf1.format(stock)} kg</span><span class="s">${days != null ? `≈ ${nf0.format(days)} jours à ${nf1.format(rt.grams / 1000)} kg/j` : "Ajoutez des lapins pour estimer"}</span></div>
+  <div class="tile"><span class="l">Distribué sur 7 jours</span><span class="v">${nf1.format(last7)} kg</span><span class="s">${nf1.format(last7 / 7)} kg par jour</span></div>
+  <div class="tile"><span class="l">Achats du mois</span><span class="v" style="font-size:1.35rem">${fcfa(monthSpend)}</span></div></div>
+  <div class="grid g2">
+    <section class="card"><div class="row-h"><h2>Achats</h2></div>${items.length ? `<div class="list">${items.map((i) => `<div class="li"><span class="ico ${i.cat === "Nourriture" ? "ok" : i.cat === "Médicament" ? "info" : ""}">${ICON[i.cat === "Nourriture" ? "grain" : i.cat === "Médicament" ? "syringe" : "box"]}</span><div class="grow"><div class="t">${esc(i.name)}</div><div class="d">${esc(i.cat)} · ${nf2.format(Number(i.qty) || 0)} ${esc(i.unit)} · ${fmtDate(i.date)}</div></div><b class="num">${fcfa(i.price)}</b><button class="btn sm ghost" data-act="del" data-kind="item" data-id="${i.id}" aria-label="Supprimer">${ICON.trash}</button></div>`).join("")}</div>` : emptyBox("box", "Aucun achat", "Enregistrez vos sacs d'aliment, médicaments et matériel. Une dépense peut être créée en même temps.", `<button class="btn pri" data-act="newitem">${ICON.plus}Achat</button>`)}</section>
+    <section class="card"><div class="row-h"><h2>Journal d'alimentation</h2></div>${feeds.length ? `<div class="list">${feeds.slice(0, 30).map((f) => `<div class="li"><span class="ico">${ICON.grain}</span><div class="grow"><div class="t">${nf1.format(Number(f.grams) / 1000)} kg</div><div class="d">${fmtDate(f.date)}${f.notes ? " · " + esc(f.notes) : ""}</div></div><button class="btn sm ghost" data-act="del" data-kind="feed" data-id="${f.id}" aria-label="Supprimer">${ICON.trash}</button></div>`).join("")}</div>` : emptyBox("grain", "Aucune distribution", "Chaque distribution est déduite du stock d'aliment.")}</section>
+  </div>`;
+};
+
+VIEWS.finances = () => {
+  const inc = S.tx.filter((x) => x.type === "in").reduce((s, x) => s + Number(x.amount || 0), 0);
+  const exp = S.tx.filter((x) => x.type === "out").reduce((s, x) => s + Number(x.amount || 0), 0);
+  let list = S.tx.slice().sort((a, b) => b.date.localeCompare(a.date)); if (ui.txf !== "all") list = list.filter((x) => x.type === ui.txf);
+  const byCat = {}; S.tx.filter((x) => x.type === "out").forEach((x) => (byCat[x.cat] = (byCat[x.cat] || 0) + Number(x.amount || 0)));
+  const cats = Object.entries(byCat).sort((a, b) => b[1] - a[1]); const maxC = cats[0]?.[1] || 1;
+  return `<div class="head"><div><h1>Finances</h1><p>Recettes et dépenses de l'élevage en francs CFA</p></div><div class="actions"><button class="btn" data-act="newtx" data-v="out">Dépense</button><button class="btn pri" data-act="newtx" data-v="in">${ICON.plus}Recette</button></div></div>
+  <div class="tiles"><div class="tile"><span class="l">Solde total</span><span class="v ${inc - exp >= 0 ? "pos" : "neg"}" style="font-size:1.4rem">${inc - exp >= 0 ? "+" : "−"}${fcfa(Math.abs(inc - exp))}</span></div><div class="tile"><span class="l">Recettes</span><span class="v pos" style="font-size:1.4rem">${fcfa(inc)}</span></div><div class="tile"><span class="l">Dépenses</span><span class="v neg" style="font-size:1.4rem">${fcfa(exp)}</span></div></div>
+  <div class="grid g2">
+    <section class="card"><div class="row-h"><h2>6 derniers mois</h2><span class="actions"><span class="chip ok">Recettes</span><span class="chip bad">Dépenses</span></span></div>${monthChart()}</section>
+    <section class="card"><div class="row-h"><h2>Dépenses par poste</h2></div>${cats.length ? `<div class="list">${cats.map(([c, v]) => `<div class="li" style="flex-direction:column;align-items:stretch;gap:6px"><div style="display:flex;justify-content:space-between;gap:8px"><span class="t">${esc(c)}</span><b class="num">${fcfa(v)}</b></div><div class="bar"><i style="width:${(v / maxC) * 100}%;background:var(--clay)"></i></div></div>`).join("")}</div>` : `<p class="hint">Aucune dépense enregistrée.</p>`}</section>
+  </div>
+  <section class="card"><div class="row-h"><h2>Opérations</h2><div class="seg" role="group">${[["all", "Toutes"], ["in", "Recettes"], ["out", "Dépenses"]].map(([v, l]) => `<button type="button" data-act="ui" data-k="txf" data-v="${v}" aria-pressed="${ui.txf === v}">${l}</button>`).join("")}</div></div>
+    ${list.length ? `<div class="tablewrap"><table><thead><tr><th>Date</th><th>Libellé</th><th>Poste</th><th class="r">Montant</th><th></th></tr></thead><tbody>${list.map((x) => `<tr><td>${fmtDate(x.date)}</td><td>${esc(x.label || "")}</td><td><span class="chip">${esc(x.cat)}</span></td><td class="r ${x.type === "in" ? "pos" : "neg"}">${x.type === "in" ? "+" : "−"}${fcfa(x.amount)}</td><td class="r"><button class="btn sm ghost" data-act="del" data-kind="tx" data-id="${x.id}" aria-label="Supprimer">${ICON.trash}</button></td></tr>`).join("")}</tbody></table></div>` : emptyBox("coins", "Aucune opération", "Ventes de lapins, achats d'aliment, frais vétérinaires…")}
+  </section>`;
+};
+function monthChart() {
+  const W = 640, H = 220, L = 58, R = 10, T = 12, B = 28; const months = [];
+  const d = new Date(); d.setDate(1);
+  for (let i = 5; i >= 0; i--) { const x = new Date(d.getFullYear(), d.getMonth() - i, 1); months.push({ k: `${x.getFullYear()}-${pad(x.getMonth() + 1)}`, l: MONTHS[x.getMonth()], i: 0, o: 0 }); }
+  S.tx.forEach((t) => { const m = months.find((x) => t.date.startsWith(x.k)); if (m) m[t.type === "in" ? "i" : "o"] += Number(t.amount || 0); });
+  const max = Math.max(...months.map((m) => Math.max(m.i, m.o)));
+  if (!max) return `<p class="hint">Les barres apparaîtront après vos premières opérations.</p>`;
+  const mag = Math.pow(10, Math.floor(Math.log10(max))); const stepRaw = max / 4; const step = [1, 2, 2.5, 5, 10, 20, 25, 50].map((s) => s * mag / 10).find((s) => s >= stepRaw) || mag;
+  const top = Math.ceil(max / step) * step; const Y = (v) => T + (1 - v / top) * (H - T - B); const cw = (W - L - R) / 6, bw = Math.min(22, cw / 3.2);
+  const ticks = []; for (let v = 0; v <= top + 1e-6; v += step) ticks.push(v);
+  const short = (v) => v >= 1e6 ? nf1.format(v / 1e6) + " M" : v >= 1e3 ? nf0.format(v / 1e3) + " k" : nf0.format(v);
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Recettes et dépenses par mois">${ticks.map((v) => `<line class="grid-l" x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}"/><text x="${L - 8}" y="${Y(v) + 4}" text-anchor="end">${short(v)}</text>`).join("")}
+    ${months.map((m, i) => { const cx = L + cw * i + cw / 2; return `<rect x="${cx - bw - 2}" y="${Y(m.i)}" width="${bw}" height="${Y(0) - Y(m.i)}" rx="4" fill="var(--ok)"><title>${m.l} : ${fcfa(m.i)}</title></rect><rect x="${cx + 2}" y="${Y(m.o)}" width="${bw}" height="${Y(0) - Y(m.o)}" rx="4" fill="var(--bad)" fill-opacity=".8"><title>${m.l} : ${fcfa(m.o)}</title></rect><text x="${cx}" y="${H - 8}" text-anchor="middle">${m.l}</text>`; }).join("")}</svg>`;
+}
+
+VIEWS.rappels = () => {
+  const open = S.reminders.filter((r) => !r.done).sort((a, b) => a.due.localeCompare(b.due)), closed = S.reminders.filter((r) => r.done).sort((a, b) => b.due.localeCompare(a.due));
+  const care = S.treatments.filter((x) => x.next && diff(today(), x.next) >= -14).sort((a, b) => a.next.localeCompare(b.next));
+  const herd = S.treatments.filter((x) => !x.rabbit).sort((a, b) => b.date.localeCompare(a.date));
+  return `<div class="head"><div><h1>Rappels & soins</h1><p>Tâches de l'élevage et rappels de traitements</p></div><div class="actions"><button class="btn" data-act="newtreat">${ICON.syringe}Soin collectif</button><button class="btn pri" data-act="newrem">${ICON.plus}Rappel</button></div></div>
+  <div class="grid g2">
+    <section class="card"><div class="row-h"><h2>À faire</h2><span class="chip">${open.length}</span></div>${open.length ? `<div class="list">${open.map(remRow).join("")}</div>` : emptyBox("bell", "Aucun rappel", "Nettoyage des cages, commande d'aliment, visite vétérinaire…")}</section>
+    <section class="card"><div class="row-h"><h2>Prochains soins</h2></div>${care.length ? `<div class="list">${care.map((x) => { const n = diff(today(), x.next); return `<div class="li"><span class="ico ${n < 0 ? "bad" : n <= 2 ? "warn" : "info"}">${ICON.syringe}</span><div class="grow"><div class="t">${esc(x.type)} · ${esc(x.product || "")}</div><div class="d">${x.rabbit ? `<a href="#lapin-${x.rabbit}">${esc(rname(x.rabbit))}</a>` : "Tout l'élevage"} · ${fmtDate(x.next)} (${relDay(n)})</div></div></div>`; }).join("")}</div>` : `<p class="hint">Ajoutez une date de rappel lors d'un soin pour la voir ici.</p>`}
+    ${herd.length ? `<h3 style="margin:16px 0 4px">Soins collectifs</h3><div class="list">${herd.map(treatRow).join("")}</div>` : ""}</section>
+  </div>
+  ${closed.length ? `<section class="card"><div class="row-h"><h2>Terminés</h2></div><div class="list">${closed.slice(0, 20).map(remRow).join("")}</div></section>` : ""}`;
+};
+function remRow(r) {
+  const n = diff(today(), r.due);
+  return `<div class="li"><button class="ico ${r.done ? "ok" : n < 0 ? "bad" : ""}" style="border:0;cursor:pointer" data-act="remtoggle" data-id="${r.id}" aria-label="${r.done ? "Marquer à faire" : "Marquer fait"}">${r.done ? ICON.check : ICON.bell}</button><div class="grow"><div class="t" style="${r.done ? "text-decoration:line-through;opacity:.6" : ""}">${esc(r.title)}</div><div class="d">${fmtDate(r.due)}${r.done ? "" : ` · ${relDay(n)}`}${r.desc ? " · " + esc(r.desc) : ""}</div></div>${prioChip(r.prio)}<button class="btn sm ghost" data-act="del" data-kind="reminder" data-id="${r.id}" aria-label="Supprimer">${ICON.trash}</button></div>`;
+}
+
+VIEWS.donnees = () => {
+  const n = Object.values(S).reduce((s, l) => s + l.length, 0);
+  return `<div class="head"><div><h1>Données</h1><p>${n} fiches enregistrées</p></div></div>
+  <section class="card"><div class="row-h"><h2>Où sont mes données ?</h2><span class="chip ${mode === "cloud" ? "ok" : "warn"}">${mode === "cloud" ? "Compte Claude" : "Ce navigateur"}</span></div>
+    <p>${mode === "cloud" ? "Votre élevage est enregistré dans votre espace privé, lié à votre compte. Vous le retrouvez sur téléphone et ordinateur. Personne d'autre n'y a accès, même si vous partagez le lien de l'application." : "Vous n'êtes pas connecté : les données restent dans ce navigateur. Elles peuvent être perdues si vous videz le cache. Exportez-les régulièrement."}</p></section>
+  <div class="grid g2">
+    <section class="card"><h2>Sauvegarder</h2><p class="hint" style="margin:6px 0 12px">Téléchargez un fichier JSON contenant tout l'élevage.</p><button class="btn pri" data-act="export">${ICON.download}Exporter</button></section>
+    <section class="card"><h2>Restaurer</h2><p class="hint" style="margin:6px 0 12px">Importez un fichier exporté depuis ABV Farm. Les fiches sont ajoutées ou mises à jour.</p><button class="btn" data-act="import">${ICON.upload}Importer un fichier</button></section>
+    <section class="card"><h2>Exemple d'élevage</h2><p class="hint" style="margin:6px 0 12px">Chargez une ferme fictive pour découvrir l'application. Effaçable en un clic.</p><div class="actions"><button class="btn" data-act="loadsample">Charger l'exemple</button><button class="btn ghost" data-act="clearsamples">Effacer l'exemple</button></div></section>
+    <section class="card"><h2>Tout effacer</h2><p class="hint" style="margin:6px 0 12px">Supprime définitivement toutes les fiches de cet élevage.</p><button class="btn danger" data-act="wipe">${ICON.trash}Effacer l'élevage</button></section>
+  </div>`;
+};
+
+/* ---------- Modal & forms ---------- */
+function closeModal() { $("#modal").innerHTML = ""; document.body.style.overflow = ""; }
+function sheet(title, body) {
+  $("#modal").innerHTML = `<div class="overlay" data-act="overlay"><div class="sheet" role="dialog" aria-modal="true" aria-label="${esc(title)}"><div class="sh"><h2>${esc(title)}</h2><button class="btn ghost sm" data-act="close" aria-label="Fermer">${ICON.x}</button></div>${body}</div></div>`;
+  document.body.style.overflow = "hidden";
+}
+function field(f, v) {
+  const id = "f_" + f.k; const val = v ?? f.def ?? "";
+  let input;
+  if (f.type === "select") input = `<select id="${id}" name="${f.k}" ${f.req ? "required" : ""}>${f.opts.map((o) => { const [ov, ol] = Array.isArray(o) ? o : [o, o]; return `<option value="${esc(ov)}" ${String(ov) === String(val) ? "selected" : ""}>${esc(ol)}</option>`; }).join("")}</select>`;
+  else if (f.type === "textarea") input = `<textarea id="${id}" name="${f.k}">${esc(val)}</textarea>`;
+  else if (f.type === "check") return `<label class="check full"><input type="checkbox" id="${id}" name="${f.k}" ${val ? "checked" : ""}>${esc(f.label)}</label>`;
+  else if (f.type === "html") return `<div class="full" id="${id}">${f.html || ""}</div>`;
+  else input = `<input id="${id}" name="${f.k}" type="${f.type || "text"}" value="${esc(val)}" ${f.req ? "required" : ""} ${f.step ? `step="${f.step}"` : ""} ${f.min != null ? `min="${f.min}"` : ""} ${f.ph ? `placeholder="${esc(f.ph)}"` : ""}>`;
+  return `<div class="field ${f.full ? "full" : ""}"><label for="${id}">${esc(f.label)}</label>${input}${f.hint ? `<span class="hint">${esc(f.hint)}</span>` : ""}</div>`;
+}
+function form({ title, fields, values = {}, submit = "Enregistrer", onSubmit, onInput }) {
+  sheet(title, `<form class="form" id="mform" novalidate>${fields.map((f) => field(f, values[f.k])).join("")}<div class="full actions" style="justify-content:flex-end"><button type="button" class="btn ghost" data-act="close">Annuler</button><button type="submit" class="btn pri">${esc(submit)}</button></div></form>`);
+  const fm = $("#mform");
+  const read = () => { const o = {}; fields.forEach((f) => { const el = fm.elements[f.k]; if (!el) return; o[f.k] = f.type === "check" ? el.checked : f.type === "number" ? (el.value === "" ? "" : Number(el.value)) : el.value.trim(); }); return o; };
+  if (onInput) { fm.addEventListener("input", () => onInput(read(), fm)); fm.addEventListener("change", () => onInput(read(), fm)); onInput(read(), fm); }
+  fm.addEventListener("submit", async (e) => {
+    e.preventDefault(); const v = read();
+    const miss = fields.find((f) => f.req && (v[f.k] === "" || v[f.k] == null));
+    if (miss) { toast(`Renseignez « ${miss.label} ».`); fm.elements[miss.k]?.focus(); return; }
+    const btn = fm.querySelector('[type="submit"]'); btn.disabled = true;
+    const ok = await onSubmit(v); btn.disabled = false;
+    if (ok !== false) closeModal();
+  });
+  setTimeout(() => fm.querySelector("input:not([type=checkbox]),select")?.focus(), 30);
+}
+function confirmBox(text, label, onYes) {
+  sheet("Confirmer", `<p>${esc(text)}</p><div class="actions" style="justify-content:flex-end"><button class="btn ghost" data-act="close">Annuler</button><button class="btn pri" id="yes" style="background:var(--bad);color:var(--surface)">${esc(label)}</button></div>`);
+  $("#yes").addEventListener("click", async () => { $("#yes").disabled = true; await onYes(); closeModal(); });
+}
+let toastT; function toast(m) { const t = $("#toast"); t.textContent = m; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => (t.hidden = true), 3200); }
+const rabOpts = (filter, none = "— Aucun —") => [["", none], ...S.rabbits.filter(filter).sort((a, b) => a.name.localeCompare(b.name, "fr")).map((r) => [r.id, `${r.name}${r.cage ? " · " + r.cage : ""}${isActive(r) ? "" : " (" + r.status + ")"}`])];
+
+function rabbitForm(r) {
+  const editing = !!r; r = r || {};
+  form({ title: editing ? `Modifier ${r.name}` : "Nouveau lapin", values: r, submit: editing ? "Enregistrer" : "Ajouter",
+    fields: [
+      { k: "name", label: "Nom ou numéro", req: true, ph: "ex. Caramel, F-12" },
+      { k: "sex", label: "Sexe", type: "select", opts: [["Female", "♀ Femelle"], ["Male", "♂ Mâle"], ["Indéterminé", "Indéterminé"]], def: "Female" },
+      { k: "birth", label: "Date de naissance", type: "date", req: true, def: today() },
+      { k: "breed", label: "Race", ph: "ex. Néo-Zélandais, Californien" },
+      { k: "cage", label: "Cage", ph: "ex. B-04" },
+      { k: "weight", label: editing ? "Nouvelle pesée (kg, optionnel)" : "Poids actuel (kg)", type: "number", step: "0.01", min: 0 },
+      { k: "father", label: "Père", type: "select", opts: rabOpts((x) => x.sex === "Male" && x.id !== r.id) },
+      { k: "mother", label: "Mère", type: "select", opts: rabOpts((x) => x.sex === "Female" && x.id !== r.id) },
+      { k: "notes", label: "Notes", type: "textarea", full: true },
+    ],
+    onSubmit: async (v) => {
+      const w = v.weight; delete v.weight;
+      const obj = { ...r, ...v, status: r.status || "Actif" };
+      const ok = await save("rabbit", obj); if (!ok) return false;
+      if (w !== "" && w > 0) await save("weight", { rabbit: obj.id, date: today(), kg: w, notes: editing ? "" : "Poids à l'enregistrement" });
+      toast(editing ? "Fiche mise à jour" : `${obj.name} ajouté`); if (!editing) go("lapin-" + obj.id);
+    } });
+}
+function matingForm(preId) {
+  const pre = rab(preId); const males = (x) => x.sex === "Male" && isActive(x), females = (x) => x.sex === "Female" && isActive(x);
+  if (!S.rabbits.some(males) || !S.rabbits.some(females)) { toast("Il faut au moins un mâle et une femelle actifs."); return; }
+  form({ title: "Nouvelle saillie", submit: "Enregistrer la saillie",
+    values: { male: pre?.sex === "Male" ? pre.id : "", female: pre?.sex === "Female" ? pre.id : "" },
+    fields: [
+      { k: "female", label: "Femelle", type: "select", req: true, opts: rabOpts(females, "Choisir…") },
+      { k: "male", label: "Mâle", type: "select", req: true, opts: rabOpts(males, "Choisir…") },
+      { k: "date", label: "Date de la saillie", type: "date", req: true, def: today() },
+      { k: "duehint", type: "html" },
+      { k: "risk", type: "html" },
+      { k: "notes", label: "Notes", type: "textarea", full: true },
+    ],
+    onInput: (v, fm) => {
+      const due = v.date ? addDays(v.date, GESTATION) : null;
+      $("#f_duehint").innerHTML = due ? `<p class="hint">Palpation du ${fmtShort(addDays(v.date, 10))} au ${fmtShort(addDays(v.date, 14))} · boîte à nid le ${fmtShort(addDays(v.date, 28))} · <b>mise bas prévue le ${fmtDate(due)}</b></p>` : "";
+      if (!v.male || !v.female) { $("#f_risk").innerHTML = `<p class="hint">Choisissez les deux reproducteurs pour vérifier la consanguinité.</p>`; return; }
+      const f = offspringF(v.male, v.female), rk = riskOf(f); const fe = rab(v.female), ma = rab(v.male);
+      const young = [fe, ma].filter((x) => age(x) < MATURE_DAYS).map((x) => x.name);
+      $("#f_risk").innerHTML = `<div class="risk ${rk.lvl}">${ICON[rk.lvl === "ok" ? "shield" : "alert"].replace("<svg", '<svg width="26" height="26" style="flex:none"')}<div><b class="num">F = ${nf2.format(f)} %</b> · ${rk.label}<div style="font-size:.85rem">${rk.tip}</div></div></div>${young.length ? `<p class="hint" style="margin-top:6px;color:var(--warn)">Attention : ${esc(young.join(", "))} n'a pas encore 5 mois.</p>` : ""}`;
+    },
+    onSubmit: async (v) => { const ok = await save("mating", { male: v.male, female: v.female, date: v.date, due: addDays(v.date, GESTATION), status: "Accouplé", notes: v.notes }); if (ok) toast("Saillie enregistrée"); return ok; } });
+}
+function kindleForm(id) {
+  const m = byId(S.matings, id); if (!m) return;
+  form({ title: `Mise bas de ${rname(m.female)}`, submit: "Enregistrer la mise bas", values: { birthDate: today() },
+    fields: [{ k: "birthDate", label: "Date de mise bas", type: "date", req: true }, { k: "alive", label: "Nés vivants", type: "number", min: 0, req: true, def: 8 }, { k: "dead", label: "Morts-nés", type: "number", min: 0, def: 0 }, { k: "notes", label: "Notes", type: "textarea", full: true, def: m.notes }],
+    onSubmit: async (v) => { const ok = await save("mating", { ...m, ...v, status: "Mise bas" }); if (ok) toast(`Mise bas enregistrée : ${v.alive} lapereaux`); return ok; } });
+}
+function weightForm(rid) {
+  form({ title: `Pesée de ${rname(rid)}`, fields: [{ k: "kg", label: "Poids (kg)", type: "number", step: "0.01", min: 0, req: true, def: lastWeight(rid) ?? "" }, { k: "date", label: "Date", type: "date", req: true, def: today() }, { k: "notes", label: "Note", full: true }],
+    onSubmit: async (v) => { const ok = await save("weight", { rabbit: rid, ...v }); if (ok) toast("Pesée enregistrée"); return ok; } });
+}
+function treatForm(rid) {
+  form({ title: rid ? `Soin pour ${rname(rid)}` : "Soin collectif", fields: [
+      { k: "type", label: "Type", type: "select", opts: TREAT_TYPES }, { k: "product", label: "Produit", req: true, ph: "ex. Ivermectine" },
+      { k: "date", label: "Date", type: "date", req: true, def: today() }, { k: "dosage", label: "Dosage", ph: "ex. 0,5 mL" },
+      { k: "withdrawal", label: "Délai d'attente (jours)", type: "number", min: 0, def: 0, hint: "Pas de vente ni d'abattage pendant ce délai." },
+      { k: "next", label: "Prochain rappel", type: "date" }, { k: "notes", label: "Notes", type: "textarea", full: true }],
+    onSubmit: async (v) => { const ok = await save("treatment", { rabbit: rid || "", ...v, withdrawal: Number(v.withdrawal) || 0 }); if (ok) toast("Soin enregistré"); return ok; } });
+}
+function itemForm() {
+  form({ title: "Nouvel achat", fields: [
+      { k: "name", label: "Article", req: true, ph: "ex. Granulés lapin 25 kg" }, { k: "cat", label: "Catégorie", type: "select", opts: INV_CATS },
+      { k: "qty", label: "Quantité", type: "number", step: "0.01", min: 0, req: true, def: 1 }, { k: "unit", label: "Unité", type: "select", opts: UNITS, def: "sac 25 kg" },
+      { k: "price", label: "Prix total (FCFA)", type: "number", min: 0, def: "" }, { k: "date", label: "Date d'achat", type: "date", req: true, def: today() },
+      { k: "mktx", label: "Ajouter aussi cette dépense aux finances", type: "check", def: true }, { k: "notes", label: "Notes", type: "textarea", full: true }],
+    onSubmit: async (v) => {
+      const mk = v.mktx; delete v.mktx; const ok = await save("item", { ...v, price: Number(v.price) || 0 }); if (!ok) return false;
+      if (mk && Number(v.price) > 0) await save("tx", { type: "out", cat: v.cat === "Nourriture" ? "Aliment" : v.cat === "Médicament" ? "Santé" : v.cat === "Matériel" ? "Matériel" : "Autre dépense", amount: Number(v.price), date: v.date, label: v.name });
+      toast("Achat enregistré");
+    } });
+}
+function feedForm(grams) {
+  form({ title: "Distribution d'aliment", fields: [{ k: "kg", label: "Quantité distribuée (kg)", type: "number", step: "0.1", min: 0, req: true, def: grams ? +(grams / 1000).toFixed(1) : "", hint: grams ? `Ration recommandée : ${nf1.format(grams / 1000)} kg` : "" }, { k: "date", label: "Date", type: "date", req: true, def: today() }, { k: "notes", label: "Note", full: true }],
+    onSubmit: async (v) => { const ok = await save("feed", { grams: Math.round(v.kg * 1000), date: v.date, notes: v.notes }); if (ok) toast(`${nf1.format(v.kg)} kg déduits du stock`); return ok; } });
+}
+function txForm(type) {
+  form({ title: type === "in" ? "Nouvelle recette" : "Nouvelle dépense", fields: [
+      { k: "amount", label: "Montant (FCFA)", type: "number", min: 0, req: true }, { k: "cat", label: "Poste", type: "select", opts: type === "in" ? TX_IN : TX_OUT },
+      { k: "label", label: "Libellé", full: true, ph: type === "in" ? "ex. Vente de 6 lapins de chair" : "ex. Visite vétérinaire" }, { k: "date", label: "Date", type: "date", req: true, def: today() }],
+    onSubmit: async (v) => { const ok = await save("tx", { ...v, type }); if (ok) toast(type === "in" ? "Recette enregistrée" : "Dépense enregistrée"); return ok; } });
+}
+function batchForm(matingId, b) {
+  const m = matingId ? byId(S.matings, matingId) : null; b = b || {};
+  const wean = b.weaning || (m?.birthDate ? addDays(m.birthDate, WEANING) : today());
+  const litters = [["", "— Aucune —"], ...S.matings.filter((x) => x.status === "Mise bas").map((x) => [x.id, `${rname(x.female)} · ${fmtShort(x.birthDate || x.due)}`])];
+  form({ title: b.id ? `Modifier ${b.code}` : "Nouveau lot d'engraissement", values: { ...b, mating: b.mating ?? matingId ?? "" }, fields: [
+      { k: "code", label: "Code du lot", req: true, def: `LOT-${today().slice(0, 7)}-${String.fromCharCode(65 + (S.batches.length % 26))}` },
+      { k: "mating", label: "Portée d'origine", type: "select", opts: litters },
+      { k: "weaning", label: "Date de sevrage", type: "date", req: true, def: wean },
+      { k: "initial", label: "Nombre au sevrage", type: "number", min: 1, req: true, def: m ? Number(m.alive) || "" : "" },
+      { k: "cage", label: "Cage / parc", ph: "ex. Parc 2" }, { k: "avgWeight", label: "Poids moyen (g)", type: "number", min: 0 },
+      { k: "target", label: "Vente prévue", type: "date", def: b.target || addDays(wean, FATTEN_DAYS), hint: `Par défaut : sevrage + ${FATTEN_DAYS} jours` },
+      { k: "status", label: "Statut", type: "select", opts: ["Actif", "Quarantaine", "Vendu"], def: "Actif" }],
+    onSubmit: async (v) => { const obj = { ...b, ...v, target: v.target || addDays(v.weaning, FATTEN_DAYS), current: b.id ? b.current : v.initial, deaths: b.deaths || 0 }; const ok = await save("batch", obj); if (ok) { toast("Lot enregistré"); go("engraissement"); } return ok; } });
+}
+function sellForm(id) {
+  const b = byId(S.batches, id); if (!b) return;
+  form({ title: `Vente — ${b.code}`, submit: "Enregistrer la vente", fields: [{ k: "n", label: "Nombre vendu", type: "number", min: 1, req: true, def: b.current }, { k: "price", label: "Montant total (FCFA)", type: "number", min: 0, req: true }, { k: "date", label: "Date", type: "date", req: true, def: today() }],
+    onSubmit: async (v) => {
+      const left = Math.max(0, (Number(b.current) || 0) - v.n);
+      const ok = await save("batch", { ...b, current: left, status: left === 0 ? "Vendu" : b.status }); if (!ok) return false;
+      if (v.price > 0) await save("tx", { type: "in", cat: "Vente chair", amount: v.price, date: v.date, label: `Vente ${v.n} lapins — ${b.code}` });
+      toast(left ? `${v.n} vendus, ${left} restants` : "Lot entièrement vendu");
+    } });
+}
+function remForm() {
+  form({ title: "Nouveau rappel", fields: [{ k: "title", label: "Tâche", req: true, full: true, ph: "ex. Désinfecter les cages" }, { k: "due", label: "Échéance", type: "date", req: true, def: today() }, { k: "prio", label: "Priorité", type: "select", opts: PRIOS, def: "Moyenne" }, { k: "desc", label: "Détails", type: "textarea", full: true }],
+    onSubmit: async (v) => { const ok = await save("reminder", { ...v, done: false }); if (ok) toast("Rappel ajouté"); return ok; } });
+}
+
+/* ---------- Example farm (marked sample:true) ---------- */
+function sampleDocs() {
+  const t = today(), D = (n) => addDays(t, n), out = [];
+  const R = (id, name, sex, birthOff, breed, cage, father, mother, status = "Actif") => out.push({ kind: "rabbit", id, name, sex, birth: D(birthOff), breed, cage, father, mother, status, notes: "", sample: true });
+  R("ex-g1", "Brutus", "Male", -1500, "Néo-Zélandais", "A-01", "", "", "Vendu"); R("ex-g2", "Perle", "Female", -1450, "Néo-Zélandais", "A-02", "", "", "Mort");
+  R("ex-m1", "Hercule", "Male", -620, "Néo-Zélandais", "A-03", "ex-g1", "ex-g2"); R("ex-m2", "Tonnerre", "Male", -400, "Californien", "A-04", "", "");
+  R("ex-f1", "Caramel", "Female", -560, "Californien", "B-01", "", ""); R("ex-f2", "Noisette", "Female", -520, "Néo-Zélandais", "B-02", "ex-g1", "ex-g2");
+  R("ex-f3", "Vanille", "Female", -330, "Croisé", "B-03", "ex-m2", "ex-f1"); R("ex-f4", "Praline", "Female", -260, "Croisé", "B-04", "ex-m1", "ex-f1");
+  R("ex-f5", "Cannelle", "Female", -210, "Californien", "B-05", "ex-m2", "ex-f2"); R("ex-y1", "Flocon", "Male", -110, "Croisé", "C-01", "ex-m1", "ex-f3");
+  R("ex-y2", "Pistache", "Female", -110, "Croisé", "C-01", "ex-m1", "ex-f3");
+  const W = (r, off, kg) => out.push({ kind: "weight", id: `ex-w-${r}-${-off}`, rabbit: r, date: D(off), kg, notes: "", sample: true });
+  [[-110, 0.06], [-90, 0.42], [-75, 0.78], [-60, 1.12], [-45, 1.55], [-30, 1.98], [-15, 2.31], [0, 2.6]].forEach(([o, k]) => W("ex-y1", o, k));
+  [[-90, 4.1], [-60, 4.3], [-30, 4.25], [-5, 4.4]].forEach(([o, k]) => W("ex-f1", o, k));
+  W("ex-m1", -20, 4.9); W("ex-f3", -12, 3.9); W("ex-f4", -10, 3.6);
+  const M = (id, male, female, off, status, extra = {}) => out.push({ kind: "mating", id, male, female, date: D(off), due: D(off + GESTATION), status, notes: "", sample: true, ...extra });
+  M("ex-s1", "ex-m2", "ex-f4", -12, "Accouplé"); M("ex-s2", "ex-m1", "ex-f5", -29, "Gestation confirmée"); M("ex-s3", "ex-m2", "ex-f3", -20, "Gestation confirmée");
+  M("ex-s4", "ex-m1", "ex-f1", -68, "Mise bas", { birthDate: D(-37), alive: 9, dead: 1 }); M("ex-s5", "ex-m1", "ex-f3", -141, "Mise bas", { birthDate: D(-110), alive: 7, dead: 0 });
+  M("ex-s6", "ex-m2", "ex-f2", -80, "Échoué");
+  out.push({ kind: "batch", id: "ex-b1", code: "LOT-A", mating: "ex-s5", weaning: D(-75), initial: 7, current: 6, deaths: 1, cage: "Parc 1", avgWeight: 2350, target: D(-30 + 0) , status: "Actif", sample: true });
+  out.push({ kind: "treatment", id: "ex-t1", rabbit: "ex-f1", type: "Vermifuge", product: "Ivermectine 1 %", date: D(-4), dosage: "0,2 mL", withdrawal: 28, next: D(86), notes: "", sample: true });
+  out.push({ kind: "treatment", id: "ex-t2", rabbit: "", type: "Vaccin", product: "VHD (RHDV2)", date: D(-178), dosage: "0,5 mL", withdrawal: 0, next: D(2), notes: "Rappel annuel", sample: true });
+  out.push({ kind: "treatment", id: "ex-t3", rabbit: "", type: "Anti-coccidien", product: "Toltrazuril", date: D(-20), dosage: "Eau de boisson", withdrawal: 14, next: "", notes: "", sample: true });
+  const IT = (id, name, cat, qty, unit, price, off) => out.push({ kind: "item", id, name, cat, qty, unit, price, date: D(off), notes: "", sample: true });
+  IT("ex-i1", "Granulés lapin", "Nourriture", 4, "sac 25 kg", 64000, -20); IT("ex-i2", "Granulés lapin", "Nourriture", 2, "sac 25 kg", 32000, -6);
+  IT("ex-i3", "Ivermectine 1 %", "Médicament", 1, "unité", 4500, -5); IT("ex-i4", "Abreuvoirs automatiques", "Matériel", 6, "unité", 9000, -40);
+  for (let i = 1; i <= 18; i++) out.push({ kind: "feed", id: `ex-fd-${i}`, grams: 2900 + ((i * 137) % 400), date: D(-i), notes: "", sample: true });
+  const TX = (id, type, cat, amount, off, label) => out.push({ kind: "tx", id, type, cat, amount, date: D(off), label, sample: true });
+  TX("ex-x1", "in", "Vente chair", 45000, -150, "Vente 9 lapins de chair"); TX("ex-x2", "out", "Aliment", 48000, -140, "Granulés 3 sacs");
+  TX("ex-x3", "in", "Vente reproducteur", 25000, -100, "Vente d'un mâle reproducteur"); TX("ex-x4", "out", "Santé", 12000, -95, "Vaccination VHD");
+  TX("ex-x5", "in", "Vente chair", 52000, -60, "Vente 10 lapins de chair"); TX("ex-x6", "out", "Matériel", 9000, -40, "Abreuvoirs automatiques");
+  TX("ex-x7", "out", "Aliment", 64000, -20, "Granulés lapin"); TX("ex-x8", "in", "Vente fumier", 8000, -12, "Fumier pour maraîcher");
+  TX("ex-x9", "out", "Aliment", 32000, -6, "Granulés lapin"); TX("ex-x10", "out", "Santé", 4500, -5, "Ivermectine 1 %");
+  out.push({ kind: "reminder", id: "ex-r1", title: "Désinfecter les cages de la rangée B", due: D(0), prio: "Moyenne", desc: "Chaux vive + nettoyage des mangeoires", done: false, sample: true });
+  out.push({ kind: "reminder", id: "ex-r2", title: "Commander 4 sacs de granulés", due: D(3), prio: "Haute", desc: "", done: false, sample: true });
+  return out;
+}
+
+/* ---------- Actions ---------- */
+async function bulk(docs, label) {
+  let n = 0; for (const d of docs) { const { kind, ...rest } = d; if (!KIND[kind]) continue; if (!(await save(kind, rest))) break; n++; if (n % 10 === 0) toast(`${label} : ${n} / ${docs.length}`); }
+  return n;
+}
+const A = {
+  close: closeModal,
+  overlay: (el, e) => { if (e.target === el) closeModal(); },
+  more: () => sheet("Plus", `<div class="morelist">${NAV.filter((n) => !BOTTOM.includes(n.id)).map((n) => `<a class="nav-a" href="#${n.id}" data-act="close">${ICON[n.icon]}<span>${n.label}</span></a>`).join("")}</div>`),
+  ui: (el) => { ui[el.dataset.k] = el.dataset.v; render(); },
+  newrabbit: () => rabbitForm(), editrabbit: (el) => rabbitForm(rab(el.dataset.id)),
+  status: (el) => { const r = rab(el.dataset.id); form({ title: `Statut de ${r.name}`, values: r, fields: [{ k: "status", label: "Statut", type: "select", opts: STATUSES, full: true, hint: "Un lapin vendu, mort, abattu ou donné passe dans « Sortis »." }], onSubmit: async (v) => save("rabbit", { ...r, status: v.status }) }); },
+  delrabbit: (el) => { const r = rab(el.dataset.id); confirmBox(`Supprimer définitivement la fiche de ${r.name} ainsi que ses pesées et soins ? Pour un animal vendu ou mort, changez plutôt son statut.`, "Supprimer", async () => {
+    for (const w of S.weights.filter((x) => x.rabbit === r.id)) await removeDoc("weight", w.id);
+    for (const x of S.treatments.filter((x) => x.rabbit === r.id)) await removeDoc("treatment", x.id);
+    if (await removeDoc("rabbit", r.id)) { toast("Fiche supprimée"); go("lapins"); } }); },
+  newmating: (el) => matingForm(el.dataset.id), kindle: (el) => kindleForm(el.dataset.id),
+  mst: async (el) => { const m = byId(S.matings, el.dataset.id); if (m && (await save("mating", { ...m, status: el.dataset.v }))) toast(`${rname(m.female)} : ${el.dataset.v}`); },
+  newweight: (el) => weightForm(el.dataset.id), newtreat: (el) => treatForm(el.dataset.id),
+  newitem: () => itemForm(), feed: (el) => feedForm(Number(el.dataset.v) || 0), newtx: (el) => txForm(el.dataset.v),
+  newbatch: (el) => batchForm(el.dataset.id), editbatch: (el) => batchForm(null, byId(S.batches, el.dataset.id)), sell: (el) => sellForm(el.dataset.id),
+  bdeath: (el) => { const b = byId(S.batches, el.dataset.id); form({ title: `Perte — ${b.code}`, fields: [{ k: "n", label: "Nombre de lapereaux morts", type: "number", min: 1, req: true, def: 1 }], onSubmit: async (v) => { const ok = await save("batch", { ...b, current: Math.max(0, b.current - v.n), deaths: (Number(b.deaths) || 0) + v.n }); if (ok) toast("Perte enregistrée"); return ok; } }); },
+  bweight: (el) => { const b = byId(S.batches, el.dataset.id); form({ title: `Poids moyen — ${b.code}`, fields: [{ k: "avgWeight", label: "Poids moyen (g)", type: "number", min: 0, req: true, def: b.avgWeight || "" }], onSubmit: async (v) => save("batch", { ...b, avgWeight: v.avgWeight }) }); },
+  newrem: () => remForm(),
+  remtoggle: async (el) => { const r = byId(S.reminders, el.dataset.id); if (r) await save("reminder", { ...r, done: !r.done }); },
+  remdone: async (el) => { const r = byId(S.reminders, el.dataset.id); if (r && (await save("reminder", { ...r, done: true }))) toast("Rappel terminé"); },
+  del: (el) => { const k = el.dataset.kind, id = el.dataset.id; confirmBox("Supprimer cet enregistrement ?", "Supprimer", async () => { if (await removeDoc(k, id)) toast("Supprimé"); }); },
+  loadsample: async () => { const docs = sampleDocs(); toast("Chargement de l'exemple…"); const n = await bulk(docs, "Exemple"); if (n) { toast(`Exemple chargé (${n} fiches)`); go("accueil"); } },
+  clearsamples: () => confirmBox("Effacer toutes les données d'exemple ? Vos propres fiches sont conservées.", "Effacer", async () => {
+    for (const [kind, key] of Object.entries(KIND)) for (const x of S[key].filter((x) => x.sample)) await removeDoc(kind, x.id);
+    toast("Exemple effacé"); }),
+  wipe: () => confirmBox("Effacer TOUT l'élevage ? Cette action est définitive. Exportez d'abord une sauvegarde si besoin.", "Tout effacer", async () => {
+    for (const [kind, key] of Object.entries(KIND)) for (const x of S[key].slice()) await removeDoc(kind, x.id);
+    toast("Élevage effacé"); }),
+  export: async () => {
+    const docs = []; for (const [kind, key] of Object.entries(KIND)) S[key].forEach((x) => { const { kind: _k, ...rest } = x; docs.push({ kind, ...rest }); });
+    const data = JSON.stringify({ app: "ABV Farm", version: 1, exported: today(), docs }, null, 1);
+    const filename = `abvfarm-sauvegarde-${today()}.json`;
+    if (downloads) { try { await downloads.save({ filename, data }); toast("Sauvegarde prête"); } catch (e) { toast("Téléchargement annulé"); } }
+    else {
+      sheet("Sauvegarde", `<p class="hint">Le téléchargement n'est pas disponible ici. Copiez ce texte et collez-le dans un fichier ${esc(filename)}.</p><textarea id="dump" style="width:100%;min-height:220px;font-family:var(--f-mono);font-size:.75rem;border:1.5px solid var(--line);border-radius:11px;padding:10px;background:var(--bg)" readonly>${esc(data)}</textarea><div class="actions" style="justify-content:flex-end"><button class="btn pri" id="cp">Copier</button></div>`);
+      $("#cp").addEventListener("click", () => { const ta = $("#dump"); navigator.clipboard?.writeText(ta.value).then(() => toast("Copié"), () => { ta.select(); toast("Sélectionné : copiez avec Ctrl+C"); }) ?? (ta.select()); });
+    }
+  },
+  import: () => $("#importFile").click(),
+};
+$("#importFile").addEventListener("change", async (e) => {
+  const f = e.target.files[0]; e.target.value = ""; if (!f) return;
+  try { const j = JSON.parse(await f.text()); if (!Array.isArray(j.docs)) throw new Error("format"); toast("Import en cours…"); const n = await bulk(j.docs, "Import"); toast(`${n} fiches importées`); }
+  catch (err) { toast("Fichier invalide : choisissez une sauvegarde ABV Farm (.json)."); }
+});
+document.addEventListener("click", (e) => {
+  const el = e.target.closest("[data-act]"); if (!el) return;
+  const f = A[el.dataset.act]; if (!f) return;
+  if (el.dataset.act === "close" && el.tagName === "A") { closeModal(); return; }
+  if (el.dataset.act !== "overlay") e.preventDefault();
+  f(el, e);
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && $("#modal").innerHTML) closeModal(); });
+
+render();
+boot();
+</script>
+
+</body></html>

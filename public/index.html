@@ -1,0 +1,2164 @@
+<!DOCTYPE html>
+<html lang="fr" class="h-full bg-slate-50">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ABV Farm • Gestion Cunicole & Cloud Firebase</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- FontAwesome 6 Pro Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  
+  <!-- Firebase SDKs (Compat for guaranteed static bundle reliability) -->
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+  
+  <!-- jsPDF & AutoTable for official certification PDF exports -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            forest: {
+              50: '#f0fdf4',
+              100: '#dcfce7',
+              200: '#bbf7d0',
+              600: '#16a34a',
+              700: '#15803d',
+              800: '#166534',
+              900: '#14532d',
+              950: '#052e16'
+            },
+            amber: {
+              400: '#fbbf24',
+              500: '#f59e0b',
+              600: '#d97706'
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+    body {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+    }
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: #f1f5f9;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 9999px;
+    }
+  </style>
+</head>
+<body class="text-slate-800 antialiased min-h-screen flex flex-col bg-slate-50 selection:bg-emerald-500 selection:text-white">
+
+  <!-- TOP APP BAR -->
+  <header class="bg-forest-900 text-white shadow-xl sticky top-0 z-40 border-b border-forest-800">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
+      
+      <!-- Brand & Official ABV Farm Logo -->
+      <div class="flex items-center gap-3.5">
+        <div class="w-13 h-13 rounded-2xl bg-white p-1 shadow-lg flex items-center justify-center overflow-hidden border-2 border-amber-400">
+          <img src="abvnewlogo.jpg" alt="Logo ABV Farm" id="headerLogo" class="w-11 h-11 object-contain" onerror="this.onerror=null; this.src='https://images.unsplash.com/photo-1585110396000-c9ffd4e4b308?w=100&auto=format&fit=crop&q=80';">
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <h1 class="text-xl font-extrabold tracking-tight text-white">ABV FARM</h1>
+            <span class="bg-amber-500 text-forest-950 text-[10px] px-2 py-0.5 rounded font-black tracking-wider uppercase shadow-sm">Cuniculture</span>
+          </div>
+          <p class="text-[11px] text-emerald-200/90 font-medium hidden sm:block">Élevage Cunicole Professionnel • Traçabilité & Génétique</p>
+        </div>
+      </div>
+
+      <!-- Cloud Status & Header Actions -->
+      <div class="flex items-center gap-2.5 sm:gap-3.5">
+        
+        <!-- Cloud Sync Badge -->
+        <div id="cloudStatusBadge" class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-forest-950/80 border border-emerald-400/30 text-emerald-300 text-xs font-semibold shadow-inner">
+          <span id="cloudPulse" class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+          <span id="cloudStatusText" class="hidden sm:inline">Firebase Cloud Actif</span>
+        </div>
+
+        <button onclick="openAddRabbitModal()" class="bg-emerald-500 hover:bg-emerald-400 active:scale-95 text-forest-950 font-bold text-xs sm:text-sm px-3.5 py-2 rounded-xl shadow-md flex items-center gap-2 transition">
+          <i class="fa-solid fa-plus text-xs"></i>
+          <span>Nouveau Lapin</span>
+        </button>
+
+        <button onclick="openBackupModal()" title="Sauvegarde Cloud & Fichiers" class="bg-forest-800 hover:bg-forest-700 text-white p-2.5 rounded-xl border border-forest-700 transition">
+          <i class="fa-solid fa-cloud-arrow-down"></i>
+        </button>
+      </div>
+
+    </div>
+  </header>
+
+  <!-- NAVIGATION TABS (Identical to Mobile Architecture) -->
+  <nav class="bg-white border-b border-slate-200 sticky top-20 z-30 shadow-sm overflow-x-auto custom-scrollbar">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex gap-1 sm:gap-2">
+      <button onclick="switchTab('dashboard')" id="nav-dashboard" class="nav-btn py-3.5 px-4 font-bold text-xs sm:text-sm border-b-2 border-emerald-600 text-emerald-700 flex items-center gap-2 whitespace-nowrap transition">
+        <i class="fa-solid fa-chart-pie"></i> Tableau de Bord
+      </button>
+      <button onclick="switchTab('rabbits')" id="nav-rabbits" class="nav-btn py-3.5 px-4 font-medium text-xs sm:text-sm text-slate-500 hover:text-slate-800 border-b-2 border-transparent flex items-center gap-2 whitespace-nowrap transition">
+        <i class="fa-solid fa-paw"></i> Cheptel & Lapins
+      </button>
+      <button onclick="switchTab('mating')" id="nav-mating" class="nav-btn py-3.5 px-4 font-medium text-xs sm:text-sm text-slate-500 hover:text-slate-800 border-b-2 border-transparent flex items-center gap-2 whitespace-nowrap transition">
+        <i class="fa-solid fa-heart text-pink-500"></i> Reproduction & Saillies
+      </button>
+      <button onclick="switchTab('batches')" id="nav-batches" class="nav-btn py-3.5 px-4 font-medium text-xs sm:text-sm text-slate-500 hover:text-slate-800 border-b-2 border-transparent flex items-center gap-2 whitespace-nowrap transition">
+        <i class="fa-solid fa-layer-group text-blue-500"></i> Lots d'Engraissement
+      </button>
+      <button onclick="switchTab('inbreeding')" id="nav-inbreeding" class="nav-btn py-3.5 px-4 font-medium text-xs sm:text-sm text-slate-500 hover:text-slate-800 border-b-2 border-transparent flex items-center gap-2 whitespace-nowrap transition">
+        <i class="fa-solid fa-dna text-purple-500"></i> Wright & Génétique
+      </button>
+      <button onclick="switchTab('finances')" id="nav-finances" class="nav-btn py-3.5 px-4 font-medium text-xs sm:text-sm text-slate-500 hover:text-slate-800 border-b-2 border-transparent flex items-center gap-2 whitespace-nowrap transition">
+        <i class="fa-solid fa-coins text-amber-500"></i> Finances (FCFA)
+      </button>
+      <button onclick="switchTab('inventory')" id="nav-inventory" class="nav-btn py-3.5 px-4 font-medium text-xs sm:text-sm text-slate-500 hover:text-slate-800 border-b-2 border-transparent flex items-center gap-2 whitespace-nowrap transition">
+        <i class="fa-solid fa-boxes-stacked text-teal-500"></i> Stocks Aliments
+      </button>
+    </div>
+  </nav>
+
+  <!-- MAIN APP CONTAINER -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+
+    <!-- 1. TAB: DASHBOARD (REPRODUCED IDENTICAL TO MOBILE DASHBOARDSCREEN.KT) -->
+    <section id="sec-dashboard" class="space-y-6">
+      
+      <!-- HERO BANNER WITH REALTIME FARM STATUS -->
+      <div class="relative overflow-hidden rounded-3xl bg-gradient-to-r from-forest-950 via-forest-900 to-emerald-900 text-white p-6 sm:p-8 shadow-xl border border-forest-800">
+        <div class="absolute -right-8 -bottom-8 opacity-10 pointer-events-none">
+          <i class="fa-solid fa-paw text-[180px]"></i>
+        </div>
+        <div class="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-forest-800/80 border border-emerald-500/30 text-emerald-300 text-xs font-semibold mb-2">
+              <i class="fa-solid fa-shield-check"></i> Données synchronisées avec Firebase Cloud
+            </div>
+            <h2 class="text-2xl sm:text-3xl font-black tracking-tight">Tableau de Bord Élevage ABV Farm</h2>
+            <p class="text-xs sm:text-sm text-emerald-200/90 font-medium max-w-xl mt-1">
+              Pilotage cunico-économique, suivi des portées, croissance pondérale et traçabilité zéro-défaut.
+            </p>
+          </div>
+          <div class="flex items-center gap-3">
+            <button onclick="switchTab('mating')" class="bg-amber-500 hover:bg-amber-400 text-forest-950 font-bold text-xs sm:text-sm px-4 py-2.5 rounded-xl shadow-md transition flex items-center gap-2">
+              <i class="fa-solid fa-heart"></i> Enregistrer Saillie
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- KEY METRICS GRID -->
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        
+        <!-- Total Rabbits -->
+        <div class="bg-white rounded-2xl p-4 sm:p-5 shadow-sm border border-slate-200 flex items-center gap-4">
+          <div class="w-13 h-13 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-2xl font-bold border border-emerald-100">
+            <i class="fa-solid fa-paw"></i>
+          </div>
+          <div>
+            <p class="text-xs text-slate-500 font-semibold uppercase tracking-wider">Cheptel Actif</p>
+            <p class="text-2xl sm:text-3xl font-extrabold text-slate-900" id="dashTotal">0</p>
+            <p class="text-[11px] text-emerald-600 font-medium mt-0.5">Sujets vivants en clapier</p>
+          </div>
+        </div>
+
+        <!-- Mâles / Femelles Reproducteurs -->
+        <div class="bg-white rounded-2xl p-4 sm:p-5 shadow-sm border border-slate-200 flex items-center gap-4">
+          <div class="w-13 h-13 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center text-2xl font-bold border border-blue-100">
+            <i class="fa-solid fa-venus-mars"></i>
+          </div>
+          <div>
+            <p class="text-xs text-slate-500 font-semibold uppercase tracking-wider">Reproducteurs</p>
+            <div class="flex items-center gap-2 text-xl sm:text-2xl font-extrabold text-slate-900">
+              <span class="text-blue-600"><span id="dashMales">0</span> ♂</span>
+              <span class="text-slate-300">/</span>
+              <span class="text-pink-600"><span id="dashFemales">0</span> ♀</span>
+            </div>
+            <p class="text-[11px] text-slate-500 font-medium mt-0.5">Matures ≥ 5 mois</p>
+          </div>
+        </div>
+
+        <!-- Naissances & Portées (7j) -->
+        <div class="bg-white rounded-2xl p-4 sm:p-5 shadow-sm border border-slate-200 flex items-center gap-4">
+          <div class="w-13 h-13 rounded-2xl bg-pink-50 text-pink-600 flex items-center justify-center text-2xl font-bold border border-pink-100">
+            <i class="fa-solid fa-baby"></i>
+          </div>
+          <div>
+            <p class="text-xs text-slate-500 font-semibold uppercase tracking-wider">Naissances (7j)</p>
+            <p class="text-2xl sm:text-3xl font-extrabold text-pink-600" id="dashBirths">0</p>
+            <p class="text-[11px] text-slate-500 font-medium mt-0.5">Lapereaux nés récemment</p>
+          </div>
+        </div>
+
+        <!-- Trésorerie Solde FCFA -->
+        <div class="bg-white rounded-2xl p-4 sm:p-5 shadow-sm border border-slate-200 flex items-center gap-4">
+          <div class="w-13 h-13 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center text-2xl font-bold border border-amber-100">
+            <i class="fa-solid fa-coins"></i>
+          </div>
+          <div>
+            <p class="text-xs text-slate-500 font-semibold uppercase tracking-wider">Solde Trésorerie</p>
+            <p class="text-xl sm:text-2xl font-black text-amber-700" id="dashBalance">0 FCFA</p>
+            <p class="text-[11px] text-emerald-600 font-medium mt-0.5">Recettes - Dépenses</p>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- SECONDARY OPERATIONAL METRICS -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        
+        <!-- Stock Aliments -->
+        <div class="bg-white rounded-2xl p-5 shadow-sm border border-slate-200 flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-teal-50 text-teal-600 flex items-center justify-center text-lg font-bold">
+              <i class="fa-solid fa-wheat-awn"></i>
+            </div>
+            <div>
+              <p class="text-xs text-slate-500 font-bold uppercase">Stock Aliments Granulés</p>
+              <p class="text-lg font-extrabold text-slate-800" id="dashFeedKg">0.0 kg</p>
+            </div>
+          </div>
+          <button onclick="switchTab('inventory')" class="text-xs text-teal-700 font-bold hover:underline">Gérer &rarr;</button>
+        </div>
+
+        <!-- Mises-bas à venir -->
+        <div class="bg-white rounded-2xl p-5 shadow-sm border border-slate-200 flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center text-lg font-bold">
+              <i class="fa-solid fa-calendar-check"></i>
+            </div>
+            <div>
+              <p class="text-xs text-slate-500 font-bold uppercase">Mises-bas attendues</p>
+              <p class="text-lg font-extrabold text-purple-800" id="dashUpcomingBirths">0 prévues</p>
+            </div>
+          </div>
+          <button onclick="switchTab('mating')" class="text-xs text-purple-700 font-bold hover:underline">Voir &rarr;</button>
+        </div>
+
+        <!-- Lots en engraissement -->
+        <div class="bg-white rounded-2xl p-5 shadow-sm border border-slate-200 flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center text-lg font-bold">
+              <i class="fa-solid fa-layer-group"></i>
+            </div>
+            <div>
+              <p class="text-xs text-slate-500 font-bold uppercase">Bandes d'engraissement</p>
+              <p class="text-lg font-extrabold text-blue-800" id="dashBatchCount">0 lots actifs</p>
+            </div>
+          </div>
+          <button onclick="switchTab('batches')" class="text-xs text-blue-700 font-bold hover:underline">Détails &rarr;</button>
+        </div>
+
+      </div>
+
+      <!-- RECENT MATING ACTIONS & TASKS PREVIEW -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        
+        <!-- Dernières Saillies -->
+        <div class="bg-white rounded-2xl p-5 shadow-sm border border-slate-200 space-y-4">
+          <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+            <h3 class="font-bold text-sm text-slate-800 flex items-center gap-2">
+              <i class="fa-solid fa-heart text-pink-500"></i> Dernières Saillies & Gestations
+            </h3>
+            <button onclick="switchTab('mating')" class="text-xs text-emerald-700 font-semibold hover:underline">Toutes les saillies &rarr;</button>
+          </div>
+          <div id="dashMatingList" class="space-y-3">
+            <!-- Dynamically populated -->
+          </div>
+        </div>
+
+        <!-- Lots d'engraissement proches de la vente -->
+        <div class="bg-white rounded-2xl p-5 shadow-sm border border-slate-200 space-y-4">
+          <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+            <h3 class="font-bold text-sm text-slate-800 flex items-center gap-2">
+              <i class="fa-solid fa-scale-balanced text-amber-500"></i> Lots d'Engraissement Actifs
+            </h3>
+            <button onclick="switchTab('batches')" class="text-xs text-emerald-700 font-semibold hover:underline">Gérer les lots &rarr;</button>
+          </div>
+          <div id="dashBatchesList" class="space-y-3">
+            <!-- Dynamically populated -->
+          </div>
+        </div>
+
+      </div>
+
+    </section>
+
+    <!-- 2. TAB: CHEPTEL & LAPINS (WITH ADVANCED FILTERS 2 MOIS / 2 KG & ZERO PHOTOS) -->
+    <section id="sec-rabbits" class="hidden space-y-6">
+      
+      <!-- FILTER COMPONENT -->
+      <div class="bg-white rounded-3xl p-5 shadow-sm border border-slate-200 space-y-4">
+        <div class="flex flex-col md:flex-row gap-3 items-center justify-between">
+          <!-- Text Search -->
+          <div class="relative w-full md:w-80">
+            <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"></i>
+            <input type="text" id="searchInput" oninput="applyFilters()" placeholder="Rechercher nom, tatouage, cage, race..." class="w-full pl-10 pr-4 py-2.5 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-slate-50">
+          </div>
+
+          <!-- Quick Age Presets (Requis: ex: 2 mois) -->
+          <div class="flex items-center gap-1.5 overflow-x-auto w-full md:w-auto pb-1 md:pb-0">
+            <span class="text-xs font-bold text-slate-500 mr-1"><i class="fa-regular fa-clock mr-1"></i>Âge :</span>
+            <button onclick="setAgeFilter('all')" id="ageChip-all" class="age-chip text-xs px-3 py-1.5 rounded-xl font-bold bg-emerald-600 text-white shadow-sm transition">Tous</button>
+            <button onclick="setAgeFilter('1m')" id="ageChip-1m" class="age-chip text-xs px-3 py-1.5 rounded-xl font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition">&lt; 1 mois</button>
+            <button onclick="setAgeFilter('2m')" id="ageChip-2m" class="age-chip text-xs px-3 py-1.5 rounded-xl font-bold bg-slate-100 text-slate-700 hover:bg-slate-200 transition">~ 2 mois (45-75j)</button>
+            <button onclick="setAgeFilter('3m')" id="ageChip-3m" class="age-chip text-xs px-3 py-1.5 rounded-xl font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition">3 à 5 mois</button>
+            <button onclick="setAgeFilter('adult')" id="ageChip-adult" class="age-chip text-xs px-3 py-1.5 rounded-xl font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition">Adultes (&ge;6m)</button>
+          </div>
+        </div>
+
+        <!-- Secondary Filters (Poids ~2kg, Sexe, Statut) -->
+        <div class="pt-3 border-t border-slate-100 flex flex-wrap gap-3 items-center justify-between">
+          <!-- Quick Weight Presets (Requis: ex: 2 kg) -->
+          <div class="flex items-center gap-1.5 overflow-x-auto">
+            <span class="text-xs font-bold text-slate-500 mr-1"><i class="fa-solid fa-weight-scale mr-1"></i>Poids :</span>
+            <button onclick="setWeightFilter('all')" id="weightChip-all" class="weight-chip text-xs px-3 py-1.5 rounded-xl font-bold bg-emerald-600 text-white shadow-sm transition">Tous</button>
+            <button onclick="setWeightFilter('light')" id="weightChip-light" class="weight-chip text-xs px-3 py-1.5 rounded-xl font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition">&lt; 1.5 kg</button>
+            <button onclick="setWeightFilter('2kg')" id="weightChip-2kg" class="weight-chip text-xs px-3 py-1.5 rounded-xl font-bold bg-slate-100 text-slate-700 hover:bg-slate-200 transition">~ 2 kg (1.8 - 2.3 kg)</button>
+            <button onclick="setWeightFilter('heavy')" id="weightChip-heavy" class="weight-chip text-xs px-3 py-1.5 rounded-xl font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition">&gt; 3.0 kg</button>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <!-- Sexe Dropdown -->
+            <select id="sexFilter" onchange="applyFilters()" class="text-xs rounded-xl border border-slate-200 px-3 py-2 bg-slate-50 font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500">
+              <option value="all">Sexe: Tous</option>
+              <option value="MALE">Mâles ♂</option>
+              <option value="FEMALE">Femelles ♀</option>
+            </select>
+
+            <!-- Statut Dropdown -->
+            <select id="statusFilter" onchange="applyFilters()" class="text-xs rounded-xl border border-slate-200 px-3 py-2 bg-slate-50 font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500">
+              <option value="all">Statut: Tous</option>
+              <option value="Reproducteur">Reproducteur</option>
+              <option value="Gestante">Gestante</option>
+              <option value="Engraissement">Engraissement</option>
+              <option value="Lapereau">Lapereau</option>
+              <option value="Réforme">Réforme</option>
+            </select>
+
+            <!-- Reset Filters -->
+            <button onclick="resetFilters()" class="text-xs text-slate-500 hover:text-slate-900 font-semibold underline px-2 py-1">
+              Réinitialiser
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- RESULTS COUNT & STATUS -->
+      <div class="flex items-center justify-between text-xs text-slate-500 px-1">
+        <span id="resultsCount" class="font-semibold text-slate-700">Calcul en cours...</span>
+        <span class="italic"><i class="fa-solid fa-lock text-emerald-600 mr-1"></i>Stocké dans Firebase Firestore & Cache Local</span>
+      </div>
+
+      <!-- RABBIT CARDS GRID (STRICTLY NO PHOTOS, GENDER ICONS & TAGS) -->
+      <div id="rabbitGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <!-- Rendered dynamically -->
+      </div>
+
+    </section>
+
+    <!-- 3. TAB: REPRODUCTION & SAILLIES (MATING & GESTATION) -->
+    <section id="sec-mating" class="hidden space-y-6">
+      <div class="bg-white rounded-3xl p-6 shadow-sm border border-slate-200 space-y-6">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+          <div>
+            <h2 class="text-xl font-black text-slate-900 flex items-center gap-2">
+              <i class="fa-solid fa-heart text-pink-500"></i> Suivi des Saillies, Gestations & Mises-bas
+            </h2>
+            <p class="text-xs text-slate-500 mt-0.5">Calcul automatique : Palpation à J+12, Boîte à nid à J+27, Mise-bas à J+31.</p>
+          </div>
+          <button onclick="openAddMatingModal()" class="bg-pink-600 hover:bg-pink-500 text-white font-bold text-xs sm:text-sm px-4 py-2.5 rounded-xl shadow-md transition flex items-center gap-2">
+            <i class="fa-solid fa-plus"></i> Nouvelle Saillie
+          </button>
+        </div>
+
+        <!-- Mating Table -->
+        <div class="overflow-x-auto rounded-2xl border border-slate-100 bg-slate-50/50">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-slate-100 text-slate-600 font-bold uppercase tracking-wider border-b border-slate-200">
+              <tr>
+                <th class="p-3">Date Saillie</th>
+                <th class="p-3">Mâle (Père)</th>
+                <th class="p-3">Femelle (Mère)</th>
+                <th class="p-3">Mise-bas prévue</th>
+                <th class="p-3">Statut</th>
+                <th class="p-3 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="matingTableBody" class="divide-y divide-slate-100 bg-white">
+              <!-- Rendered dynamically -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4. TAB: LOTS D'ENGRAISSEMENT (FATTENING BATCHES) -->
+    <section id="sec-batches" class="hidden space-y-6">
+      <div class="bg-white rounded-3xl p-6 shadow-sm border border-slate-200 space-y-6">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+          <div>
+            <h2 class="text-xl font-black text-slate-900 flex items-center gap-2">
+              <i class="fa-solid fa-layer-group text-blue-500"></i> Suivi des Lots d'Engraissement
+            </h2>
+            <p class="text-xs text-slate-500 mt-0.5">Gestion en bande post-sevrage, effectif initial/actuel, poids moyen et date cible de vente.</p>
+          </div>
+          <button onclick="openAddBatchModal()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs sm:text-sm px-4 py-2.5 rounded-xl shadow-md transition flex items-center gap-2">
+            <i class="fa-solid fa-plus"></i> Nouveau Lot
+          </button>
+        </div>
+
+        <div id="batchesGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <!-- Rendered dynamically -->
+        </div>
+      </div>
+    </section>
+
+    <!-- 5. TAB: WRIGHT INBREEDING CALCULATOR -->
+    <section id="sec-inbreeding" class="hidden space-y-6">
+      <div class="bg-white rounded-3xl p-6 sm:p-8 shadow-sm border border-slate-200 space-y-6">
+        <div class="flex items-center gap-4">
+          <div class="w-12 h-12 rounded-2xl bg-purple-100 text-purple-700 flex items-center justify-center text-xl font-bold">
+            <i class="fa-solid fa-dna"></i>
+          </div>
+          <div>
+            <h2 class="text-xl font-black text-slate-900">Simulateur d'Accouplement & Coefficient de Wright (Fx)</h2>
+            <p class="text-xs text-slate-500 mt-0.5">Évaluez mathématiquement la consanguinité entre tout mâle et femelle avant la saillie.</p>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
+          <!-- Sire Selection -->
+          <div class="p-5 rounded-2xl bg-blue-50/60 border border-blue-100 space-y-3">
+            <label class="block text-xs font-bold text-blue-900 uppercase tracking-wide">
+              <i class="fa-solid fa-mars mr-1"></i>Reproducteur Mâle (Père)
+            </label>
+            <select id="simSire" onchange="computeInbreedingSimulation()" class="w-full bg-white border border-blue-200 rounded-xl p-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-blue-500">
+              <option value="">-- Choisir un Mâle --</option>
+            </select>
+            <div id="simSireInfo" class="text-xs text-slate-600 bg-white p-3 rounded-xl border border-blue-100 hidden"></div>
+          </div>
+
+          <!-- Dam Selection -->
+          <div class="p-5 rounded-2xl bg-pink-50/60 border border-pink-100 space-y-3">
+            <label class="block text-xs font-bold text-pink-900 uppercase tracking-wide">
+              <i class="fa-solid fa-venus mr-1"></i>Reproductrice Femelle (Mère)
+            </label>
+            <select id="simDam" onchange="computeInbreedingSimulation()" class="w-full bg-white border border-pink-200 rounded-xl p-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-pink-500">
+              <option value="">-- Choisir une Femelle --</option>
+            </select>
+            <div id="simDamInfo" class="text-xs text-slate-600 bg-white p-3 rounded-xl border border-pink-100 hidden"></div>
+          </div>
+        </div>
+
+        <!-- Simulation Output Box -->
+        <div id="simResultBox" class="mt-4 p-6 rounded-2xl border bg-slate-50 text-center space-y-3">
+          <p class="text-sm text-slate-500 font-medium">Sélectionnez un reproducteur mâle et une reproductrice femelle pour démarrer l'analyse génétique.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 6. TAB: FINANCES (FCFA) -->
+    <section id="sec-finances" class="hidden space-y-6">
+      <div class="bg-white rounded-3xl p-6 shadow-sm border border-slate-200 space-y-6">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+          <div>
+            <h2 class="text-xl font-black text-slate-900 flex items-center gap-2">
+              <i class="fa-solid fa-coins text-amber-500"></i> Comptabilité & Trésorerie Cunicole
+            </h2>
+            <p class="text-xs text-slate-500 mt-0.5">Enregistrement des recettes (ventes de reproducteurs, chair) et dépenses (aliments, soins).</p>
+          </div>
+          <button onclick="openAddTransactionModal()" class="bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs sm:text-sm px-4 py-2.5 rounded-xl shadow-md transition flex items-center gap-2">
+            <i class="fa-solid fa-plus"></i> Nouvelle Transaction
+          </button>
+        </div>
+
+        <!-- Transactions List -->
+        <div class="overflow-x-auto rounded-2xl border border-slate-100 bg-slate-50/50">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-slate-100 text-slate-600 font-bold uppercase tracking-wider border-b border-slate-200">
+              <tr>
+                <th class="p-3">Date</th>
+                <th class="p-3">Type</th>
+                <th class="p-3">Catégorie</th>
+                <th class="p-3">Description</th>
+                <th class="p-3 text-right">Montant</th>
+              </tr>
+            </thead>
+            <tbody id="financeTableBody" class="divide-y divide-slate-100 bg-white">
+              <!-- Rendered dynamically -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- 7. TAB: INVENTORY / PHARMACIE & STOCK -->
+    <section id="sec-inventory" class="hidden space-y-6">
+      <div class="bg-white rounded-3xl p-6 shadow-sm border border-slate-200 space-y-6">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+          <div>
+            <h2 class="text-xl font-black text-slate-900 flex items-center gap-2">
+              <i class="fa-solid fa-boxes-stacked text-teal-600"></i> Gestion des Stocks d'Aliments & Pharmacie
+            </h2>
+            <p class="text-xs text-slate-500 mt-0.5">Suivi des sacs d'aliments granulés, médicaments vétérinaires et matériels.</p>
+          </div>
+          <button onclick="openAddInventoryModal()" class="bg-teal-600 hover:bg-teal-500 text-white font-bold text-xs sm:text-sm px-4 py-2.5 rounded-xl shadow-md transition flex items-center gap-2">
+            <i class="fa-solid fa-plus"></i> Ajouter Article
+          </button>
+        </div>
+
+        <div id="inventoryGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <!-- Rendered dynamically -->
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- MODAL: AJOUTER / MODIFIER UN LAPIN (ZÉRO PHOTO - NOMS AUTOMATIQUES) -->
+  <div id="rabbitModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-white rounded-3xl max-w-lg w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-slate-200 p-6 space-y-5">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+        <h3 id="modalTitle" class="text-lg font-bold text-slate-900">Nouveau Lapin ABV Farm</h3>
+        <button onclick="closeModal('rabbitModal')" class="text-slate-400 hover:text-slate-700 text-lg">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <form id="rabbitForm" onsubmit="saveRabbit(event)" class="space-y-4">
+        <input type="hidden" id="editRabbitId">
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Sexe *</label>
+            <select id="formSex" required class="w-full text-sm rounded-xl border border-slate-200 p-2.5 bg-slate-50 focus:ring-2 focus:ring-emerald-500">
+              <option value="MALE">Mâle ♂</option>
+              <option value="FEMALE">Femelle ♀</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Statut *</label>
+            <select id="formStatus" required class="w-full text-sm rounded-xl border border-slate-200 p-2.5 bg-slate-50 focus:ring-2 focus:ring-emerald-500">
+              <option value="Reproducteur">Reproducteur</option>
+              <option value="Gestante">Gestante</option>
+              <option value="Engraissement">Engraissement</option>
+              <option value="Lapereau">Lapereau</option>
+              <option value="Réforme">Réforme</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <label class="text-xs font-bold text-slate-700">Nom Unique *</label>
+            <button type="button" onclick="generateUniqueName()" class="text-xs text-emerald-700 font-bold hover:underline flex items-center gap-1">
+              <i class="fa-solid fa-wand-magic-sparkles"></i> Générer Nom Unique
+            </button>
+          </div>
+          <input type="text" id="formName" required placeholder="Ex: ABV-26-TITAN" class="w-full text-sm rounded-xl border border-slate-200 p-2.5 bg-slate-50 focus:ring-2 focus:ring-emerald-500 font-semibold">
+          <p class="text-[11px] text-slate-400 mt-1">Chaque sujet reçoit un patronyme unique distinctif.</p>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Tatouage / Bague</label>
+            <input type="text" id="formTag" placeholder="Ex: T-501" class="w-full text-sm rounded-xl border border-slate-200 p-2.5 bg-slate-50 focus:ring-2 focus:ring-emerald-500">
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Cage / Clapier *</label>
+            <input type="text" id="formCage" required placeholder="Ex: C-14" class="w-full text-sm rounded-xl border border-slate-200 p-2.5 bg-slate-50 focus:ring-2 focus:ring-emerald-500">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Race *</label>
+            <select id="formBreed" class="w-full text-sm rounded-xl border border-slate-200 p-2.5 bg-slate-50 focus:ring-2 focus:ring-emerald-500">
+              <option value="Néo-Zélandais Blanc">Néo-Zélandais Blanc</option>
+              <option value="Californien">Californien</option>
+              <option value="Géant des Flandres">Géant des Flandres</option>
+              <option value="Papillon Français">Papillon Français</option>
+              <option value="Fauve de Bourgogne">Fauve de Bourgogne</option>
+              <option value="Hyplus">Hyplus</option>
+              <option value="Croisé Local">Croisé Local</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Date Naissance *</label>
+            <input type="date" id="formDob" required class="w-full text-sm rounded-xl border border-slate-200 p-2.5 bg-slate-50 focus:ring-2 focus:ring-emerald-500">
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">Poids Actuel (kg) *</label>
+          <input type="number" step="0.05" min="0.1" max="15.0" id="formWeight" required placeholder="Ex: 2.10" class="w-full text-sm rounded-xl border border-slate-200 p-2.5 bg-slate-50 focus:ring-2 focus:ring-emerald-500 font-bold text-emerald-700">
+        </div>
+
+        <div class="grid grid-cols-2 gap-3 pt-2 border-t border-slate-100">
+          <div>
+            <label class="block text-xs font-bold text-blue-800 mb-1">Père (Sire)</label>
+            <select id="formSire" class="w-full text-xs rounded-xl border border-slate-200 p-2 bg-slate-50">
+              <option value="">-- Inconnu --</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-pink-800 mb-1">Mère (Dam)</label>
+            <select id="formDam" class="w-full text-xs rounded-xl border border-slate-200 p-2 bg-slate-50">
+              <option value="">-- Inconnue --</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-end gap-3 pt-4">
+          <button type="button" onclick="closeModal('rabbitModal')" class="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition">
+            Annuler
+          </button>
+          <button type="submit" class="px-5 py-2.5 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-md transition">
+            Enregistrer dans le Cloud
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: DÉTAIL D'UN LAPIN (AVEC EXPORT PDF OFFICIEL AVEC LOGO ABV FARM) -->
+  <div id="detailModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-white rounded-3xl max-w-2xl w-full max-h-[92vh] overflow-y-auto shadow-2xl border border-slate-200 p-6 space-y-6">
+      
+      <div class="flex items-start justify-between pb-4 border-b border-slate-100">
+        <div class="flex items-center gap-4">
+          <div id="detailGenderBadge" class="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl font-bold shadow-inner"></div>
+          <div>
+            <div class="flex items-center gap-2">
+              <h3 id="detailName" class="text-xl font-extrabold text-slate-900">Nom du Lapin</h3>
+              <span id="detailTag" class="text-xs bg-slate-100 text-slate-700 font-bold px-2 py-0.5 rounded">T-000</span>
+            </div>
+            <p id="detailSubtitle" class="text-xs text-slate-500 mt-0.5">Race • Cage</p>
+          </div>
+        </div>
+        <button onclick="closeModal('detailModal')" class="text-slate-400 hover:text-slate-700 text-lg">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <div class="grid grid-cols-3 gap-3">
+        <div class="bg-slate-50 p-3 rounded-2xl border border-slate-100 text-center">
+          <span class="text-[11px] font-medium text-slate-400 uppercase">Âge Exact</span>
+          <p id="detailAge" class="text-sm font-bold text-slate-800 mt-0.5">--</p>
+        </div>
+        <div class="bg-slate-50 p-3 rounded-2xl border border-slate-100 text-center">
+          <span class="text-[11px] font-medium text-slate-400 uppercase">Dernier Poids</span>
+          <p id="detailWeight" class="text-sm font-bold text-emerald-700 mt-0.5">-- kg</p>
+        </div>
+        <div class="bg-slate-50 p-3 rounded-2xl border border-slate-100 text-center">
+          <span class="text-[11px] font-medium text-slate-400 uppercase">Statut</span>
+          <p id="detailStatus" class="text-sm font-bold text-slate-800 mt-0.5">--</p>
+        </div>
+      </div>
+
+      <!-- Pedigree -->
+      <div class="p-4 rounded-2xl bg-amber-50/60 border border-amber-200/60 space-y-2">
+        <h4 class="text-xs font-bold text-amber-900 uppercase tracking-wide flex items-center gap-1.5">
+          <i class="fa-solid fa-sitemap"></i> Ascendance Génétique (Pedigree)
+        </h4>
+        <div class="grid grid-cols-2 gap-4 text-xs">
+          <div>
+            <span class="text-slate-500 font-medium">Père (Sire) :</span>
+            <span id="detailSire" class="font-bold text-blue-700 ml-1">Non renseigné</span>
+          </div>
+          <div>
+            <span class="text-slate-500 font-medium">Mère (Dam) :</span>
+            <span id="detailDam" class="font-bold text-pink-700 ml-1">Non renseignée</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Pesées -->
+      <div class="space-y-3">
+        <div class="flex items-center justify-between">
+          <h4 class="text-xs font-bold text-slate-700 uppercase tracking-wide">
+            <i class="fa-solid fa-chart-line mr-1"></i>Historique des Pesées
+          </h4>
+          <button onclick="promptAddWeight()" class="text-xs text-emerald-700 font-bold hover:underline flex items-center gap-1">
+            <i class="fa-solid fa-plus"></i> Nouvelle Pesée
+          </button>
+        </div>
+        <div id="weightLogTable" class="max-h-36 overflow-y-auto border border-slate-100 rounded-xl bg-slate-50 text-xs"></div>
+      </div>
+
+      <!-- Soins -->
+      <div class="space-y-3">
+        <div class="flex items-center justify-between">
+          <h4 class="text-xs font-bold text-slate-700 uppercase tracking-wide">
+            <i class="fa-solid fa-shield-virus mr-1"></i>Carnet Sanitaire & Soins
+          </h4>
+          <button onclick="promptAddTreatment()" class="text-xs text-emerald-700 font-bold hover:underline flex items-center gap-1">
+            <i class="fa-solid fa-plus"></i> Noter un Soin
+          </button>
+        </div>
+        <div id="treatmentLogTable" class="max-h-36 overflow-y-auto border border-slate-100 rounded-xl bg-slate-50 text-xs"></div>
+      </div>
+
+      <!-- Actions -->
+      <div class="pt-4 border-t border-slate-100 flex items-center justify-between">
+        <button onclick="deleteCurrentRabbit()" class="text-xs text-red-600 hover:text-red-800 font-bold flex items-center gap-1.5">
+          <i class="fa-regular fa-trash-can"></i> Supprimer
+        </button>
+
+        <div class="flex items-center gap-3">
+          <button onclick="editCurrentRabbit()" class="px-4 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition">
+            Modifier
+          </button>
+          <button onclick="exportCurrentRabbitPdf()" class="px-5 py-2.5 text-xs font-bold text-white bg-forest-900 hover:bg-forest-800 rounded-xl shadow-md transition flex items-center gap-2">
+            <i class="fa-solid fa-file-pdf text-amber-400"></i> Exporter PDF Officiel ABV Farm
+          </button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- MODAL: NOUVELLE SAILLIE -->
+  <div id="matingModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-white rounded-3xl max-w-md w-full shadow-2xl border border-slate-200 p-6 space-y-4">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+        <h3 class="text-base font-bold text-slate-900">Enregistrer une Saillie</h3>
+        <button onclick="closeModal('matingModal')" class="text-slate-400 hover:text-slate-700 text-lg">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <form id="matingForm" onsubmit="saveMating(event)" class="space-y-4 text-xs">
+        <div>
+          <label class="block font-bold text-blue-900 mb-1">Mâle Reproducteur *</label>
+          <select id="matingMale" required class="w-full text-xs rounded-xl border border-slate-200 p-2.5 bg-slate-50"></select>
+        </div>
+        <div>
+          <label class="block font-bold text-pink-900 mb-1">Femelle Reproductrice *</label>
+          <select id="matingFemale" required class="w-full text-xs rounded-xl border border-slate-200 p-2.5 bg-slate-50"></select>
+        </div>
+        <div>
+          <label class="block font-bold text-slate-700 mb-1">Date de Saillie *</label>
+          <input type="date" id="matingDate" required class="w-full text-xs rounded-xl border border-slate-200 p-2.5 bg-slate-50">
+        </div>
+        <div class="flex items-center justify-end gap-3 pt-3">
+          <button type="button" onclick="closeModal('matingModal')" class="px-4 py-2 font-semibold text-slate-600">Annuler</button>
+          <button type="submit" class="px-5 py-2 font-bold text-white bg-pink-600 rounded-xl shadow">Enregistrer</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: NOUVEAU LOT ENGRAISSEMENT -->
+  <div id="batchModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-white rounded-3xl max-w-md w-full shadow-2xl border border-slate-200 p-6 space-y-4">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+        <h3 class="text-base font-bold text-slate-900">Nouveau Lot d'Engraissement</h3>
+        <button onclick="closeModal('batchModal')" class="text-slate-400 hover:text-slate-700 text-lg">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <form id="batchForm" onsubmit="saveBatch(event)" class="space-y-3 text-xs">
+        <div>
+          <label class="block font-bold text-slate-700 mb-1">Code du Lot *</label>
+          <input type="text" id="batchCode" required placeholder="Ex: LOT-26-E01" class="w-full rounded-xl border border-slate-200 p-2.5 bg-slate-50 font-bold">
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Effectif Initial *</label>
+            <input type="number" id="batchCount" required min="1" value="8" class="w-full rounded-xl border border-slate-200 p-2.5 bg-slate-50">
+          </div>
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Poids Moyen (g) *</label>
+            <input type="number" id="batchAvgWeight" required min="100" value="750" class="w-full rounded-xl border border-slate-200 p-2.5 bg-slate-50">
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Date Sevrage *</label>
+            <input type="date" id="batchWeaningDate" required class="w-full rounded-xl border border-slate-200 p-2.5 bg-slate-50">
+          </div>
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Emplacement Cage *</label>
+            <input type="text" id="batchCage" required placeholder="Ex: BAT-A-04" class="w-full rounded-xl border border-slate-200 p-2.5 bg-slate-50">
+          </div>
+        </div>
+        <div class="flex items-center justify-end gap-3 pt-3">
+          <button type="button" onclick="closeModal('batchModal')" class="px-4 py-2 font-semibold text-slate-600">Annuler</button>
+          <button type="submit" class="px-5 py-2 font-bold text-white bg-blue-600 rounded-xl shadow">Créer le Lot</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: NOUVELLE TRANSACTION FINANCIERE -->
+  <div id="txModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-white rounded-3xl max-w-md w-full shadow-2xl border border-slate-200 p-6 space-y-4">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+        <h3 class="text-base font-bold text-slate-900">Enregistrer une Transaction (FCFA)</h3>
+        <button onclick="closeModal('txModal')" class="text-slate-400 hover:text-slate-700 text-lg">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <form id="txForm" onsubmit="saveTransaction(event)" class="space-y-3 text-xs">
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Type *</label>
+            <select id="txType" class="w-full rounded-xl border border-slate-200 p-2.5 bg-slate-50 font-bold">
+              <option value="Recette">Recette (Entrée +)</option>
+              <option value="Dépense">Dépense (Sortie -)</option>
+            </select>
+          </div>
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Montant (FCFA) *</label>
+            <input type="number" id="txAmount" required min="50" step="50" placeholder="Ex: 15000" class="w-full rounded-xl border border-slate-200 p-2.5 bg-slate-50 font-bold text-amber-700">
+          </div>
+        </div>
+        <div>
+          <label class="block font-bold text-slate-700 mb-1">Catégorie *</label>
+          <select id="txCategory" class="w-full rounded-xl border border-slate-200 p-2.5 bg-slate-50">
+            <option value="Vente Lapin Chair">Vente Lapin Chair</option>
+            <option value="Vente Reproducteur">Vente Reproducteur</option>
+            <option value="Achat Aliment">Achat Aliment</option>
+            <option value="Produits Vétérinaires">Produits Vétérinaires</option>
+            <option value="Matériel & Clapiers">Matériel & Clapiers</option>
+            <option value="Autre">Autre</option>
+          </select>
+        </div>
+        <div>
+          <label class="block font-bold text-slate-700 mb-1">Description / Client</label>
+          <input type="text" id="txDesc" placeholder="Ex: Vente 3 lapins sevrés à M. Diallo" class="w-full rounded-xl border border-slate-200 p-2.5 bg-slate-50">
+        </div>
+        <div class="flex items-center justify-end gap-3 pt-3">
+          <button type="button" onclick="closeModal('txModal')" class="px-4 py-2 font-semibold text-slate-600">Annuler</button>
+          <button type="submit" class="px-5 py-2 font-bold text-white bg-amber-600 rounded-xl shadow">Enregistrer</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: NOUVEL ARTICLE INVENTAIRE -->
+  <div id="invModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-white rounded-3xl max-w-md w-full shadow-2xl border border-slate-200 p-6 space-y-4">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+        <h3 class="text-base font-bold text-slate-900">Ajouter au Stock & Pharmacie</h3>
+        <button onclick="closeModal('invModal')" class="text-slate-400 hover:text-slate-700 text-lg">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <form id="invForm" onsubmit="saveInventory(event)" class="space-y-3 text-xs">
+        <div>
+          <label class="block font-bold text-slate-700 mb-1">Désignation *</label>
+          <input type="text" id="invName" required placeholder="Ex: Sac Granulés Engraissement 50kg" class="w-full rounded-xl border border-slate-200 p-2.5 bg-slate-50 font-bold">
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Catégorie *</label>
+            <select id="invCat" class="w-full rounded-xl border border-slate-200 p-2.5 bg-slate-50">
+              <option value="Nourriture">Nourriture</option>
+              <option value="Médicament">Médicament</option>
+              <option value="Équipement">Équipement</option>
+              <option value="Autre">Autre</option>
+            </select>
+          </div>
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Quantité *</label>
+            <input type="number" id="invQty" required min="0.1" step="0.5" value="50" class="w-full rounded-xl border border-slate-200 p-2.5 bg-slate-50">
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Unité *</label>
+            <input type="text" id="invUnit" required value="kg" placeholder="Ex: kg, dose, boîte" class="w-full rounded-xl border border-slate-200 p-2.5 bg-slate-50">
+          </div>
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Prix Total (FCFA)</label>
+            <input type="number" id="invPrice" min="0" value="18000" class="w-full rounded-xl border border-slate-200 p-2.5 bg-slate-50">
+          </div>
+        </div>
+        <div class="flex items-center justify-end gap-3 pt-3">
+          <button type="button" onclick="closeModal('invModal')" class="px-4 py-2 font-semibold text-slate-600">Annuler</button>
+          <button type="submit" class="px-5 py-2 font-bold text-white bg-teal-600 rounded-xl shadow">Ajouter au Stock</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: SAUVEGARDE / CLOUD SYNC -->
+  <div id="backupModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-white rounded-3xl max-w-md w-full shadow-2xl border border-slate-200 p-6 space-y-5">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+        <h3 class="text-base font-bold text-slate-900">Sécurité des Données & Cloud</h3>
+        <button onclick="closeModal('backupModal')" class="text-slate-400 hover:text-slate-700 text-lg">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <div class="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-900 space-y-2">
+        <p class="font-bold flex items-center gap-2">
+          <i class="fa-solid fa-cloud-arrow-up text-emerald-600 text-sm"></i> Synchronisation Cloud Double Couche
+        </p>
+        <p class="leading-relaxed">
+          1. <strong>Base de données Cloud Firebase Firestore</strong> connectée en temps réel.<br>
+          2. <strong>Cache local persistant</strong> : Vos données résistent aux pannes de réseau et suppressions de cache.
+        </p>
+      </div>
+
+      <div class="space-y-3 pt-2">
+        <button onclick="downloadBackupJson()" class="w-full py-3 px-4 rounded-xl bg-forest-900 hover:bg-forest-800 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md transition">
+          <i class="fa-solid fa-download"></i> Télécharger Sauvegarde Complète (.json)
+        </button>
+
+        <label class="w-full py-3 px-4 rounded-xl border border-slate-300 hover:bg-slate-50 text-slate-700 font-bold text-xs flex items-center justify-center gap-2 cursor-pointer transition">
+          <i class="fa-solid fa-upload"></i> Restaurer une Sauvegarde Fichier
+          <input type="file" accept=".json" onchange="restoreBackupJson(event)" class="hidden">
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <!-- JAVASCRIPT APPLICATION LOGIC & FIREBASE INTEGRATION -->
+  <script>
+    // --- FIREBASE CONFIGURATION (OFFICIAL ABV FARM PROJECT) ---
+    const firebaseConfig = {
+      apiKey: "AIzaSyCS-dwArbSOKZJM3F5DiY84R0FGdxmzcCk",
+      authDomain: "gen-lang-client-0349652531.firebaseapp.com",
+      projectId: "gen-lang-client-0349652531",
+      storageBucket: "gen-lang-client-0349652531.firebasestorage.app",
+      messagingSenderId: "921975845975",
+      appId: "1:921975845975:web:abvfarm001"
+    };
+
+    let isFirebaseReady = false;
+    let db = null;
+    let auth = null;
+    const FARM_USER_ID = "farm_master_abv";
+
+    try {
+      if (typeof firebase !== 'undefined') {
+        firebase.initializeApp(firebaseConfig);
+        db = firebase.firestore();
+        auth = firebase.auth();
+        isFirebaseReady = true;
+        console.log("Firebase Cloud Firestore initialized successfully");
+      }
+    } catch (err) {
+      console.warn("Firebase running in offline local persistence mode:", err);
+    }
+
+    // --- SAMPLE INITIAL DATA (MATCHING ANDROID SEED) ---
+    const INITIAL_RABBITS = [
+      {
+        id: "abv-001",
+        name: "ABV-26-TITAN",
+        tag: "T-101",
+        sex: "MALE",
+        breed: "Néo-Zélandais Blanc",
+        cage: "M-01",
+        status: "Reproducteur",
+        dob: "2025-05-10",
+        weights: [
+          { date: "2025-07-10", weight: 2.1 },
+          { date: "2025-10-10", weight: 3.4 },
+          { date: "2026-02-10", weight: 4.25 }
+        ],
+        treatments: [
+          { date: "2025-06-20", title: "Vaccination VHD 1&2", notes: "Lot 992-B" },
+          { date: "2025-11-05", title: "Vermifuge Lévamisole", notes: "Rappel semestriel" }
+        ],
+        sire: "GÉANT-ALPHA",
+        dam: "LUNA-01"
+      },
+      {
+        id: "abv-002",
+        name: "ABV-26-OPALE",
+        tag: "T-102",
+        sex: "FEMALE",
+        breed: "Néo-Zélandais Blanc",
+        cage: "F-02",
+        status: "Gestante",
+        dob: "2025-07-01",
+        weights: [
+          { date: "2025-09-01", weight: 2.0 },
+          { date: "2026-01-15", weight: 3.8 }
+        ],
+        treatments: [
+          { date: "2025-08-10", title: "Anticoccidien", notes: "Dans eau de boisson" }
+        ],
+        sire: "BARON-REX",
+        dam: "DIANE-04"
+      },
+      {
+        id: "abv-003",
+        name: "ABV-26-ECLAIR",
+        tag: "T-203",
+        sex: "MALE",
+        breed: "Californien",
+        cage: "E-05",
+        status: "Engraissement",
+        dob: "2026-08-25", // 2 mois !
+        weights: [
+          { date: "2026-09-25", weight: 1.1 },
+          { date: "2026-10-25", weight: 2.05 } // 2 kg !
+        ],
+        treatments: [
+          { date: "2026-09-30", title: "Sevrage & Vitamines", notes: "Transition réussie" }
+        ],
+        sire: "ABV-26-TITAN",
+        dam: "ABV-26-OPALE"
+      },
+      {
+        id: "abv-004",
+        name: "ABV-26-RUBIS",
+        tag: "T-204",
+        sex: "FEMALE",
+        breed: "Californien",
+        cage: "E-06",
+        status: "Engraissement",
+        dob: "2026-08-28", // 2 mois !
+        weights: [
+          { date: "2026-10-26", weight: 1.95 } // 2 kg !
+        ],
+        treatments: [],
+        sire: "ABV-26-TITAN",
+        dam: "ABV-26-OPALE"
+      }
+    ];
+
+    const INITIAL_MATINGS = [
+      {
+        id: "mat-01",
+        sire: "ABV-26-TITAN",
+        dam: "ABV-26-OPALE",
+        matingDate: "2026-10-05",
+        expectedBirthDate: "2026-11-05",
+        status: "Confirmée Gestante"
+      }
+    ];
+
+    const INITIAL_BATCHES = [
+      {
+        id: "batch-01",
+        code: "LOT-26-E01",
+        count: 8,
+        avgWeightGrams: 2050,
+        cage: "BAT-A-01",
+        weaningDate: "2026-09-20",
+        targetSaleDate: "2026-11-15"
+      }
+    ];
+
+    const INITIAL_FINANCES = [
+      { id: "tx-01", date: "2026-10-15", type: "Recette", category: "Vente Reproducteur", amount: 25000, desc: "Vente mâle reproducteur T-090" },
+      { id: "tx-02", date: "2026-10-18", type: "Dépense", category: "Achat Aliment", amount: 18000, desc: "1 sac granulés 50kg" }
+    ];
+
+    const INITIAL_INVENTORY = [
+      { id: "inv-01", name: "Granulés Cunicoles Croissance", category: "Nourriture", quantity: 85, unit: "kg", price: 32000 },
+      { id: "inv-02", name: "Vaccin VHD 1 & 2 (10 doses)", category: "Médicament", quantity: 2, unit: "flacon", price: 15000 }
+    ];
+
+    const NOBLE_NAMES = [
+      "TITAN", "ECLAIR", "OPALE", "RUBIS", "DIAMANT", "SAPHIR", "SULTAN", 
+      "COMETE", "PHOENIX", "ORION", "APOLLON", "ZEUS", "HERMES", "CESAR",
+      "CLEOPATRE", "ATHENA", "ARTEMIS", "VALIANT", "TEMPETE", "MAJESTY",
+      "CYRANO", "VIKING", "BARON", "PRINCE", "REINE", "CHAMPION", "RADAR"
+    ];
+
+    // App state
+    let rabbits = [];
+    let matings = [];
+    let batches = [];
+    let finances = [];
+    let inventory = [];
+
+    let currentFilterAge = 'all';
+    let currentFilterWeight = 'all';
+    let activeRabbitId = null;
+
+    // --- DATA INITIALIZATION WITH CLOUD & LOCAL CACHE ---
+    async function loadData() {
+      // 1. Try LocalStorage first for instant rendering
+      const storedR = localStorage.getItem('abv_farm_rabbits');
+      const storedM = localStorage.getItem('abv_farm_matings');
+      const storedB = localStorage.getItem('abv_farm_batches');
+      const storedF = localStorage.getItem('abv_farm_finances');
+      const storedI = localStorage.getItem('abv_farm_inventory');
+
+      rabbits = storedR ? JSON.parse(storedR) : INITIAL_RABBITS;
+      matings = storedM ? JSON.parse(storedM) : INITIAL_MATINGS;
+      batches = storedB ? JSON.parse(storedB) : INITIAL_BATCHES;
+      finances = storedF ? JSON.parse(storedF) : INITIAL_FINANCES;
+      inventory = storedI ? JSON.parse(storedI) : INITIAL_INVENTORY;
+
+      renderAll();
+
+      // 2. Try Firestore Cloud Sync if online
+      if (isFirebaseReady && db) {
+        try {
+          const snapshot = await db.collection("users").doc(FARM_USER_ID).collection("rabbits").get();
+          if (!snapshot.empty) {
+            const cloudRabbits = [];
+            snapshot.forEach(doc => cloudRabbits.push(doc.data()));
+            if (cloudRabbits.length > 0) {
+              rabbits = cloudRabbits;
+              saveLocalState();
+              renderAll();
+            }
+          } else {
+            // First time seed to cloud
+            syncAllToCloud();
+          }
+        } catch (e) {
+          console.warn("Firestore cloud connection notice:", e.message);
+        }
+      }
+    }
+
+    function saveLocalState() {
+      localStorage.setItem('abv_farm_rabbits', JSON.stringify(rabbits));
+      localStorage.setItem('abv_farm_matings', JSON.stringify(matings));
+      localStorage.setItem('abv_farm_batches', JSON.stringify(batches));
+      localStorage.setItem('abv_farm_finances', JSON.stringify(finances));
+      localStorage.setItem('abv_farm_inventory', JSON.stringify(inventory));
+    }
+
+    async function syncRabbitToCloud(rabbit) {
+      saveLocalState();
+      if (isFirebaseReady && db) {
+        try {
+          await db.collection("users").doc(FARM_USER_ID).collection("rabbits").doc(rabbit.id).set(rabbit);
+          updateCloudStatus(true);
+        } catch(e) {
+          console.warn("Offline fallback saved:", e.message);
+        }
+      }
+    }
+
+    async function syncAllToCloud() {
+      if (!isFirebaseReady || !db) return;
+      try {
+        const batch = db.batch();
+        rabbits.forEach(r => {
+          const ref = db.collection("users").doc(FARM_USER_ID).collection("rabbits").doc(r.id);
+          batch.set(ref, r);
+        });
+        await batch.commit();
+        updateCloudStatus(true);
+      } catch(e) {
+        console.warn("Batch cloud sync:", e.message);
+      }
+    }
+
+    function updateCloudStatus(isOnline) {
+      const badge = document.getElementById('cloudStatusBadge');
+      const pulse = document.getElementById('cloudPulse');
+      const text = document.getElementById('cloudStatusText');
+      if (isOnline) {
+        pulse.className = "w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse";
+        text.innerText = "Firebase Cloud Actif";
+      } else {
+        pulse.className = "w-2.5 h-2.5 rounded-full bg-amber-400";
+        text.innerText = "Mode Local (Auto-Sync)";
+      }
+    }
+
+    // --- HELPERS: AGE, WEIGHT, RENDERING ---
+    function getRabbitAgeDetails(dobString) {
+      if (!dobString) return { days: 0, months: 0, text: "Inconnu" };
+      const birth = new Date(dobString);
+      const now = new Date();
+      const diffTime = Math.abs(now - birth);
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      const months = Math.floor(diffDays / 30.4375);
+      const remainingDays = Math.floor(diffDays % 30.4375);
+
+      let text = "";
+      if (diffDays < 30) {
+        text = `${diffDays} jours`;
+      } else if (months < 12) {
+        text = `${months} mois${remainingDays > 0 ? ' ' + remainingDays + 'j' : ''}`;
+      } else {
+        const years = (diffDays / 365.25).toFixed(1);
+        text = `${years} ans (${months} mois)`;
+      }
+      return { days: diffDays, months: months, text: text };
+    }
+
+    function getLatestWeight(rabbit) {
+      if (!rabbit.weights || rabbit.weights.length === 0) return 0;
+      return rabbit.weights[rabbit.weights.length - 1].weight;
+    }
+
+    // --- TAB SWITCHING (ROUTER) ---
+    function switchTab(tabId) {
+      const sections = ['dashboard', 'rabbits', 'mating', 'batches', 'inbreeding', 'finances', 'inventory'];
+      sections.forEach(s => {
+        const el = document.getElementById(`sec-${s}`);
+        const nav = document.getElementById(`nav-${s}`);
+        if (el) el.classList.add('hidden');
+        if (nav) nav.className = "nav-btn py-3.5 px-4 font-medium text-xs sm:text-sm text-slate-500 hover:text-slate-800 border-b-2 border-transparent flex items-center gap-2 whitespace-nowrap transition";
+      });
+
+      const activeSec = document.getElementById(`sec-${tabId}`);
+      const activeNav = document.getElementById(`nav-${tabId}`);
+      if (activeSec) activeSec.classList.remove('hidden');
+      if (activeNav) activeNav.className = "nav-btn py-3.5 px-4 font-bold text-xs sm:text-sm border-b-2 border-emerald-600 text-emerald-700 flex items-center gap-2 whitespace-nowrap transition";
+
+      if (tabId === 'inbreeding') populateSimulationDropdowns();
+    }
+
+    // --- RENDER ALL SECTIONS ---
+    function renderAll() {
+      renderDashboard();
+      applyFilters();
+      renderMatings();
+      renderBatches();
+      renderFinances();
+      renderInventory();
+      populateParentSelects();
+    }
+
+    function renderDashboard() {
+      document.getElementById('dashTotal').innerText = rabbits.length;
+      const males = rabbits.filter(r => r.sex === 'MALE').length;
+      const females = rabbits.filter(r => r.sex === 'FEMALE').length;
+      document.getElementById('dashMales').innerText = males;
+      document.getElementById('dashFemales').innerText = females;
+
+      // Naissances (7j)
+      const now = Date.now();
+      const sevenDays = 7 * 24 * 3600 * 1000;
+      const births7d = rabbits.filter(r => {
+        const dobTime = new Date(r.dob).getTime();
+        return (now - dobTime) <= sevenDays;
+      }).length;
+      document.getElementById('dashBirths').innerText = births7d;
+
+      // Solde trésorerie
+      const rec = finances.filter(f => f.type === 'Recette').reduce((acc, f) => acc + f.amount, 0);
+      const dep = finances.filter(f => f.type === 'Dépense').reduce((acc, f) => acc + f.amount, 0);
+      const balance = rec - dep;
+      document.getElementById('dashBalance').innerText = `${balance.toLocaleString('fr-FR')} FCFA`;
+
+      // Food stock
+      const feedKg = inventory.filter(i => i.category === 'Nourriture').reduce((acc, i) => acc + i.quantity, 0);
+      document.getElementById('dashFeedKg').innerText = `${feedKg.toFixed(1)} kg`;
+
+      // Upcoming births
+      document.getElementById('dashUpcomingBirths').innerText = `${matings.length} prévues`;
+      document.getElementById('dashBatchCount').innerText = `${batches.length} lots actifs`;
+
+      // Dash Matings Preview
+      const matingList = document.getElementById('dashMatingList');
+      if (matings.length === 0) {
+        matingList.innerHTML = `<p class="text-xs text-slate-400 italic">Aucune saillie en cours</p>`;
+      } else {
+        matingList.innerHTML = matings.slice(0, 3).map(m => `
+          <div class="p-3 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-between text-xs">
+            <div>
+              <span class="font-bold text-slate-900">${m.dam}</span> &times; <span class="font-medium text-slate-600">${m.sire}</span>
+              <p class="text-[11px] text-pink-600 font-semibold mt-0.5">Mise-bas : ${m.expectedBirthDate}</p>
+            </div>
+            <span class="px-2 py-1 rounded bg-pink-100 text-pink-800 text-[10px] font-bold">${m.status}</span>
+          </div>
+        `).join('');
+      }
+
+      // Dash Batches Preview
+      const batchList = document.getElementById('dashBatchesList');
+      if (batches.length === 0) {
+        batchList.innerHTML = `<p class="text-xs text-slate-400 italic">Aucun lot d'engraissement</p>`;
+      } else {
+        batchList.innerHTML = batches.slice(0, 3).map(b => `
+          <div class="p-3 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-between text-xs">
+            <div>
+              <span class="font-bold text-slate-900">${b.code}</span> (${b.count} lapins)
+              <p class="text-[11px] text-slate-500 mt-0.5">Cage : ${b.cage} • Poids moy : ${(b.avgWeightGrams / 1000).toFixed(2)} kg</p>
+            </div>
+            <span class="px-2 py-1 rounded bg-blue-100 text-blue-800 text-[10px] font-bold">En engraissement</span>
+          </div>
+        `).join('');
+      }
+    }
+
+    // --- FILTERS LOGIC (AGE 2 MOIS / POIDS 2 KG) ---
+    function setAgeFilter(type) {
+      currentFilterAge = type;
+      document.querySelectorAll('.age-chip').forEach(el => {
+        el.className = 'age-chip text-xs px-3 py-1.5 rounded-xl font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition';
+      });
+      const activeEl = document.getElementById(`ageChip-${type}`);
+      if (activeEl) {
+        activeEl.className = 'age-chip text-xs px-3 py-1.5 rounded-xl font-bold bg-emerald-600 text-white shadow-sm transition';
+      }
+      applyFilters();
+    }
+
+    function setWeightFilter(type) {
+      currentFilterWeight = type;
+      document.querySelectorAll('.weight-chip').forEach(el => {
+        el.className = 'weight-chip text-xs px-3 py-1.5 rounded-xl font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition';
+      });
+      const activeEl = document.getElementById(`weightChip-${type}`);
+      if (activeEl) {
+        activeEl.className = 'weight-chip text-xs px-3 py-1.5 rounded-xl font-bold bg-emerald-600 text-white shadow-sm transition';
+      }
+      applyFilters();
+    }
+
+    function resetFilters() {
+      document.getElementById('searchInput').value = '';
+      document.getElementById('sexFilter').value = 'all';
+      document.getElementById('statusFilter').value = 'all';
+      setAgeFilter('all');
+      setWeightFilter('all');
+    }
+
+    function applyFilters() {
+      const q = (document.getElementById('searchInput').value || '').toLowerCase().trim();
+      const sex = document.getElementById('sexFilter').value;
+      const status = document.getElementById('statusFilter').value;
+
+      const filtered = rabbits.filter(r => {
+        if (q) {
+          const match = (r.name || '').toLowerCase().includes(q) ||
+                        (r.tag || '').toLowerCase().includes(q) ||
+                        (r.cage || '').toLowerCase().includes(q) ||
+                        (r.breed || '').toLowerCase().includes(q);
+          if (!match) return false;
+        }
+
+        if (sex !== 'all' && r.sex !== sex) return false;
+        if (status !== 'all' && r.status !== status) return false;
+
+        const age = getRabbitAgeDetails(r.dob);
+        if (currentFilterAge === '1m' && age.days > 35) return false;
+        if (currentFilterAge === '2m' && (age.days < 45 || age.days > 75)) return false; // Cible directe des lapins de 2 mois (~60j)
+        if (currentFilterAge === '3m' && (age.days < 76 || age.days > 180)) return false;
+        if (currentFilterAge === 'adult' && age.days < 180) return false;
+
+        const w = getLatestWeight(r);
+        if (currentFilterWeight === 'light' && w >= 1.5) return false;
+        if (currentFilterWeight === '2kg' && (w < 1.75 || w > 2.3)) return false; // Cible directe des lapins de 2 kg
+        if (currentFilterWeight === 'heavy' && w <= 3.0) return false;
+
+        return true;
+      });
+
+      renderRabbitGrid(filtered);
+    }
+
+    function renderRabbitGrid(list) {
+      const grid = document.getElementById('rabbitGrid');
+      const countEl = document.getElementById('resultsCount');
+
+      countEl.innerText = `${list.length} lapin(s) trouvé(s) sur un cheptel de ${rabbits.length}`;
+
+      if (list.length === 0) {
+        grid.innerHTML = `
+          <div class="col-span-full py-12 text-center bg-white rounded-3xl border border-dashed border-slate-300">
+            <i class="fa-solid fa-filter-circle-xmark text-4xl text-slate-300 mb-2"></i>
+            <p class="text-sm font-bold text-slate-700">Aucun lapin ne correspond à ces critères</p>
+            <p class="text-xs text-slate-400 mt-1">Modifiez vos filtres d'âge ou de poids</p>
+          </div>
+        `;
+        return;
+      }
+
+      grid.innerHTML = list.map(r => {
+        const isMale = r.sex === 'MALE';
+        const genderColor = isMale ? 'text-blue-600 bg-blue-50 border-blue-200' : 'text-pink-600 bg-pink-50 border-pink-200';
+        const genderIcon = isMale ? '<i class="fa-solid fa-mars"></i>' : '<i class="fa-solid fa-venus"></i>';
+        const age = getRabbitAgeDetails(r.dob);
+        const latestW = getLatestWeight(r);
+
+        return `
+          <div onclick="openDetailModal('${r.id}')" class="bg-white rounded-3xl p-5 shadow-sm border border-slate-200 hover:shadow-md hover:border-emerald-300 transition cursor-pointer flex flex-col justify-between group">
+            <div>
+              <div class="flex items-start justify-between mb-3">
+                <div class="flex items-center gap-3">
+                  <div class="w-12 h-12 rounded-2xl flex items-center justify-center text-xl font-bold border ${genderColor}">
+                    ${genderIcon}
+                  </div>
+                  <div>
+                    <h3 class="font-extrabold text-slate-900 group-hover:text-emerald-700 transition">${r.name}</h3>
+                    <p class="text-xs text-slate-500">${r.breed}</p>
+                  </div>
+                </div>
+                <span class="text-xs font-bold px-2.5 py-1 rounded-full ${r.status === 'Reproducteur' ? 'bg-amber-100 text-amber-800' : r.status === 'Gestante' ? 'bg-pink-100 text-pink-800' : 'bg-emerald-100 text-emerald-800'}">
+                  ${r.status}
+                </span>
+              </div>
+
+              <div class="grid grid-cols-2 gap-2 text-xs py-2 border-y border-slate-100 my-2">
+                <div>
+                  <span class="text-slate-400 font-medium">Cage :</span>
+                  <span class="font-bold text-slate-800 ml-1">${r.cage}</span>
+                </div>
+                <div>
+                  <span class="text-slate-400 font-medium">Bague :</span>
+                  <span class="font-bold text-slate-800 ml-1">${r.tag || 'N/A'}</span>
+                </div>
+                <div>
+                  <span class="text-slate-400 font-medium">Âge :</span>
+                  <span class="font-bold text-slate-800 ml-1">${age.text}</span>
+                </div>
+                <div>
+                  <span class="text-slate-400 font-medium">Poids :</span>
+                  <span class="font-bold text-emerald-700 ml-1">${latestW.toFixed(2)} kg</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="flex items-center justify-between text-[11px] text-slate-400 pt-2">
+              <span>Père : ${r.sire || 'Inconnu'}</span>
+              <span class="font-bold text-emerald-600 group-hover:underline">Fiche & PDF &rarr;</span>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // --- REPRODUCTION / MATINGS ---
+    function renderMatings() {
+      const tbody = document.getElementById('matingTableBody');
+      if (matings.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" class="p-4 text-center text-slate-400 italic">Aucune saillie enregistrée</td></tr>`;
+        return;
+      }
+      tbody.innerHTML = matings.map(m => `
+        <tr class="hover:bg-slate-50">
+          <td class="p-3 font-semibold text-slate-800">${m.matingDate}</td>
+          <td class="p-3 font-bold text-blue-700">${m.sire}</td>
+          <td class="p-3 font-bold text-pink-700">${m.dam}</td>
+          <td class="p-3 font-bold text-emerald-700">${m.expectedBirthDate}</td>
+          <td class="p-3"><span class="px-2 py-0.5 rounded text-[10px] font-bold bg-pink-100 text-pink-800">${m.status}</span></td>
+          <td class="p-3 text-right">
+            <button onclick="deleteMating('${m.id}')" class="text-red-500 hover:text-red-700"><i class="fa-regular fa-trash-can"></i></button>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    function openAddMatingModal() {
+      const maleSelect = document.getElementById('matingMale');
+      const femaleSelect = document.getElementById('matingFemale');
+      const males = rabbits.filter(r => r.sex === 'MALE');
+      const females = rabbits.filter(r => r.sex === 'FEMALE');
+
+      maleSelect.innerHTML = males.map(m => `<option value="${m.name}">${m.name} (${m.cage})</option>`).join('');
+      femaleSelect.innerHTML = females.map(f => `<option value="${f.name}">${f.name} (${f.cage})</option>`).join('');
+      document.getElementById('matingDate').value = new Date().toISOString().split('T')[0];
+      openModal('matingModal');
+    }
+
+    function saveMating(e) {
+      e.preventDefault();
+      const sire = document.getElementById('matingMale').value;
+      const dam = document.getElementById('matingFemale').value;
+      const matingDate = document.getElementById('matingDate').value;
+      
+      const d = new Date(matingDate);
+      d.setDate(d.getDate() + 31);
+      const expectedBirthDate = d.toISOString().split('T')[0];
+
+      const newMating = {
+        id: 'mat-' + Date.now(),
+        sire, dam, matingDate, expectedBirthDate,
+        status: "En Gestation (Mise-bas J+31)"
+      };
+
+      matings.unshift(newMating);
+      saveLocalState();
+      renderAll();
+      closeModal('matingModal');
+    }
+
+    function deleteMating(id) {
+      if (confirm("Supprimer cet enregistrement de saillie ?")) {
+        matings = matings.filter(m => m.id !== id);
+        saveLocalState();
+        renderAll();
+      }
+    }
+
+    // --- BATCHES (ENGRAISSEMENT) ---
+    function renderBatches() {
+      const grid = document.getElementById('batchesGrid');
+      if (batches.length === 0) {
+        grid.innerHTML = `<p class="col-span-full text-xs text-slate-400 italic">Aucun lot d'engraissement créé.</p>`;
+        return;
+      }
+      grid.innerHTML = batches.map(b => `
+        <div class="p-5 rounded-2xl bg-white border border-slate-200 shadow-sm space-y-3">
+          <div class="flex items-center justify-between">
+            <h4 class="font-black text-slate-900">${b.code}</h4>
+            <span class="text-xs bg-blue-100 text-blue-800 font-bold px-2 py-0.5 rounded">Engraissement</span>
+          </div>
+          <div class="grid grid-cols-2 gap-2 text-xs py-2 border-y border-slate-100">
+            <div><span class="text-slate-400">Effectif :</span> <strong class="text-slate-800">${b.count} têtes</strong></div>
+            <div><span class="text-slate-400">Cage :</span> <strong class="text-slate-800">${b.cage}</strong></div>
+            <div><span class="text-slate-400">Poids moyen :</span> <strong class="text-emerald-700">${(b.avgWeightGrams / 1000).toFixed(2)} kg</strong></div>
+            <div><span class="text-slate-400">Sevrage :</span> <strong class="text-slate-800">${b.weaningDate}</strong></div>
+          </div>
+          <div class="flex items-center justify-between pt-1">
+            <span class="text-[11px] text-slate-400">Vente prévue : ${b.targetSaleDate}</span>
+            <button onclick="deleteBatch('${b.id}')" class="text-xs text-red-500 hover:underline">Supprimer</button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function openAddBatchModal() {
+      document.getElementById('batchWeaningDate').value = new Date().toISOString().split('T')[0];
+      openModal('batchModal');
+    }
+
+    function saveBatch(e) {
+      e.preventDefault();
+      const code = document.getElementById('batchCode').value;
+      const count = parseInt(document.getElementById('batchCount').value);
+      const avgWeightGrams = parseInt(document.getElementById('batchAvgWeight').value);
+      const weaningDate = document.getElementById('batchWeaningDate').value;
+      const cage = document.getElementById('batchCage').value;
+
+      const d = new Date(weaningDate);
+      d.setDate(d.getDate() + 60);
+      const targetSaleDate = d.toISOString().split('T')[0];
+
+      batches.unshift({
+        id: 'batch-' + Date.now(),
+        code, count, avgWeightGrams, weaningDate, cage, targetSaleDate
+      });
+      saveLocalState();
+      renderAll();
+      closeModal('batchModal');
+    }
+
+    function deleteBatch(id) {
+      if (confirm("Supprimer ce lot ?")) {
+        batches = batches.filter(b => b.id !== id);
+        saveLocalState();
+        renderAll();
+      }
+    }
+
+    // --- FINANCES (FCFA) ---
+    function renderFinances() {
+      const tbody = document.getElementById('financeTableBody');
+      if (finances.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" class="p-4 text-center text-slate-400 italic">Aucune transaction enregistrée</td></tr>`;
+        return;
+      }
+      tbody.innerHTML = finances.map(f => {
+        const isRecette = f.type === 'Recette';
+        return `
+          <tr class="hover:bg-slate-50">
+            <td class="p-3 text-slate-500">${f.date}</td>
+            <td class="p-3"><span class="px-2 py-0.5 rounded text-[10px] font-bold ${isRecette ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}">${f.type}</span></td>
+            <td class="p-3 font-semibold text-slate-800">${f.category}</td>
+            <td class="p-3 text-slate-600">${f.desc}</td>
+            <td class="p-3 text-right font-bold ${isRecette ? 'text-emerald-700' : 'text-red-700'}">
+              ${isRecette ? '+' : '-'}${f.amount.toLocaleString('fr-FR')} FCFA
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function openAddTransactionModal() {
+      openModal('txModal');
+    }
+
+    function saveTransaction(e) {
+      e.preventDefault();
+      const type = document.getElementById('txType').value;
+      const amount = parseFloat(document.getElementById('txAmount').value);
+      const category = document.getElementById('txCategory').value;
+      const desc = document.getElementById('txDesc').value || '-';
+      const date = new Date().toISOString().split('T')[0];
+
+      finances.unshift({
+        id: 'tx-' + Date.now(),
+        date, type, category, amount, desc
+      });
+      saveLocalState();
+      renderAll();
+      closeModal('txModal');
+    }
+
+    // --- INVENTORY (STOCK) ---
+    function renderInventory() {
+      const grid = document.getElementById('inventoryGrid');
+      if (inventory.length === 0) {
+        grid.innerHTML = `<p class="col-span-full text-xs text-slate-400 italic">Aucun article dans l'inventaire.</p>`;
+        return;
+      }
+      grid.innerHTML = inventory.map(item => `
+        <div class="p-5 rounded-2xl bg-white border border-slate-200 shadow-sm space-y-3">
+          <div class="flex items-center justify-between">
+            <h4 class="font-black text-slate-900">${item.name}</h4>
+            <span class="text-xs bg-teal-100 text-teal-800 font-bold px-2 py-0.5 rounded">${item.category}</span>
+          </div>
+          <div class="flex items-center justify-between py-2 border-y border-slate-100 text-xs">
+            <span class="text-slate-500">Quantité en stock :</span>
+            <span class="text-lg font-black text-teal-700">${item.quantity} ${item.unit}</span>
+          </div>
+          <div class="flex items-center justify-between text-xs text-slate-400">
+            <span>Valeur : ${item.price.toLocaleString('fr-FR')} FCFA</span>
+            <button onclick="deleteInventory('${item.id}')" class="text-red-500 hover:underline">Supprimer</button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function openAddInventoryModal() {
+      openModal('invModal');
+    }
+
+    function saveInventory(e) {
+      e.preventDefault();
+      const name = document.getElementById('invName').value;
+      const category = document.getElementById('invCat').value;
+      const quantity = parseFloat(document.getElementById('invQty').value);
+      const unit = document.getElementById('invUnit').value;
+      const price = parseFloat(document.getElementById('invPrice').value) || 0;
+
+      inventory.unshift({
+        id: 'inv-' + Date.now(),
+        name, category, quantity, unit, price
+      });
+      saveLocalState();
+      renderAll();
+      closeModal('invModal');
+    }
+
+    function deleteInventory(id) {
+      if (confirm("Supprimer cet article ?")) {
+        inventory = inventory.filter(i => i.id !== id);
+        saveLocalState();
+        renderAll();
+      }
+    }
+
+    // --- UNIQUE AUTOMATIC NAME GENERATION ---
+    function generateUniqueName() {
+      const year = new Date().getFullYear().toString().slice(-2);
+      const randomNoble = NOBLE_NAMES[Math.floor(Math.random() * NOBLE_NAMES.length)];
+      const randomSuffix = Math.floor(10 + Math.random() * 89);
+      document.getElementById('formName').value = `ABV-${year}-${randomNoble}-${randomSuffix}`;
+    }
+
+    // --- MODAL HELPERS ---
+    function openModal(id) { document.getElementById(id).classList.remove('hidden'); }
+    function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
+
+    function openAddRabbitModal() {
+      document.getElementById('editRabbitId').value = '';
+      document.getElementById('modalTitle').innerText = "Nouveau Lapin ABV Farm";
+      document.getElementById('rabbitForm').reset();
+      generateUniqueName();
+      document.getElementById('formDob').value = new Date().toISOString().split('T')[0];
+      populateParentSelects();
+      openModal('rabbitModal');
+    }
+
+    function populateParentSelects() {
+      const sireSelect = document.getElementById('formSire');
+      const damSelect = document.getElementById('formDam');
+      const males = rabbits.filter(r => r.sex === 'MALE');
+      const females = rabbits.filter(r => r.sex === 'FEMALE');
+
+      if (sireSelect) sireSelect.innerHTML = `<option value="">-- Inconnu --</option>` + males.map(m => `<option value="${m.name}">${m.name} (${m.cage})</option>`).join('');
+      if (damSelect) damSelect.innerHTML = `<option value="">-- Inconnue --</option>` + females.map(f => `<option value="${f.name}">${f.name} (${f.cage})</option>`).join('');
+    }
+
+    function populateSimulationDropdowns() {
+      const simSire = document.getElementById('simSire');
+      const simDam = document.getElementById('simDam');
+      const males = rabbits.filter(r => r.sex === 'MALE');
+      const females = rabbits.filter(r => r.sex === 'FEMALE');
+
+      if (simSire) simSire.innerHTML = `<option value="">-- Choisir un Mâle --</option>` + males.map(m => `<option value="${m.id}">${m.name} (${m.breed})</option>`).join('');
+      if (simDam) simDam.innerHTML = `<option value="">-- Choisir une Femelle --</option>` + females.map(f => `<option value="${f.id}">${f.name} (${f.breed})</option>`).join('');
+    }
+
+    // --- SAVE RABBIT & SYNC CLOUD ---
+    async function saveRabbit(e) {
+      e.preventDefault();
+      const editId = document.getElementById('editRabbitId').value;
+      const sex = document.getElementById('formSex').value;
+      const status = document.getElementById('formStatus').value;
+      const name = document.getElementById('formName').value.trim();
+      const tag = document.getElementById('formTag').value.trim();
+      const cage = document.getElementById('formCage').value.trim();
+      const breed = document.getElementById('formBreed').value;
+      const dob = document.getElementById('formDob').value;
+      const weightVal = parseFloat(document.getElementById('formWeight').value) || 2.0;
+      const sire = document.getElementById('formSire').value;
+      const dam = document.getElementById('formDam').value;
+
+      let targetRabbit = null;
+
+      if (editId) {
+        const idx = rabbits.findIndex(r => r.id === editId);
+        if (idx !== -1) {
+          rabbits[idx] = {
+            ...rabbits[idx],
+            sex, status, name, tag, cage, breed, dob, sire, dam
+          };
+          const lastW = getLatestWeight(rabbits[idx]);
+          if (Math.abs(lastW - weightVal) > 0.02) {
+            rabbits[idx].weights.push({
+              date: new Date().toISOString().split('T')[0],
+              weight: weightVal
+            });
+          }
+          targetRabbit = rabbits[idx];
+        }
+      } else {
+        targetRabbit = {
+          id: 'abv-' + Date.now(),
+          name, tag, sex, breed, cage, status, dob, sire, dam,
+          weights: [
+            { date: new Date().toISOString().split('T')[0], weight: weightVal }
+          ],
+          treatments: []
+        };
+        rabbits.unshift(targetRabbit);
+      }
+
+      await syncRabbitToCloud(targetRabbit);
+      renderAll();
+      closeModal('rabbitModal');
+
+      if (editId && activeRabbitId === editId) {
+        openDetailModal(editId);
+      }
+    }
+
+    // --- DETAIL MODAL ---
+    function openDetailModal(id) {
+      activeRabbitId = id;
+      const r = rabbits.find(item => item.id === id);
+      if (!r) return;
+
+      const isMale = r.sex === 'MALE';
+      const badge = document.getElementById('detailGenderBadge');
+      if (isMale) {
+        badge.className = "w-14 h-14 rounded-2xl flex items-center justify-center text-2xl font-bold bg-blue-100 text-blue-700 border border-blue-200";
+        badge.innerHTML = '<i class="fa-solid fa-mars"></i>';
+      } else {
+        badge.className = "w-14 h-14 rounded-2xl flex items-center justify-center text-2xl font-bold bg-pink-100 text-pink-700 border border-pink-200";
+        badge.innerHTML = '<i class="fa-solid fa-venus"></i>';
+      }
+
+      document.getElementById('detailName').innerText = r.name;
+      document.getElementById('detailTag').innerText = r.tag ? `Bague : ${r.tag}` : 'Sans bague';
+      document.getElementById('detailSubtitle').innerText = `${r.breed} • Cage ${r.cage}`;
+
+      const age = getRabbitAgeDetails(r.dob);
+      document.getElementById('detailAge').innerText = age.text;
+      document.getElementById('detailWeight').innerText = `${getLatestWeight(r).toFixed(2)} kg`;
+      document.getElementById('detailStatus').innerText = r.status;
+
+      document.getElementById('detailSire').innerText = r.sire || 'Inconnu (Fondateur)';
+      document.getElementById('detailDam').innerText = r.dam || 'Inconnue (Fondatrice)';
+
+      // Weight table
+      const wTable = document.getElementById('weightLogTable');
+      if (r.weights && r.weights.length > 0) {
+        wTable.innerHTML = `
+          <table class="w-full text-left">
+            <thead class="bg-slate-100 text-slate-500 font-semibold border-b border-slate-200">
+              <tr><th class="p-2">Date</th><th class="p-2">Poids mesuré</th></tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+              ${r.weights.map(w => `
+                <tr><td class="p-2 text-slate-600">${w.date}</td><td class="p-2 font-bold text-emerald-700">${w.weight.toFixed(2)} kg</td></tr>
+              `).join('')}
+            </tbody>
+          </table>
+        `;
+      } else {
+        wTable.innerHTML = `<p class="p-3 text-slate-400 italic">Aucune pesée enregistrée</p>`;
+      }
+
+      // Treatment table
+      const tTable = document.getElementById('treatmentLogTable');
+      if (r.treatments && r.treatments.length > 0) {
+        tTable.innerHTML = `
+          <table class="w-full text-left">
+            <thead class="bg-slate-100 text-slate-500 font-semibold border-b border-slate-200">
+              <tr><th class="p-2">Date</th><th class="p-2">Soin</th><th class="p-2">Détails</th></tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+              ${r.treatments.map(t => `
+                <tr><td class="p-2 text-slate-600 whitespace-nowrap">${t.date}</td><td class="p-2 font-bold text-slate-800">${t.title}</td><td class="p-2 text-slate-500">${t.notes || '-'}</td></tr>
+              `).join('')}
+            </tbody>
+          </table>
+        `;
+      } else {
+        tTable.innerHTML = `<p class="p-3 text-slate-400 italic">Aucun traitement sanitaire consigné</p>`;
+      }
+
+      openModal('detailModal');
+    }
+
+    function promptAddWeight() {
+      if (!activeRabbitId) return;
+      const val = prompt("Entrez le nouveau poids mesuré en kg (ex: 2.15) :");
+      if (!val) return;
+      const num = parseFloat(val.replace(',', '.'));
+      if (isNaN(num) || num <= 0) return;
+      const r = rabbits.find(item => item.id === activeRabbitId);
+      if (r) {
+        if (!r.weights) r.weights = [];
+        r.weights.push({ date: new Date().toISOString().split('T')[0], weight: num });
+        syncRabbitToCloud(r);
+        openDetailModal(activeRabbitId);
+        renderAll();
+      }
+    }
+
+    function promptAddTreatment() {
+      if (!activeRabbitId) return;
+      const title = prompt("Titre du soin (ex: Vermifuge Lévamisole, Anticoccidien) :");
+      if (!title) return;
+      const notes = prompt("Observations / Posologie :") || "";
+      const r = rabbits.find(item => item.id === activeRabbitId);
+      if (r) {
+        if (!r.treatments) r.treatments = [];
+        r.treatments.push({ date: new Date().toISOString().split('T')[0], title: title.trim(), notes: notes.trim() });
+        syncRabbitToCloud(r);
+        openDetailModal(activeRabbitId);
+      }
+    }
+
+    function deleteCurrentRabbit() {
+      if (!activeRabbitId) return;
+      const r = rabbits.find(item => item.id === activeRabbitId);
+      if (!r) return;
+      if (confirm(`Confirmez-vous la suppression du lapin ${r.name} ?`)) {
+        rabbits = rabbits.filter(item => item.id !== activeRabbitId);
+        if (isFirebaseReady && db) {
+          db.collection("users").doc(FARM_USER_ID).collection("rabbits").doc(activeRabbitId).delete().catch(console.warn);
+        }
+        saveLocalState();
+        closeModal('detailModal');
+        renderAll();
+      }
+    }
+
+    function editCurrentRabbit() {
+      if (!activeRabbitId) return;
+      const r = rabbits.find(item => item.id === activeRabbitId);
+      if (!r) return;
+      closeModal('detailModal');
+      document.getElementById('editRabbitId').value = r.id;
+      document.getElementById('modalTitle').innerText = "Modifier " + r.name;
+      document.getElementById('formSex').value = r.sex;
+      document.getElementById('formStatus').value = r.status;
+      document.getElementById('formName').value = r.name;
+      document.getElementById('formTag').value = r.tag || '';
+      document.getElementById('formCage').value = r.cage;
+      document.getElementById('formBreed').value = r.breed;
+      document.getElementById('formDob').value = r.dob;
+      document.getElementById('formWeight').value = getLatestWeight(r);
+      populateParentSelects();
+      document.getElementById('formSire').value = r.sire || '';
+      document.getElementById('formDam').value = r.dam || '';
+      openModal('rabbitModal');
+    }
+
+    // --- OFFICIAL PDF EXPORT WITH ABV FARM LOGO (JSPDF) ---
+    async function exportCurrentRabbitPdf() {
+      if (!activeRabbitId) return;
+      const r = rabbits.find(item => item.id === activeRabbitId);
+      if (!r) return;
+
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      const age = getRabbitAgeDetails(r.dob);
+      const latestW = getLatestWeight(r);
+
+      // Forest Green Banner
+      doc.setFillColor(20, 83, 45);
+      doc.rect(0, 0, 210, 38, 'F');
+
+      // Gold Accent
+      doc.setFillColor(245, 158, 11);
+      doc.rect(0, 38, 210, 2, 'F');
+
+      // Logo
+      try {
+        const logoImg = document.getElementById('headerLogo');
+        if (logoImg && logoImg.complete) {
+          doc.addImage(logoImg, 'JPEG', 12, 6, 26, 26);
+        }
+      } catch (e) {
+        console.warn("Logo bypassed in pdf:", e);
+      }
+
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(18);
+      doc.text("ABV FARM • ÉLEVAGE CUNICOLE PROFESSIONNEL", 44, 18);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      doc.setTextColor(220, 252, 231);
+      doc.text("FICHE INDIVIDUELLE D'ÉLEVAGE & CERTIFICATION GÉNÉTIQUE", 44, 25);
+      doc.text("Document officiel certifié conforme par le registre cunicole ABV Farm", 44, 30);
+
+      // Section 1: Identité
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(13);
+      doc.setTextColor(20, 83, 45);
+      doc.text("1. IDENTITÉ & CARACTÉRISTIQUES DU REPRODUCTEUR", 14, 50);
+
+      const identityData = [
+        ["Nom du Sujet :", r.name, "Sexe :", r.sex === 'MALE' ? 'Mâle ♂' : 'Femelle ♀'],
+        ["Numéro / Bague :", r.tag || 'N/A', "Statut Actuel :", r.status],
+        ["Race Cunicole :", r.breed, "Cage / Clapier :", r.cage],
+        ["Date de Naissance :", r.dob, "Âge Actuel :", age.text],
+        ["Dernier Poids Mesuré :", `${latestW.toFixed(2)} kg`, "Père (Sire) :", r.sire || 'Inconnu'],
+        ["Mère (Dam) :", r.dam || 'Inconnue', "Date du Document :", new Date().toLocaleDateString('fr-FR')]
+      ];
+
+      doc.autoTable({
+        startY: 54,
+        body: identityData,
+        theme: 'grid',
+        styles: { fontSize: 9.5, cellPadding: 2.8 },
+        columnStyles: {
+          0: { fontStyle: 'bold', fillColor: [248, 250, 252], textColor: [71, 85, 105], width: 42 },
+          1: { fontStyle: 'bold', textColor: [15, 23, 42], width: 60 },
+          2: { fontStyle: 'bold', fillColor: [248, 250, 252], textColor: [71, 85, 105], width: 42 },
+          3: { fontStyle: 'bold', textColor: [15, 23, 42], width: 46 }
+        }
+      });
+
+      // Section 2: Poids
+      let nextY = doc.lastAutoTable.finalY + 10;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(12);
+      doc.setTextColor(20, 83, 45);
+      doc.text("2. HISTORIQUE PONDÉRAL & ÉVOLUTION DE LA BIOMASSE", 14, nextY);
+
+      const weightsRows = (r.weights || []).map(w => [w.date, `${w.weight.toFixed(2)} kg`, "Conforme aux courbes de croissance ABV Farm"]);
+      if (weightsRows.length === 0) weightsRows.push(["N/A", "Aucune pesée", "-"]);
+
+      doc.autoTable({
+        startY: nextY + 4,
+        head: [['Date de pesée', 'Poids Relevé', 'Observations Croissance']],
+        body: weightsRows,
+        theme: 'striped',
+        headStyles: { fillColor: [22, 101, 52] },
+        styles: { fontSize: 9, cellPadding: 2.5 }
+      });
+
+      // Section 3: Traitements
+      nextY = doc.lastAutoTable.finalY + 10;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(12);
+      doc.setTextColor(20, 83, 45);
+      doc.text("3. CARNET SANITAIRE & PROTOCOLES VÉTÉRINAIRES", 14, nextY);
+
+      const treatRows = (r.treatments || []).map(t => [t.date, t.title, t.notes || 'Conforme']);
+      if (treatRows.length === 0) treatRows.push(["-", "Aucun traitement consigné", "Sujet sain et vigoureux"]);
+
+      doc.autoTable({
+        startY: nextY + 4,
+        head: [['Date', 'Traitement / Vaccination', 'Posologie & Observations']],
+        body: treatRows,
+        theme: 'striped',
+        headStyles: { fillColor: [22, 101, 52] },
+        styles: { fontSize: 9, cellPadding: 2.5 }
+      });
+
+      // Certification Box
+      nextY = doc.lastAutoTable.finalY + 12;
+      if (nextY > 250) {
+        doc.addPage();
+        nextY = 20;
+      }
+
+      doc.setFillColor(248, 250, 252);
+      doc.setDrawColor(203, 213, 225);
+      doc.roundedRect(14, nextY, 182, 28, 3, 3, 'FD');
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9.5);
+      doc.setTextColor(20, 83, 45);
+      doc.text("SCEAU OFFICIEL D'AUTHENTICITÉ • REGISTRE ÉLEVAGE ABV FARM", 20, nextY + 8);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8.5);
+      doc.setTextColor(71, 85, 105);
+      doc.text("Ce document certifie l'origine et l'ascendance de ce sujet cunicole au sein de notre cheptel.", 20, nextY + 15);
+      doc.text(`Identifiant Unique Système : ${r.id.toUpperCase()} • Signature du Responsable d'Élevage : [CERTIFIÉ ABV FARM]`, 20, nextY + 22);
+
+      doc.save(`Fiche_Cunicole_ABV_${r.name.replace(/\s+/g, '_')}.pdf`);
+    }
+
+    // --- WRIGHT INBREEDING SIMULATION ---
+    function computeInbreedingSimulation() {
+      const sireId = document.getElementById('simSire').value;
+      const damId = document.getElementById('simDam').value;
+      const resultBox = document.getElementById('simResultBox');
+
+      const sireInfo = document.getElementById('simSireInfo');
+      const damInfo = document.getElementById('simDamInfo');
+
+      const sire = rabbits.find(r => r.id === sireId);
+      const dam = rabbits.find(r => r.id === damId);
+
+      if (sire) {
+        sireInfo.classList.remove('hidden');
+        sireInfo.innerHTML = `<strong>${sire.name}</strong> • ${sire.breed} (Cage ${sire.cage})<br><span class="text-slate-400">Père: ${sire.sire || 'Inconnu'} | Mère: ${sire.dam || 'Inconnue'}</span>`;
+      } else {
+        sireInfo.classList.add('hidden');
+      }
+
+      if (dam) {
+        damInfo.classList.remove('hidden');
+        damInfo.innerHTML = `<strong>${dam.name}</strong> • ${dam.breed} (Cage ${dam.cage})<br><span class="text-slate-400">Père: ${dam.sire || 'Inconnu'} | Mère: ${dam.dam || 'Inconnue'}</span>`;
+      } else {
+        damInfo.classList.add('hidden');
+      }
+
+      if (!sire || !dam) {
+        resultBox.innerHTML = `<p class="text-sm text-slate-500 font-medium">Sélectionnez un mâle et une femelle ci-dessus pour calculer la compatibilité génétique.</p>`;
+        return;
+      }
+
+      let coefficient = 0;
+      let commonAncestors = [];
+
+      if (sire.name === dam.sire || sire.name === dam.dam || dam.name === sire.sire || dam.name === sire.dam) {
+        coefficient = 25.0;
+        commonAncestors.push("Lien direct Parent-Enfant");
+      } else if (sire.sire && sire.sire === dam.sire && sire.dam && sire.dam === dam.dam) {
+        coefficient = 25.0;
+        commonAncestors.push(`Mêmes parents (${sire.sire} & ${sire.dam})`);
+      } else if ((sire.sire && sire.sire === dam.sire) || (sire.dam && sire.dam === dam.dam)) {
+        coefficient = 12.5;
+        commonAncestors.push(`Parent commun (${sire.sire === dam.sire ? sire.sire : sire.dam})`);
+      }
+
+      let riskColor = "bg-emerald-50 border-emerald-300 text-emerald-900";
+      let riskBadge = `<span class="bg-emerald-600 text-white text-xs px-3 py-1 rounded-full font-bold">Accouplement Optimal (Risque Faible)</span>`;
+      let advice = "La diversité génétique est optimale. Ce croisement favorisera la vigueur hybride, une grande taille de portée et une forte résistance des lapereaux.";
+
+      if (coefficient >= 25) {
+        riskColor = "bg-red-50 border-red-300 text-red-900";
+        riskBadge = `<span class="bg-red-600 text-white text-xs px-3 py-1 rounded-full font-bold">Consanguinité Forte (DÉCONSEILLÉ)</span>`;
+        advice = "Risque accru d'anomalies génétiques et baisse de vitalité néonatale. Il est fortement conseillé de choisir un autre mâle ou d'introduire un reproducteur externe.";
+      } else if (coefficient >= 12.5) {
+        riskColor = "bg-amber-50 border-amber-300 text-amber-900";
+        riskBadge = `<span class="bg-amber-600 text-white text-xs px-3 py-1 rounded-full font-bold">Consanguinité Modérée (À Surveiller)</span>`;
+        advice = "Croisement acceptable pour fixer des caractéristiques raciales, mais à ne pas cumuler sur les générations suivantes.";
+      }
+
+      resultBox.innerHTML = `
+        <div class="p-5 rounded-2xl border ${riskColor} text-left space-y-3">
+          <div class="flex items-center justify-between">
+            <div>
+              <span class="text-xs font-bold uppercase tracking-wider">Coefficient de Wright estimé (Fx)</span>
+              <h3 class="text-3xl font-black mt-0.5">${coefficient.toFixed(2)} %</h3>
+            </div>
+            ${riskBadge}
+          </div>
+          <p class="text-xs font-medium leading-relaxed">${advice}</p>
+          ${commonAncestors.length > 0 ? `
+            <div class="pt-2 border-t border-current/20 text-xs">
+              <strong>Ancêtres communs identifiés :</strong> ${commonAncestors.join(', ')}
+            </div>
+          ` : `
+            <div class="pt-2 border-t border-current/20 text-xs">
+              <strong>Aucun ancêtre commun direct trouvé dans les générations connues.</strong>
+            </div>
+          `}
+        </div>
+      `;
+    }
+
+    // --- BACKUP & RESTORE JSON ---
+    function openBackupModal() { openModal('backupModal'); }
+
+    function downloadBackupJson() {
+      const dump = {
+        rabbits, matings, batches, finances, inventory,
+        exportedAt: new Date().toISOString()
+      };
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(dump, null, 2));
+      const a = document.createElement('a');
+      a.setAttribute("href", dataStr);
+      a.setAttribute("download", `ABV_FARM_SAUVEGARDE_${new Date().toISOString().split('T')[0]}.json`);
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }
+
+    function restoreBackupJson(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function(evt) {
+        try {
+          const parsed = JSON.parse(evt.target.result);
+          if (parsed.rabbits) {
+            rabbits = parsed.rabbits || [];
+            matings = parsed.matings || [];
+            batches = parsed.batches || [];
+            finances = parsed.finances || [];
+            inventory = parsed.inventory || [];
+            saveLocalState();
+            syncAllToCloud();
+            renderAll();
+            closeModal('backupModal');
+            alert("Sauvegarde restaurée avec succès !");
+          } else if (Array.isArray(parsed)) {
+            rabbits = parsed;
+            saveLocalState();
+            syncAllToCloud();
+            renderAll();
+            closeModal('backupModal');
+            alert("Cheptel restauré avec succès !");
+          }
+        } catch(err) {
+          alert("Erreur lors de la lecture du fichier JSON.");
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    // Start App
+    window.addEventListener('DOMContentLoaded', () => {
+      loadData();
+    });
+  </script>
+</body>
+</html>

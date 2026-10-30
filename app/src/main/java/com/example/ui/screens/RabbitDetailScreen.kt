@@ -41,6 +41,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
+import com.example.R
 import androidx.navigation.NavController
 import com.example.data.PhotoRecord
 import com.example.data.Rabbit
@@ -89,18 +92,10 @@ fun RabbitDetailScreen(navController: NavController, viewModel: FarmViewModel, r
         else -> "$ageInMonths mois (${ageInDays % 30}j)"
     }
 
-    // Interactive image viewing overlay state
-    var activeViewerPhotoUri by remember { mutableStateOf<String?>(null) }
 
     // Direct input weight dialog
     var showWeightDialog by remember { mutableStateOf(false) }
     var weightInputText by remember { mutableStateOf("") }
-
-    // Supplementary photos logs dialog states
-    var showPhotoDialog by remember { mutableStateOf(false) }
-    var supplementaryPhotoUri by remember { mutableStateOf<String?>(null) }
-    var photoNoteText by remember { mutableStateOf("") }
-    var photoWeightText by remember { mutableStateOf("") }
 
     // Treatment dialog states
     var showTreatmentDialog by remember { mutableStateOf(false) }
@@ -111,35 +106,7 @@ fun RabbitDetailScreen(navController: NavController, viewModel: FarmViewModel, r
     var treatmentWithdrawalDays by remember { mutableStateOf("0") }
     var showWithdrawalBlockedDialog by remember { mutableStateOf(false) }
 
-    val photoPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickVisualMedia(),
-        onResult = { uri ->
-            if (uri != null) {
-                supplementaryPhotoUri = uri.toString()
-            }
-        }
-    )
-
     val context = LocalContext.current
-    val cameraLauncherForAlbum = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.TakePicturePreview(),
-        onResult = { bitmap ->
-            if (bitmap != null) {
-                val savedUri = saveBitmapToCache(context, bitmap)
-                if (savedUri != null) {
-                    supplementaryPhotoUri = savedUri.toString()
-                }
-            }
-        }
-    )
-
-    // Rabbit photo presets to easily choose during updates
-    val presets = listOf(
-        "https://images.unsplash.com/photo-1585110396000-c9ffd4e4b308?w=300" to "Blanc Pur",
-        "https://images.unsplash.com/photo-1591561954557-26941169b49e?w=300" to "Brun Pastel",
-        "https://images.unsplash.com/photo-1518791841217-8f162f1e1131?w=300" to "Gris Doux",
-        "https://images.unsplash.com/photo-1541364983171-a8ba01d95cfc?w=300" to "Noir Intense"
-    )
 
     var selectedDetailTab by remember { mutableIntStateOf(0) }
     var showCageCardDialog by remember { mutableStateOf(false) }
@@ -167,7 +134,6 @@ fun RabbitDetailScreen(navController: NavController, viewModel: FarmViewModel, r
     var editStatus by remember { mutableStateOf("Actif") }
     var editFatherId by remember { mutableStateOf<Int?>(null) }
     var editMotherId by remember { mutableStateOf<Int?>(null) }
-    var editImageUri by remember { mutableStateOf<String?>(null) }
     var editBirthDate by remember { mutableLongStateOf(0L) }
 
     fun openEditDialog() {
@@ -180,7 +146,6 @@ fun RabbitDetailScreen(navController: NavController, viewModel: FarmViewModel, r
         editStatus = rabbit.status
         editFatherId = rabbit.fatherId
         editMotherId = rabbit.motherId
-        editImageUri = rabbit.imageUri
         editBirthDate = rabbit.dateOfBirth
         showEditDialog = true
     }
@@ -266,27 +231,18 @@ fun RabbitDetailScreen(navController: NavController, viewModel: FarmViewModel, r
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(80.dp)
+                            .size(76.dp)
                             .clip(RoundedCornerShape(20.dp))
                             .background(Color.White.copy(alpha = 0.5f))
                             .border(width = 1.dp, color = textColor.copy(alpha = 0.2f), shape = RoundedCornerShape(20.dp)),
                         contentAlignment = Alignment.Center
                     ) {
-                        if (rabbit.imageUri != null) {
-                            AsyncImage(
-                                model = rabbit.imageUri,
-                                contentDescription = "Photo de ${rabbit.name}",
-                                modifier = Modifier.fillMaxSize().clickable { activeViewerPhotoUri = rabbit.imageUri },
-                                contentScale = androidx.compose.ui.layout.ContentScale.Crop
-                            )
-                        } else {
-                            Icon(
-                                imageVector = if (isMale) Icons.Rounded.Male else Icons.Rounded.Female,
-                                contentDescription = null,
-                                tint = textColor,
-                                modifier = Modifier.size(38.dp)
-                            )
-                        }
+                        Icon(
+                            imageVector = if (isMale) Icons.Rounded.Male else Icons.Rounded.Female,
+                            contentDescription = null,
+                            tint = textColor,
+                            modifier = Modifier.size(38.dp)
+                        )
                     }
 
                     Column(
@@ -356,6 +312,26 @@ fun RabbitDetailScreen(navController: NavController, viewModel: FarmViewModel, r
                                     contentDescription = "Changer statut",
                                     tint = textColor.copy(alpha = 0.7f),
                                     modifier = Modifier.size(11.dp)
+                                )
+                            }
+                        }
+
+                        val ownInbreedingF = remember(rabbit.id, rabbits) {
+                            if (rabbit.fatherId != null && rabbit.motherId != null) {
+                                com.example.data.GenealogyHelper.calculateRabbitInbreeding(rabbit.id, rabbits)
+                            } else 0.0
+                        }
+                        if (ownInbreedingF > 0.0) {
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = if (ownInbreedingF > 6.25) Color(0xFFFFEDD5) else Color(0xFFFEF3C7)
+                            ) {
+                                Text(
+                                    text = String.format(Locale.getDefault(), "Consanguinité F = %.1f%%", ownInbreedingF),
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (ownInbreedingF > 6.25) Color(0xFF9A3412) else Color(0xFF92400E),
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
                                 )
                             }
                         }
@@ -468,8 +444,7 @@ fun RabbitDetailScreen(navController: NavController, viewModel: FarmViewModel, r
                 "📋 Identité",
                 "🩺 Soins (${treatmentRecords.size})",
                 "⚖️ Poids (${weightRecords.size})",
-                "🧬 Repro ($matingsCount)",
-                "📷 Photos (${photoRecords.size})"
+                "🧬 Repro ($matingsCount)"
             )
 
             ScrollableTabRow(
@@ -1578,112 +1553,7 @@ fun RabbitDetailScreen(navController: NavController, viewModel: FarmViewModel, r
                     }
                 }
 
-                4 -> {
-                    // TAB 4: PHOTOS & ÉVOLUTION
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Journal des Photos",
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.onBackground
-                        )
 
-                        Button(
-                            onClick = { showPhotoDialog = true },
-                            shape = RoundedCornerShape(12.dp),
-                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
-                        ) {
-                            Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Nouvelle Photo", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 10.dp),
-                        shape = RoundedCornerShape(20.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                    ) {
-                        if (photoRecords.isEmpty()) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(24.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    "Aucun historique de photo supplémentaire enregistré. Ajoutez une photo pour suivre l'évolution de la croissance.",
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    textAlign = TextAlign.Center
-                                )
-                            }
-                        } else {
-                            Column(
-                                modifier = Modifier.padding(16.dp),
-                                verticalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
-                                photoRecords.forEachIndexed { index, photoRecord ->
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(72.dp)
-                                                .clip(RoundedCornerShape(12.dp))
-                                                .background(MaterialTheme.colorScheme.surfaceVariant)
-                                                .clickable { activeViewerPhotoUri = photoRecord.imageUri }
-                                        ) {
-                                            AsyncImage(
-                                                model = photoRecord.imageUri,
-                                                contentDescription = "Photo d'évolution",
-                                                modifier = Modifier.fillMaxSize(),
-                                                contentScale = androidx.compose.ui.layout.ContentScale.Crop
-                                            )
-                                        }
-
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                text = SimpleDateFormat("dd MMMM yyyy 'à' HH:mm", Locale.getDefault()).format(Date(photoRecord.recordDate)),
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = MaterialTheme.colorScheme.primary
-                                            )
-                                            Spacer(modifier = Modifier.height(4.dp))
-                                            Text(
-                                                text = if (photoRecord.note.isNotBlank()) photoRecord.note else "Mise à jour périodique",
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                color = MaterialTheme.colorScheme.onSurface
-                                            )
-                                        }
-
-                                        IconButton(
-                                            onClick = { viewModel.deletePhotoRecord(photoRecord) }
-                                        ) {
-                                            Icon(
-                                                Icons.Rounded.Delete,
-                                                contentDescription = "Supprimer de l'historique",
-                                                tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
-                                                modifier = Modifier.size(20.dp)
-                                            )
-                                        }
-                                    }
-                                    if (index < photoRecords.lastIndex) {
-                                        HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
             }
 
             Spacer(modifier = Modifier.height(48.dp))
@@ -1739,185 +1609,7 @@ fun RabbitDetailScreen(navController: NavController, viewModel: FarmViewModel, r
         )
     }
 
-    // Modal Dialog to upload / add supplementary photo updates
-    if (showPhotoDialog) {
-        AlertDialog(
-            onDismissRequest = { 
-                showPhotoDialog = false
-                supplementaryPhotoUri = null
-                photoNoteText = ""
-            },
-            title = { Text("Nouvelle photo d'évolution", fontWeight = FontWeight.Bold) },
-            text = {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                    modifier = Modifier.verticalScroll(rememberScrollState())
-                ) {
-                    Text("Ajoutez une photo supplémentaire pour documenter la croissance de ${rabbit.name} après une période donnée :")
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(72.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(MaterialTheme.colorScheme.surfaceVariant),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (supplementaryPhotoUri != null) {
-                                AsyncImage(
-                                    model = supplementaryPhotoUri,
-                                    contentDescription = "Aperçu de l'évolution",
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop
-                                )
-                            } else {
-                                Icon(Icons.Rounded.PhotoCamera, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
-
-                        Column(
-                            modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Button(
-                                onClick = {
-                                    try {
-                                        cameraLauncherForAlbum.launch(null)
-                                    } catch (e: Exception) {
-                                        Toast.makeText(context, "Appareil photo non disponible", Toast.LENGTH_LONG).show()
-                                    }
-                                },
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text("Prendre une Photo", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            }
-                            Button(
-                                onClick = {
-                                    try {
-                                        photoPickerLauncher.launch(
-                                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                                        )
-                                    } catch (e: Exception) {
-                                        Toast.makeText(context, "Sélecteur de photos non disponible", Toast.LENGTH_LONG).show()
-                                    }
-                                },
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.fillMaxWidth(),
-                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer)
-                            ) {
-                                Text("Depuis la Galerie", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    }
-
-                    // Presets horizontal selector
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("Ou utiliser un modèle :", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
-                        LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            items(presets) { (presetUrl, _) ->
-                                Card(
-                                    modifier = Modifier
-                                        .width(80.dp)
-                                        .clickable { supplementaryPhotoUri = presetUrl }
-                                        .border(
-                                            width = if (supplementaryPhotoUri == presetUrl) 2.dp else 0.dp,
-                                            color = MaterialTheme.colorScheme.primary,
-                                            shape = RoundedCornerShape(8.dp)
-                                        ),
-                                    shape = RoundedCornerShape(8.dp)
-                                ) {
-                                    Box(modifier = Modifier.size(54.dp)) {
-                                        AsyncImage(
-                                            model = presetUrl,
-                                            contentDescription = null,
-                                            modifier = Modifier.fillMaxSize(),
-                                            contentScale = androidx.compose.ui.layout.ContentScale.Crop
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    OutlinedTextField(
-                        value = photoNoteText,
-                        onValueChange = { photoNoteText = it },
-                        label = { Text("Note d'évolution (Optionnel)") },
-                        placeholder = { Text("Ex: Croissance à 3 mois, pelage soyeux") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    OutlinedTextField(
-                        value = photoWeightText,
-                        onValueChange = { photoWeightText = it },
-                        label = { Text("Mettre à jour le poids de croissance (kg - Optionnel)") },
-                        placeholder = { Text("Ex: 1.6") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val uriToSave = supplementaryPhotoUri
-                        if (uriToSave != null) {
-                            val now = System.currentTimeMillis()
-                            viewModel.addPhotoRecord(
-                                PhotoRecord(
-                                    rabbitId = rabbitId,
-                                    imageUri = uriToSave,
-                                    recordDate = now,
-                                    note = photoNoteText.trim()
-                                )
-                            )
-                            
-                            // Optional weight update triggered dynamically from the photo panel
-                            val parsedWeight = photoWeightText.toDoubleOrNull()
-                            if (parsedWeight != null) {
-                                viewModel.addWeightRecord(
-                                    WeightRecord(
-                                        rabbitId = rabbitId,
-                                        weight = parsedWeight,
-                                        recordDate = now
-                                    )
-                                )
-                                viewModel.updateRabbit(rabbit.copy(weight = parsedWeight))
-                            }
-                            
-                            showPhotoDialog = false
-                            supplementaryPhotoUri = null
-                            photoNoteText = ""
-                            photoWeightText = ""
-                        }
-                    },
-                    enabled = supplementaryPhotoUri != null
-                ) {
-                    Text("Ajouter", fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = {
-                        showPhotoDialog = false
-                        supplementaryPhotoUri = null
-                        photoNoteText = ""
-                        photoWeightText = ""
-                    }
-                ) {
-                    Text("Annuler")
-                }
-            }
-        )
-    }
 
     if (showTreatmentDialog) {
         AlertDialog(
@@ -2072,107 +1764,12 @@ fun RabbitDetailScreen(navController: NavController, viewModel: FarmViewModel, r
         )
     }
 
-    // Grand Format Image Viewer with fast WhatsApp/Social sharing
-    if (activeViewerPhotoUri != null) {
-        val viewerUri = activeViewerPhotoUri!!
-        AlertDialog(
-            onDismissRequest = { activeViewerPhotoUri = null },
-            title = { Text("Visualisation d'Image 🖼️", fontWeight = FontWeight.Bold, fontSize = 16.sp) },
-            text = {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(260.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(Color.Black),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        AsyncImage(
-                            model = viewerUri,
-                            contentDescription = "Image agrandie",
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = androidx.compose.ui.layout.ContentScale.Fit
-                        )
-                    }
-                    Text(
-                        text = "Suivi de croissance et identification d'élevage d'ABV Ferme.",
-                        fontSize = 11.sp,
-                        textAlign = TextAlign.Center,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            },
-            confirmButton = {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Button(
-                        onClick = {
-                            try {
-                                val sendIntent = Intent(Intent.ACTION_SEND).apply {
-                                    type = "image/*"
-                                    if (viewerUri.startsWith("content://")) {
-                                        putExtra(Intent.EXTRA_STREAM, Uri.parse(viewerUri))
-                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                    } else {
-                                        putExtra(Intent.EXTRA_TEXT, "Regardez la photo de mon lapin ${rabbit.name} : $viewerUri")
-                                    }
-                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                }
-                                val chooser = Intent.createChooser(sendIntent, "Partager la photo via")
-                                chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                context.startActivity(chooser)
-                            } catch (e: Exception) {
-                                Toast.makeText(context, "Erreur de partage de photo : ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
-                            }
-                        },
-                        modifier = Modifier.weight(1.3f)
-                    ) {
-                        Icon(Icons.Rounded.Share, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Partager 💬", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    }
 
-                    Button(
-                        onClick = { activeViewerPhotoUri = null },
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer)
-                    ) {
-                        Text("Fermer", fontSize = 11.sp)
-                    }
-                }
-            }
-        )
-    }
 
     if (showEditDialog) {
         var expandedFatherDropdownEdit by remember { mutableStateOf(false) }
         var expandedMotherDropdownEdit by remember { mutableStateOf(false) }
-        val editPhotoPickerLauncher = rememberLauncherForActivityResult(
-            contract = ActivityResultContracts.PickVisualMedia(),
-            onResult = { uri ->
-                if (uri != null) {
-                    editImageUri = uri.toString()
-                }
-            }
-        )
-        val editCameraLauncher = rememberLauncherForActivityResult(
-            contract = ActivityResultContracts.TakePicturePreview(),
-            onResult = { bitmap ->
-                if (bitmap != null) {
-                    val savedUri = saveBitmapToCache(context, bitmap)
-                    if (savedUri != null) {
-                        editImageUri = savedUri.toString()
-                    }
-                }
-            }
-        )
+
         val eligibleFathersEdit = rabbits.filter { it.sex == "Male" && it.id != rabbitId }
         val eligibleMothersEdit = rabbits.filter { it.sex == "Female" && it.id != rabbitId }
         var showDatePickerEdit by remember { mutableStateOf(false) }
@@ -2185,76 +1782,8 @@ fun RabbitDetailScreen(navController: NavController, viewModel: FarmViewModel, r
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.verticalScroll(rememberScrollState())
                 ) {
-                    Text("Photo de profil (Prendre ou sélectionner)", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(72.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(MaterialTheme.colorScheme.surfaceVariant),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (editImageUri != null) {
-                                AsyncImage(
-                                    model = editImageUri,
-                                    contentDescription = null,
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop
-                                )
-                            } else {
-                                Icon(
-                                    imageVector = Icons.Rounded.AddAPhoto,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
 
-                        Column(
-                            modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Button(
-                                onClick = {
-                                    try {
-                                        editCameraLauncher.launch(null)
-                                    } catch (e: Exception) {
-                                        Toast.makeText(context, "Appareil photo non disponible", Toast.LENGTH_LONG).show()
-                                    }
-                                },
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier.fillMaxWidth(),
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-                            ) {
-                                Icon(Icons.Rounded.PhotoCamera, contentDescription = null, modifier = Modifier.size(14.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Prendre Photo", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            }
-                            Button(
-                                onClick = {
-                                    try {
-                                        editPhotoPickerLauncher.launch(
-                                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                                        )
-                                    } catch (e: Exception) {
-                                        Toast.makeText(context, "Sélecteur de photos non disponible", Toast.LENGTH_LONG).show()
-                                    }
-                                },
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier.fillMaxWidth(),
-                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer),
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-                            ) {
-                                Icon(Icons.Rounded.Collections, contentDescription = null, modifier = Modifier.size(14.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Galerie", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    }
+
 
                     OutlinedTextField(
                         value = editName,
@@ -2525,7 +2054,7 @@ fun RabbitDetailScreen(navController: NavController, viewModel: FarmViewModel, r
                                     status = editStatus,
                                     fatherId = editFatherId,
                                     motherId = editMotherId,
-                                    imageUri = editImageUri,
+                                    imageUri = null,
                                     dateOfBirth = editBirthDate
                                 )
                                 viewModel.updateRabbit(updatedRabbit)
@@ -2603,6 +2132,38 @@ fun RabbitDetailScreen(navController: NavController, viewModel: FarmViewModel, r
                             .verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
+                        // Brand Header: Logo & Farm Name
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f), RoundedCornerShape(10.dp))
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Image(
+                                painter = painterResource(id = R.drawable.abvnewlogo),
+                                contentDescription = "Logo ABV Farm",
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                            )
+                            Column {
+                                Text(
+                                    text = "ABV FARM",
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Text(
+                                    text = "FICHE DE CAGE OFFICIELLE",
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 9.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
                         // Header: Name & Cage
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -3021,19 +2582,3 @@ fun ParentShortcutCard(
     }
 }
 
-private fun saveBitmapToCache(context: android.content.Context, bitmap: android.graphics.Bitmap): android.net.Uri? {
-    return try {
-        val imagesPath = java.io.File(context.filesDir, "images")
-        if (!imagesPath.exists()) {
-            imagesPath.mkdirs()
-        }
-        val file = java.io.File(imagesPath, "rabbit_photo_${System.currentTimeMillis()}.jpg")
-        val stream = java.io.FileOutputStream(file)
-        bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 95, stream)
-        stream.close()
-        android.net.Uri.fromFile(file)
-    } catch (e: Exception) {
-        e.printStackTrace()
-        null
-    }
-}

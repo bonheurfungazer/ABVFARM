@@ -298,7 +298,34 @@ dialog { border: 0; padding: 0; background: transparent; max-width: 100vw; max-h
 .loading { display: grid; place-items: center; min-height: 50vh; color: var(--muted); gap: 10px; }
 .badge-dot { position: absolute; top: -3px; right: -3px; min-width: 18px; height: 18px; border-radius: 999px; background: var(--bad); color: #fff; font-size: 0.68rem; font-weight: 800; display: flex; align-items: center; justify-content: center; padding: 0 4px; box-shadow: 0 0 0 2px var(--surface); line-height: 1; }
 .side-alerts-widget { display: flex; align-items: center; justify-content: space-between; padding: 9px 12px; border-radius: 12px; background: var(--surface-2); margin-bottom: 8px; cursor: pointer; transition: background .12s ease; text-decoration: none; color: inherit; }
-.side-alerts-widget:hover { background: var(--sage-soft); color: var(--sage-soft-ink); }
+/* Masquage strict et total du filigrane / badge / tiroir Netlify */
+netlify-drawer,
+[data-netlify-drawer],
+[data-netlify-badge],
+#netlify-badge,
+.netlify-badge,
+iframe[src*="netlify"],
+iframe[id*="netlify"],
+iframe[title*="Netlify"],
+[id*="netlify-drawer"],
+[class*="netlify-drawer"],
+[id*="netlify-badge"],
+[class*="netlify-badge"],
+div[data-layer*="netlify"] {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  max-width: 0 !important;
+  max-height: 0 !important;
+  position: absolute !important;
+  top: -9999px !important;
+  left: -9999px !important;
+  z-index: -99999 !important;
+}
+
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 </style>
 </head>
@@ -2460,6 +2487,37 @@ document.addEventListener("click", (e) => {
 });
 
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && $("#modal").innerHTML) closeModal(); });
+
+/* ---------- Nettoyage dynamique du filigrane Netlify ---------- */
+function purgeNetlifyWatermark() {
+  const selectors = [
+    'netlify-drawer',
+    '[data-netlify-drawer]',
+    '[data-netlify-badge]',
+    '#netlify-badge',
+    '.netlify-badge',
+    'iframe[src*="netlify"]',
+    'iframe[id*="netlify"]',
+    '[id*="netlify-drawer"]',
+    '[class*="netlify-drawer"]',
+    '[id*="netlify-badge"]',
+    '[class*="netlify-badge"]'
+  ];
+  selectors.forEach((sel) => {
+    document.querySelectorAll(sel).forEach((el) => {
+      try { el.remove(); } catch (e) { el.style.display = 'none'; }
+    });
+  });
+}
+
+try {
+  const netlifyObserver = new MutationObserver(() => purgeNetlifyWatermark());
+  netlifyObserver.observe(document.documentElement, { childList: true, subtree: true });
+} catch (e) {}
+
+window.addEventListener("DOMContentLoaded", purgeNetlifyWatermark);
+window.addEventListener("load", purgeNetlifyWatermark);
+setInterval(purgeNetlifyWatermark, 1000);
 
 // Boot application
 const initialDocs = Object.values(getLocalData());

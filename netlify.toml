@@ -4,6 +4,9 @@
   functions = "netlify/functions"
   command = ""
 
+[build.environment]
+  NETLIFY_SKIP_COLLABORATIVE_PROMPTS = "true"
+
 [[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/api/:splat"

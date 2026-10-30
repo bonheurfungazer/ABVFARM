@@ -774,6 +774,7 @@ function handleUserAuthenticated(user, msg) {
   // 2. Basculer l'identité sur l'UID connecté
   userSession.isLoggedIn = true;
   userSession.isLocalProfile = false;
+  userSession.authProvider = (user.providerData && user.providerData[0] && user.providerData[0].providerId) || (user.email ? "password" : "custom");
   userSession.uid = user.uid;
   userSession.email = user.email || userSession.email;
   userSession.managerName = user.displayName || userSession.managerName || (user.email ? user.email.split("@")[0] : "Éleveur");
@@ -859,9 +860,13 @@ function updateUserUI() {
   let subText = "";
 
   if (userSession.isLoggedIn) {
-    if (isOnline) {
-      statusHtml = `<span class="dot on"></span><span style="color:var(--ok)">Google Cloud Synchronisé</span>`;
-      subText = "Google Cloud actif";
+    const provName = userSession.isLocalProfile ? "Mode Local" : (userSession.authProvider === "google.com" ? "Google Cloud" : "Email Cloud");
+    if (userSession.isLocalProfile) {
+      statusHtml = `<span class="dot local"></span><span>Profil local (${esc(userSession.email || "actif")})</span>`;
+      subText = "Mode local • Enregistré";
+    } else if (isOnline) {
+      statusHtml = `<span class="dot on"></span><span style="color:var(--ok)">${provName} Synchronisé</span>`;
+      subText = `${provName} actif`;
     } else {
       statusHtml = `<span class="dot offline"></span><span style="color:var(--warn)">Hors-ligne (Local)</span>`;
       subText = "Hors-ligne • Enregistré";
@@ -877,7 +882,7 @@ function updateUserUI() {
   if (mobSub) mobSub.textContent = subText;
 }
 
-/* ---------- Google Authentication Handler ---------- */
+/* ---------- Google & Email Authentication Layer ---------- */
 function getGoogleProvider(forceSelect = false) {
   const provider = new firebase.auth.GoogleAuthProvider();
   provider.addScope("profile");
@@ -903,13 +908,10 @@ function handleAuthError(err) {
       diag.style.display = "block";
       diag.innerHTML = `
         <div style="font-weight:700;margin-bottom:6px">La fenêtre pop-up Google s'est refermée ou a été bloquée.</div>
-        <div style="margin-bottom:8px">Sur smartphone ou si votre navigateur bloque les pop-ups, cliquez ci-dessous pour vous connecter par redirection sécurisée :</div>
-        <button type="button" class="btn pri sm" style="width:100%" onclick="signInWithGoogle('redirect')">
-          Continuer par redirection directe Google
-        </button>
+        <div style="margin-bottom:8px"><b>Solution PWA :</b> Utilisez le bouton blanc officiel Google en haut (Google One-Tap direct sans pop-up), ou la connexion par e-mail dans le 1er onglet.</div>
       `;
     }
-    toast("Pop-up fermée. Cliquez ci-dessous sur 'Redirection directe'.");
+    toast("Pop-up fermée. Utilisez le bouton officiel Google ou la connexion par e-mail.");
     return;
   }
 
@@ -917,7 +919,7 @@ function handleAuthError(err) {
     msg = "La fenêtre pop-up Google a été bloquée par votre navigateur.";
     if (diag) {
       diag.style.display = "block";
-      diag.innerHTML = `<b>Pop-up bloquée :</b> Votre navigateur ou smartphone a bloqué la fenêtre pop-up Google.<br><button type="button" class="btn pri sm" style="margin-top:8px;width:100%" onclick="signInWithGoogle('redirect')">Continuer par redirection sécurisée Google</button>`;
+      diag.innerHTML = `<b>Pop-up bloquée :</b> Votre navigateur ou smartphone a bloqué la fenêtre pop-up Google.<br>Utilisez le bouton officiel blanc ci-dessus ou basculez sur l'onglet <b>Par Email</b>.`;
     }
     toast(msg);
     return;
@@ -960,12 +962,9 @@ function signInWithGoogle(mode = "auto", forceSelect = false) {
     return;
   }
 
-  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-  const effectiveMode = (mode === "auto") ? (isMobile ? "redirect" : "popup") : mode;
-
   const provider = getGoogleProvider(forceSelect);
 
-  if (effectiveMode === "redirect") {
+  if (mode === "redirect") {
     toast("Redirection vers Google en cours…");
     window.firebaseAuth.signInWithRedirect(provider).catch((err) => {
       handleAuthError(err);
@@ -994,7 +993,7 @@ function renderGoogleSignInButton(containerId = "g_id_signin_container") {
         client_id: "921975845975-snhp3hpml9kngq6vlij40blhanb3n167.apps.googleusercontent.com",
         callback: (res) => {
           if (res && res.credential) {
-            toast("Authentification Google en cours…");
+            toast("Authentification Google sécurisée…");
             if (window.firebaseAuth && typeof firebase !== "undefined") {
               const cred = firebase.auth.GoogleAuthProvider.credential(res.credential);
               window.firebaseAuth.signInWithCredential(cred).then((result) => {
@@ -1008,7 +1007,8 @@ function renderGoogleSignInButton(containerId = "g_id_signin_container") {
             }
           }
         },
-        auto_select: false
+        auto_select: false,
+        use_fedcm_for_prompt: true
       });
       google.accounts.id.renderButton(container, {
         type: "standard",
@@ -1023,6 +1023,216 @@ function renderGoogleSignInButton(containerId = "g_id_signin_container") {
       console.warn("GIS renderButton notice:", e);
     }
   }
+}
+
+/* ---------- Email & Password Authentication ---------- */
+async function signInWithEmail(email, password) {
+  if (!email || !password) {
+    toast("Veuillez saisir votre adresse e-mail et votre mot de passe.");
+    return;
+  }
+  if (!window.firebaseAuth) {
+    if (typeof firebase !== "undefined" && firebase.auth) initFirebaseSync();
+  }
+  if (!window.firebaseAuth) {
+    toast("Service Firebase non disponible. Utilisez le mode local.");
+    return;
+  }
+  toast("Connexion par e-mail en cours…");
+  try {
+    const cred = await window.firebaseAuth.signInWithEmailAndPassword(email.trim(), password);
+    if (cred && cred.user) {
+      handleUserAuthenticated(cred.user, `Bienvenue ! Connecté avec : ${cred.user.email}`);
+      closeModal();
+    }
+  } catch (err) {
+    console.error("Email login error:", err);
+    handleEmailAuthError(err, email);
+  }
+}
+
+async function registerWithEmail(email, password, farmName, managerName) {
+  if (!email || !password) {
+    toast("Veuillez saisir un e-mail et un mot de passe (6 caractères min.).");
+    return;
+  }
+  if (password.length < 6) {
+    toast("Le mot de passe doit comporter au moins 6 caractères.");
+    return;
+  }
+  if (!window.firebaseAuth) {
+    if (typeof firebase !== "undefined" && firebase.auth) initFirebaseSync();
+  }
+  if (!window.firebaseAuth) {
+    toast("Service Firebase non disponible.");
+    return;
+  }
+  toast("Création de votre compte en cours…");
+  try {
+    const cred = await window.firebaseAuth.createUserWithEmailAndPassword(email.trim(), password);
+    if (cred && cred.user) {
+      try {
+        await cred.user.updateProfile({
+          displayName: managerName || farmName || email.split("@")[0]
+        });
+      } catch (e) {}
+      if (farmName) userSession.farmName = farmName;
+      if (managerName) userSession.managerName = managerName;
+      saveUserSession(userSession);
+      handleUserAuthenticated(cred.user, `Compte créé avec succès ! Bienvenue ${userSession.managerName}`);
+      closeModal();
+    }
+  } catch (err) {
+    console.error("Email registration error:", err);
+    handleEmailAuthError(err, email, farmName, managerName);
+  }
+}
+
+async function sendPasswordReset(email) {
+  if (!email) {
+    toast("Veuillez renseigner votre adresse e-mail.");
+    return;
+  }
+  if (!window.firebaseAuth) {
+    toast("Service Firebase non disponible.");
+    return;
+  }
+  try {
+    await window.firebaseAuth.sendPasswordResetEmail(email.trim());
+    toast(`E-mail de réinitialisation envoyé à ${email}. Vérifiez votre boîte de réception.`);
+  } catch (err) {
+    console.error("Password reset error:", err);
+    if (err.code === "auth/user-not-found") {
+      toast("Aucun compte n'est enregistré avec cette adresse e-mail.");
+    } else {
+      toast("Notice réinitialisation : " + (err.message || err.code));
+    }
+  }
+}
+
+function handleEmailAuthError(err, email, farmName, managerName) {
+  const diag = $("#authEmailDiagnosticBox");
+  let msg = "Erreur de connexion par e-mail.";
+  let actionHtml = "";
+
+  if (err.code === "auth/user-not-found" || err.code === "auth/invalid-credential") {
+    msg = "Compte introuvable ou mot de passe invalide.";
+    actionHtml = `
+      <div style="margin-top:6px">Si vous n'avez pas encore de compte, sélectionnez <b>« Créer un compte »</b> ci-dessus.</div>
+    `;
+  } else if (err.code === "auth/wrong-password") {
+    msg = "Mot de passe incorrect.";
+    actionHtml = `
+      <button type="button" class="btn sm ghost" style="margin-top:6px;color:var(--sage)" id="btnResetPassLink">
+        Envoyer un lien de réinitialisation de mot de passe
+      </button>
+    `;
+  } else if (err.code === "auth/email-already-in-use") {
+    msg = "Cette adresse e-mail est déjà inscrite. Veuillez vous connecter.";
+  } else if (err.code === "auth/weak-password") {
+    msg = "Mot de passe trop court (6 caractères minimum).";
+  } else if (err.code === "auth/invalid-email") {
+    msg = "Format d'adresse e-mail invalide.";
+  } else if (err.code === "auth/operation-not-allowed") {
+    msg = "L'authentification par e-mail/mot de passe n'est pas encore activée dans votre console Firebase.";
+    actionHtml = `
+      <div style="font-size:0.82rem;line-height:1.4;margin-top:6px">
+        Activez-la en 1 clic dans <b>Firebase Console > Authentication > Sign-in method > Adresse e-mail/Mot de passe > Activer</b>.<br>
+        <b>Solution immédiate :</b> activez ce compte directement en mode local sécurisé :
+        <button type="button" class="btn sm pri" style="margin-top:8px;width:100%" id="btnQuickLocalProfile">
+          Activer ce profil en mode local immédiat
+        </button>
+      </div>
+    `;
+  } else if (err.code === "auth/network-request-failed") {
+    msg = "Connexion réseau impossible. Vérifiez votre connexion Internet.";
+    actionHtml = `
+      <button type="button" class="btn sm pri" style="margin-top:8px;width:100%" id="btnQuickLocalProfile">
+        Continuer en mode local hors-ligne
+      </button>
+    `;
+  } else {
+    msg = "Notice : " + (err.message || err.code);
+  }
+
+  if (diag) {
+    diag.style.display = "block";
+    diag.innerHTML = `<b>${esc(msg)}</b>${actionHtml}`;
+    const btnReset = diag.querySelector("#btnResetPassLink");
+    if (btnReset) btnReset.addEventListener("click", () => sendPasswordReset(email));
+    const btnQuick = diag.querySelector("#btnQuickLocalProfile");
+    if (btnQuick) btnQuick.addEventListener("click", () => signInLocalProfile(email, farmName, managerName));
+  }
+  toast(msg);
+}
+
+function signInLocalProfile(email, farmName, managerName) {
+  userSession.isLoggedIn = true;
+  userSession.isLocalProfile = true;
+  userSession.authProvider = "local";
+  userSession.email = email || userSession.email || "eleveur@abvfarm.local";
+  userSession.uid = "local_" + btoa(userSession.email).replace(/[^a-zA-Z0-9]/g, "").slice(0, 16);
+  userSession.farmName = farmName || userSession.farmName || "ABV Farm";
+  userSession.managerName = managerName || userSession.managerName || (email ? email.split("@")[0] : "Éleveur ABV");
+  userSession.photoUrl = null;
+  userSession.lastSync = "Mode local autonome";
+  saveUserSession(userSession);
+  
+  // Conserver ou migrer les données dans l'espace utilisateur local
+  const guestData = getLocalData();
+  const userKey = getUserDataKey();
+  try { localStorage.setItem(userKey, JSON.stringify(guestData)); } catch(e) {}
+  ingest(Object.values(guestData));
+  toast(`Profil local activé pour ${userSession.email} !`);
+  closeModal();
+  render();
+}
+
+/* ---------- Google & PWA Auth Diagnostic Tool ---------- */
+function runGoogleAuthDiagnostics() {
+  const box = $("#googleDiagResultBox");
+  if (!box) return;
+  box.style.display = "block";
+  box.innerHTML = `<div style="display:flex;align-items:center;gap:8px"><span>Analyse en cours…</span></div>`;
+
+  const results = [];
+  const currentOrigin = window.location.origin;
+  const currentHost = window.location.hostname;
+  const protocol = window.location.protocol;
+  const clientId = "921975845975-snhp3hpml9kngq6vlij40blhanb3n167.apps.googleusercontent.com";
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+
+  results.push(`<b>1. Domaine & Protocole :</b> <code>${esc(protocol)}//${esc(currentHost)}</code> ${protocol === "https:" ? "✅ (HTTPS)" : "⚠️ (Non-HTTPS)"}`);
+  results.push(`<b>2. Mode d'affichage de l'application :</b> ${isStandalone ? "📱 <b>PWA installée (Standalone)</b>" : "🌐 <b>Navigateur Web</b>"}`);
+  results.push(`<b>3. Client ID Google Web :</b> <code>${clientId.slice(0, 24)}...</code>`);
+
+  const fbLoaded = typeof firebase !== "undefined" && !!firebase.apps;
+  results.push(`<b>4. SDK Firebase :</b> ${fbLoaded ? "✅ Prêt (v" + firebase.SDK_VERSION + ")" : "❌ Non chargé"}`);
+
+  const gisLoaded = !!(window.google && window.google.accounts && window.google.accounts.id);
+  results.push(`<b>5. Google Identity Services (GSI) :</b> ${gisLoaded ? "✅ Prêt (Bouton 1-clic actif)" : "⚠️ En attente de chargement"}`);
+
+  const db = window.firebaseDb;
+  results.push(`<b>6. Base Firestore Cloud :</b> ${db ? "✅ Connectée" : "⚠️ Non initialisée"}`);
+
+  let recommendation = `
+    <div style="margin-top:10px;padding:10px;border-radius:8px;background:var(--surface);border:1px solid var(--line);font-size:0.83rem;line-height:1.45">
+      <b>🔍 Pourquoi la redirection Google peut perdre la session sur PWA :</b><br>
+      Dans une PWA installée ou sur smartphone, la redirection vers Google fait quitter l'application vers le navigateur externe. Au retour, le système d'exploitation ouvre parfois une nouvelle session isolée sans les cookies temporaires d'authentification.<br><br>
+      <b>✅ Solutions recommandées :</b><br>
+      1. <b>Bouton officiel Google (ci-dessus) :</b> Utilise Google Identity Services (GSI). Il authentifie directement sans quitter l'application PWA !<br>
+      2. <b>Onglet Par Email :</b> 100% stable sur PWA sans aucune dépendance aux redirections de fenêtres.<br>
+      3. <b>Mode Local :</b> Enregistre toutes vos données directement sur votre téléphone.
+    </div>
+  `;
+
+  box.innerHTML = `
+    <div style="font-weight:700;margin-bottom:8px;color:var(--sage)">Résultats du diagnostic Google & PWA :</div>
+    <ul style="margin:0;padding-left:16px;display:flex;flex-direction:column;gap:6px;font-size:0.83rem">
+      ${results.map(r => `<li>${r}</li>`).join("")}
+    </ul>
+    ${recommendation}
+  `;
 }
 
 /* ---------- Derived data ---------- */
@@ -2044,9 +2254,9 @@ VIEWS.donnees = () => {
   <section class="card">
     <div class="row-h">
       <h2>Synchronisation & Sécurité des Données</h2>
-      <button class="btn sm" data-act="accountModal">${ICON.cloud}${userSession.isLoggedIn ? "Compte Google Connecté" : "Connexion Compte Google"}</button>
+      <button class="btn sm" data-act="accountModal">${ICON.cloud}${userSession.isLoggedIn ? "Compte Synchronisé" : "Connexion Compte (Email / Google)"}</button>
     </div>
-    <p>Vos données sont protégées et enregistrées instantanément sur cet appareil pour vous garantir un fonctionnement continu avec ou sans connexion Internet. Connectez votre compte Google pour une sauvegarde automatique et permanente dans le Cloud Firebase.</p>
+    <p>Vos données sont protégées et enregistrées instantanément sur cet appareil pour vous garantir un fonctionnement continu avec ou sans connexion Internet. Connectez votre compte par Email ou Google pour une sauvegarde automatique et permanente dans le Cloud Firebase.</p>
   </section>
   <div class="grid g2">
     <section class="card"><h2>Application Téléphone (PWA)</h2><p class="hint" style="margin:6px 0 12px">Installez ABV Farm directement sur l'écran d'accueil de votre smartphone ou tablette pour l'ouvrir comme une application native sans ouvrir le navigateur.</p><button class="btn pri" onclick="installPWA()">${ICON.phone}Installer sur mon téléphone</button></section>
@@ -2238,70 +2448,162 @@ function unauthorizedDomainModal() {
   sheet("Autorisation du domaine dans Firebase", body);
 }
 
-/* ---------- Account Modal (Google Auth & Cloud Settings) ---------- */
+/* ---------- Account Modal (Email & Google Auth + Cloud Settings) ---------- */
 function accountModal() {
   const isLogged = userSession.isLoggedIn;
+  const provName = userSession.isLocalProfile ? "Mode Local" : (userSession.authProvider === "google.com" ? "Compte Google Cloud" : "Compte Email Cloud");
+
   const body = `
   <div style="display:flex;flex-direction:column;gap:16px">
+    <!-- User Profile Header Banner -->
     <div style="display:flex;align-items:center;gap:12px;background:var(--surface-2);padding:14px;border-radius:14px">
       <div style="width:48px;height:48px;border-radius:50%;background:var(--sage);color:#fff;display:grid;place-items:center;font-size:1.3rem;font-weight:700;overflow:hidden">
         ${userSession.photoUrl ? `<img src="${esc(userSession.photoUrl)}" style="width:100%;height:100%;object-fit:cover" referrerpolicy="no-referrer">` : esc((userSession.farmName || "A").charAt(0).toUpperCase())}
       </div>
       <div style="min-width:0;flex:1">
         <b style="font-size:1.05rem;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(userSession.farmName || "ABV Farm")}</b>
-        <span class="hint">${isLogged ? esc(userSession.email || "Compte Google Connecté") : "Mode local autonome (sans compte Google)"}</span>
+        <span class="hint">${isLogged ? `${provName} (${esc(userSession.email)})` : "Mode local invité (Non connecté)"}</span>
       </div>
     </div>
 
-    <!-- Sync status banner -->
+    <!-- Sync status indicator -->
     <div class="banner ${isLogged && isOnline ? "ok" : isOnline ? "info" : "warn"}">
       <div style="display:flex;align-items:center;gap:8px">
         <span class="dot ${isLogged && isOnline ? "on" : isOnline ? "local" : "offline"}"></span>
         <span>${isLogged 
-          ? (isOnline ? "Compte Google Cloud actif • Synchronisé en temps réel" : "Mode Hors-Ligne • Enregistrement local garanti")
-          : (isOnline ? "Stockage local actif (Connectez Google pour sauvegarder dans le Cloud)" : "Mode Hors-Ligne (Stockage local garanti)")}</span>
+          ? (userSession.isLocalProfile 
+              ? "Profil local actif • Sauvegarde garantie sur cet appareil"
+              : (isOnline ? `${provName} actif • Synchronisé en temps réel` : "Mode Hors-Ligne • Enregistrement local garanti"))
+          : (isOnline ? "Stockage local actif (Connectez-vous par Email ou Google pour sauvegarder dans le Cloud)" : "Mode Hors-Ligne (Stockage local garanti)")}</span>
       </div>
     </div>
 
     ${!isLogged ? `
-    <!-- Google Sign-In Card -->
-    <div class="card" style="box-shadow:none;border-color:var(--line);display:flex;flex-direction:column;gap:12px">
-      <h3>Connexion via Compte Google</h3>
-      <p class="hint">Connectez-vous avec votre compte Google pour sauvegarder automatiquement tout votre cheptel dans le Cloud Firebase. Vos données restent accessibles sur tous vos appareils, même hors-ligne.</p>
-      
-      <!-- Bouton officiel Google Identity Services (Direct & rapide) -->
-      <div id="g_id_signin_container" style="display:flex;justify-content:center;width:100%;min-height:44px"></div>
-
-      <!-- Bouton Google direct auto (sans forcer le choix de compte) -->
-      <button type="button" class="btn" id="btnGoogleSignIn" style="background:#FFFFFF;color:#3c4043;border:1.5px solid #dadce0;font-weight:600;display:flex;align-items:center;justify-content:center;gap:10px;padding:12px 16px;width:100%;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.08);cursor:pointer">
-        <svg width="20" height="20" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.616z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/><path fill="#FBBC05" d="M3.964 10.707c-.18-.54-.282-1.117-.282-1.707s.102-1.167.282-1.707V4.961H.957C.347 6.175 0 7.55 0 9s.348 2.825.957 4.039l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.961L3.964 7.293C4.672 5.166 6.656 3.58 9 3.58z"/></svg>
-        <span style="font-size:0.95rem">Continuer avec mon compte Google</span>
-      </button>
-
-      <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.8rem">
-        <button type="button" class="btn ghost sm" id="btnGoogleSignInRedirect" style="color:var(--sage);cursor:pointer;padding:4px 6px">
-          ${ICON.cloud} Redirection directe
+    <!-- Authentication Card with Tabs -->
+    <div class="card" style="box-shadow:none;border-color:var(--line);padding:14px">
+      <!-- Tabs Switcher -->
+      <div class="seg" role="tablist" style="margin-bottom:14px;width:100%">
+        <button type="button" id="tabEmailAuth" role="tab" aria-selected="true" style="flex:1;font-weight:700;padding:8px 6px">
+          ✉️ Par Email
         </button>
-        <button type="button" class="btn ghost sm" id="btnGoogleSignInSwitch" style="color:var(--muted);cursor:pointer;padding:4px 6px">
-          Changer de compte
+        <button type="button" id="tabGoogleAuth" role="tab" aria-selected="false" style="flex:1;font-weight:700;padding:8px 6px">
+          🌐 Avec Google
         </button>
       </div>
 
-      <div id="authDiagnosticBox" style="display:none;background:var(--warn-soft);color:var(--warn);padding:10px 12px;border-radius:10px;font-size:0.84rem;line-height:1.4"></div>
+      <!-- TAB 1 : EMAIL & MOT DE PASSE -->
+      <div id="paneEmailAuth" style="display:flex;flex-direction:column;gap:12px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <h3 id="emailFormTitle" style="margin:0;font-size:1rem">Connexion par e-mail</h3>
+          <button type="button" class="btn ghost sm" id="btnSwitchEmailMode" style="color:var(--sage);font-weight:600;padding:2px 6px;font-size:0.8rem">
+            Créer un compte
+          </button>
+        </div>
+        <p class="hint" id="emailFormSubtitle" style="margin:0">Idéal sur smartphone et PWA : aucune redirection, session conservée indéfiniment.</p>
+
+        <!-- Optional fields for registration -->
+        <div id="registerExtraFields" style="display:none;flex-direction:column;gap:10px">
+          <div class="field">
+            <label style="font-size:0.8rem">Nom de l'élevage</label>
+            <input type="text" id="regFarmName" placeholder="ex. Élevage ABV du Littoral" value="${esc(userSession.farmName || "")}">
+          </div>
+          <div class="field">
+            <label style="font-size:0.8rem">Nom de l'éleveur responsable</label>
+            <input type="text" id="regManagerName" placeholder="ex. Jean Dupont" value="${esc(userSession.managerName || "")}">
+          </div>
+        </div>
+
+        <div class="field">
+          <label style="font-size:0.8rem">Adresse e-mail</label>
+          <input type="email" id="emailInput" placeholder="votre-email@exemple.com" autocomplete="email">
+        </div>
+
+        <div class="field">
+          <label style="font-size:0.8rem">Mot de passe</label>
+          <input type="password" id="passInput" placeholder="•••••••• (6 car. minimum)" autocomplete="current-password">
+        </div>
+
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <button type="button" class="btn pri" id="btnSubmitEmailAuth" style="flex:1;justify-content:center">
+            Se connecter
+          </button>
+        </div>
+
+        <div style="text-align:right">
+          <button type="button" class="btn ghost sm" id="btnForgotPass" style="font-size:0.78rem;color:var(--muted);padding:2px 4px">
+            Mot de passe oublié ?
+          </button>
+        </div>
+
+        <div id="authEmailDiagnosticBox" style="display:none;background:var(--warn-soft);color:var(--warn);padding:10px 12px;border-radius:10px;font-size:0.84rem;line-height:1.4"></div>
+
+        <!-- Mode Local Autonome -->
+        <div style="margin-top:4px;padding:10px 12px;background:var(--surface-2);border-radius:10px;border:1px dashed var(--line);font-size:0.83rem">
+          <div style="font-weight:700;display:flex;align-items:center;gap:6px;color:var(--sage)">
+            ${ICON.shield}Mode local autonome (sans mot de passe)
+          </div>
+          <p class="hint" style="margin:4px 0 8px">Accès instantané 100% hors-ligne. Vos données sont enregistrées en sécurité sur votre appareil sous votre nom.</p>
+          <button type="button" class="btn sm" id="btnLocalProfileDirect" style="width:100%;justify-content:center">
+            ${ICON.check}Activer mon profil local
+          </button>
+        </div>
+      </div>
+
+      <!-- TAB 2 : GOOGLE AUTH (OPTIMISÉ PWA) -->
+      <div id="paneGoogleAuth" style="display:none;flex-direction:column;gap:12px">
+        <h3 style="margin:0;font-size:1rem">Connexion Google pour PWA & Mobile</h3>
+        
+        <div class="banner info" style="margin:0;font-size:0.82rem;line-height:1.4">
+          💡 <b>Conseil PWA :</b> Sur application mobile ou PWA, utilisez le <b>bouton blanc officiel ci-dessous</b> : il s'authentifie en 1 clic sans quitter l'application.
+        </div>
+
+        <!-- Bouton officiel Google Identity Services (Direct & sans redirection) -->
+        <div id="g_id_signin_container" style="display:flex;justify-content:center;width:100%;min-height:44px;margin:4px 0"></div>
+
+        <!-- Bouton Google direct Pop-up -->
+        <button type="button" class="btn" id="btnGoogleSignIn" style="background:#FFFFFF;color:#3c4043;border:1.5px solid #dadce0;font-weight:600;display:flex;align-items:center;justify-content:center;gap:10px;padding:10px 16px;width:100%;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.08);cursor:pointer">
+          <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.616z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/><path fill="#FBBC05" d="M3.964 10.707c-.18-.54-.282-1.117-.282-1.707s.102-1.167.282-1.707V4.961H.957C.347 6.175 0 7.55 0 9s.348 2.825.957 4.039l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.961L3.964 7.293C4.672 5.166 6.656 3.58 9 3.58z"/></svg>
+          <span style="font-size:0.92rem">Connexion Google (Fenêtre Pop-up)</span>
+        </button>
+
+        <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.8rem">
+          <button type="button" class="btn ghost sm" id="btnGoogleSignInSwitch" style="color:var(--muted);cursor:pointer;padding:4px 6px">
+            Changer de compte
+          </button>
+          <button type="button" class="btn ghost sm" id="btnGoogleSignInRedirect" style="color:var(--sage);cursor:pointer;padding:4px 6px" title="Attention: déconseillé en PWA installée">
+            ${ICON.cloud} Redirection complète
+          </button>
+        </div>
+
+        <div id="authDiagnosticBox" style="display:none;background:var(--warn-soft);color:var(--warn);padding:10px 12px;border-radius:10px;font-size:0.84rem;line-height:1.4"></div>
+
+        <!-- Outil de diagnostic en direct -->
+        <div style="margin-top:6px;padding:10px 12px;background:var(--surface-2);border-radius:10px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+            <b style="font-size:0.86rem">Diagnostic Google & PWA</b>
+            <button type="button" class="btn sm ghost" id="btnRunGoogleDiag" style="color:var(--sage);padding:2px 8px;font-weight:700">
+              ${ICON.search}Lancer le test
+            </button>
+          </div>
+          <div id="googleDiagResultBox" style="font-size:0.82rem;line-height:1.45;color:var(--muted)">
+            Cliquez sur « Lancer le test » pour inspecter le domaine, le mode PWA et les composants Google.
+          </div>
+        </div>
+      </div>
     </div>
     ` : `
     <!-- Logged in controls -->
     <div class="card" style="box-shadow:none;border-color:var(--line)">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <h3>Compte Google Connecté</h3>
+        <h3>${esc(provName)}</h3>
         <span class="chip ok">Connecté</span>
       </div>
-      <p style="font-size:0.9rem"><b>${esc(userSession.managerName)}</b></p>
-      <p class="hint">${esc(userSession.email)}</p>
+      <p style="font-size:0.95rem;margin:0 0 2px"><b>${esc(userSession.managerName)}</b></p>
+      <p class="hint" style="margin:0">${esc(userSession.email)}</p>
       ${userSession.lastSync ? `<p class="hint" style="margin-top:6px">Dernière synchronisation : ${userSession.lastSync}</p>` : ""}
       
       <div class="actions" style="margin-top:14px;justify-content:space-between">
-        <button class="btn sm pri" id="btnForceSync">${ICON.cloud}Synchroniser maintenant</button>
+        ${!userSession.isLocalProfile ? `<button class="btn sm pri" id="btnForceSync">${ICON.cloud}Synchroniser maintenant</button>` : `<div></div>`}
         <button class="btn sm danger" id="btnLogout">Déconnexion</button>
       </div>
     </div>
@@ -2329,12 +2631,106 @@ function accountModal() {
     </div>
   </div>`;
 
-  sheet("Compte Google & Application Téléphone", body);
+  sheet("Compte & Synchronisation Cloud", body);
 
+  // Tabs logic
+  const tabEmail = $("#tabEmailAuth");
+  const tabGoogle = $("#tabGoogleAuth");
+  const paneEmail = $("#paneEmailAuth");
+  const paneGoogle = $("#paneGoogleAuth");
+
+  if (tabEmail && tabGoogle && paneEmail && paneGoogle) {
+    tabEmail.addEventListener("click", () => {
+      tabEmail.setAttribute("aria-selected", "true");
+      tabGoogle.setAttribute("aria-selected", "false");
+      paneEmail.style.display = "flex";
+      paneGoogle.style.display = "none";
+    });
+    tabGoogle.addEventListener("click", () => {
+      tabGoogle.setAttribute("aria-selected", "true");
+      tabEmail.setAttribute("aria-selected", "false");
+      paneGoogle.style.display = "flex";
+      paneEmail.style.display = "none";
+      renderGoogleSignInButton("g_id_signin_container");
+    });
+  }
+
+  // Switch between Login and Registration for Email
+  let isRegisterMode = false;
+  const btnSwitchMode = $("#btnSwitchEmailMode");
+  const regExtra = $("#registerExtraFields");
+  const formTitle = $("#emailFormTitle");
+  const formSubtitle = $("#emailFormSubtitle");
+  const btnSubmitEmail = $("#btnSubmitEmailAuth");
+
+  if (btnSwitchMode) {
+    btnSwitchMode.addEventListener("click", () => {
+      isRegisterMode = !isRegisterMode;
+      if (isRegisterMode) {
+        formTitle.textContent = "Créer un nouveau compte";
+        formSubtitle.textContent = "Créez votre compte ABV Farm avec synchronisation cloud.";
+        btnSwitchMode.textContent = "Déjà un compte ? Se connecter";
+        btnSubmitEmail.textContent = "Créer mon compte";
+        if (regExtra) regExtra.style.display = "flex";
+      } else {
+        formTitle.textContent = "Connexion par e-mail";
+        formSubtitle.textContent = "Idéal sur smartphone et PWA : aucune redirection, session conservée indéfiniment.";
+        btnSwitchMode.textContent = "Créer un compte";
+        btnSubmitEmail.textContent = "Se connecter";
+        if (regExtra) regExtra.style.display = "none";
+      }
+    });
+  }
+
+  // Email form submit
+  if (btnSubmitEmail) {
+    btnSubmitEmail.addEventListener("click", async () => {
+      const email = $("#emailInput")?.value.trim();
+      const pass = $("#passInput")?.value;
+      if (!email || !pass) {
+        toast("Veuillez renseigner votre e-mail et votre mot de passe.");
+        return;
+      }
+      if (isRegisterMode) {
+        const farm = $("#regFarmName")?.value.trim() || userSession.farmName;
+        const manager = $("#regManagerName")?.value.trim() || userSession.managerName;
+        await registerWithEmail(email, pass, farm, manager);
+      } else {
+        await signInWithEmail(email, pass);
+      }
+    });
+  }
+
+  // Forgot Password
+  const btnForgot = $("#btnForgotPass");
+  if (btnForgot) {
+    btnForgot.addEventListener("click", () => {
+      const email = $("#emailInput")?.value.trim();
+      if (!email) {
+        toast("Veuillez saisir votre adresse e-mail dans le champ ci-dessus.");
+        $("#emailInput")?.focus();
+        return;
+      }
+      sendPasswordReset(email);
+    });
+  }
+
+  // Direct Local Profile Activation
+  const btnLocalDirect = $("#btnLocalProfileDirect");
+  if (btnLocalDirect) {
+    btnLocalDirect.addEventListener("click", () => {
+      const email = $("#emailInput")?.value.trim() || "eleveur@abvfarm.local";
+      const farm = $("#regFarmName")?.value.trim() || userSession.farmName || "ABV Farm";
+      const manager = $("#regManagerName")?.value.trim() || userSession.managerName || "Éleveur ABV";
+      signInLocalProfile(email, farm, manager);
+    });
+  }
+
+  // Google buttons
   const btnGoogle = $("#btnGoogleSignIn");
   if (btnGoogle) {
     btnGoogle.addEventListener("click", () => {
-      signInWithGoogle('auto', false);
+      signInWithGoogle('popup', false);
     });
   }
 
@@ -2348,12 +2744,18 @@ function accountModal() {
   const btnGoogleSwitch = $("#btnGoogleSignInSwitch");
   if (btnGoogleSwitch) {
     btnGoogleSwitch.addEventListener("click", () => {
-      signInWithGoogle('auto', true);
+      signInWithGoogle('popup', true);
     });
   }
 
-  renderGoogleSignInButton("g_id_signin_container");
+  const btnRunDiag = $("#btnRunGoogleDiag");
+  if (btnRunDiag) {
+    btnRunDiag.addEventListener("click", () => {
+      runGoogleAuthDiagnostics();
+    });
+  }
 
+  // Farm profile edit save
   const btnSaveFarm = $("#btnSaveFarm");
   if (btnSaveFarm) {
     btnSaveFarm.addEventListener("click", () => {
@@ -2365,6 +2767,7 @@ function accountModal() {
     });
   }
 
+  // Logout
   const btnLogout = $("#btnLogout");
   if (btnLogout) {
     btnLogout.addEventListener("click", async () => {
@@ -2383,14 +2786,13 @@ function accountModal() {
         photoUrl: null,
         uid: null,
         isLocalProfile: false,
+        authProvider: null,
         lastSync: null
       };
       try { localStorage.setItem(LS_USER_KEY, JSON.stringify(userSession)); } catch (e) {}
       cloudSyncActive = false;
-      // Vider complètement l'état mémoire S
       ready = false;
       S = blank();
-      // Charger uniquement l'espace invité ("abvfarm_data_guest")
       const guestData = getLocalData();
       ingest(Object.values(guestData));
       toast("Vous êtes déconnecté");
@@ -2399,6 +2801,7 @@ function accountModal() {
     });
   }
 
+  // Force Cloud Sync
   const btnForceSync = $("#btnForceSync");
   if (btnForceSync) {
     btnForceSync.addEventListener("click", async () => {

@@ -53,15 +53,15 @@
   --f-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
   --r-s: 8px; --r-m: 14px; --r-l: 20px;
 }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
-  --bg: #101512; --surface: #18201B; --surface-2: #212A25; --ink: #E4ECE6; --muted: #A2B3A9; --line: #2E3B34;
-  --sage: #7CB88F; --sage-ink: #0E2416; --sage-soft: #233A2B; --sage-soft-ink: #D3EBDB;
-  --clay: #EC9E86; --clay-soft: #46271E;
-  --ok: #8FD19E; --ok-soft: #1B3423; --warn: #F4B567; --warn-soft: #3A2911; --bad: #FFB0A6; --bad-soft: #4A1D1A;
-  --info: #8CCBF7; --info-soft: #0F2D43; --male: #A3CBF3; --male-soft: #16283A; --female: #F4AACB; --female-soft: #35192A;
-  --hero: #2C553B; --hero-ink: #EEF6F0; --shadow: 0 1px 2px rgba(0,0,0,.3);
-  color-scheme: dark;
-} }
+:root, :root[data-theme="sage"], :root[data-theme="light"] {
+  --bg: #F6F5EF; --surface: #FFFFFF; --surface-2: #EFEDE5; --ink: #24302A; --muted: #5B6862; --line: #DCD8CD;
+  --sage: #3E5A47; --sage-ink: #FFFFFF; --sage-soft: #E2EDE4; --sage-soft-ink: #233527;
+  --clay: #B95F45; --clay-soft: #F6E3DB;
+  --ok: #1E6B34; --ok-soft: #E3F1E5; --warn: #9A5208; --warn-soft: #FFF1D9; --bad: #B3261E; --bad-soft: #FDE5E2;
+  --info: #0B629A; --info-soft: #E1F0FA; --male: #1F5FA6; --male-soft: #E0ECF8; --female: #A92F63; --female-soft: #F9E3ED;
+  --hero: #3E5A47; --hero-ink: #F3F7F2; --shadow: 0 1px 2px rgba(36,48,42,.06), 0 4px 14px rgba(36,48,42,.05);
+  color-scheme: light;
+}
 :root[data-theme="dark"] {
   --bg: #101512; --surface: #18201B; --surface-2: #212A25; --ink: #E4ECE6; --muted: #A2B3A9; --line: #2E3B34;
   --sage: #7CB88F; --sage-ink: #0E2416; --sage-soft: #233A2B; --sage-soft-ink: #D3EBDB;
@@ -71,6 +71,28 @@
   --hero: #2C553B; --hero-ink: #EEF6F0; --shadow: 0 1px 2px rgba(0,0,0,.3);
   color-scheme: dark;
 }
+:root[data-theme="terracotta"] {
+  --bg: #F9F6F0; --surface: #FFFFFF; --surface-2: #F2ECE1; --ink: #2E241D; --muted: #786558; --line: #E2D7C8;
+  --sage: #B45309; --sage-ink: #FFFFFF; --sage-soft: #FEF3C7; --sage-soft-ink: #78350F;
+  --clay: #C2410C; --clay-soft: #FFEDD5;
+  --ok: #15803D; --ok-soft: #DCFCE7; --warn: #D97706; --warn-soft: #FEF3C7; --bad: #B91C1C; --bad-soft: #FEE2E2;
+  --info: #0284C7; --info-soft: #E0F2FE; --male: #1D4ED8; --male-soft: #DBEAFE; --female: #BE185D; --female-soft: #FCE7F3;
+  --hero: #9A3412; --hero-ink: #FFF7ED; --shadow: 0 1px 2px rgba(46,36,29,.06), 0 4px 14px rgba(46,36,29,.05);
+  color-scheme: light;
+}
+:root[data-theme="emerald"] {
+  --bg: #F0FDF4; --surface: #FFFFFF; --surface-2: #DCFCE7; --ink: #14532D; --muted: #497259; --line: #BBF7D0;
+  --sage: #15803D; --sage-ink: #FFFFFF; --sage-soft: #D1FAE5; --sage-soft-ink: #064E3B;
+  --clay: #D97706; --clay-soft: #FEF3C7;
+  --ok: #16A34A; --ok-soft: #DCFCE7; --warn: #CA8A04; --warn-soft: #FEF9C3; --bad: #DC2626; --bad-soft: #FEE2E2;
+  --info: #0284C7; --info-soft: #E0F2FE; --male: #2563EB; --male-soft: #DBEAFE; --female: #DB2777; --female-soft: #FCE7F3;
+  --hero: #166534; --hero-ink: #F0FDF4; --shadow: 0 1px 2px rgba(20,83,45,.06), 0 4px 14px rgba(20,83,45,.05);
+  color-scheme: light;
+}
+details summary { list-style: none; }
+details summary::-webkit-details-marker { display: none; }
+.chevron-rot { transition: transform .22s cubic-bezier(0.4, 0, 0.2, 1); color: var(--muted); flex: none; }
+details[open] > summary .chevron-rot { transform: rotate(180deg); color: var(--sage); }
 * { box-sizing: border-box; }
 html, body { height: 100%; }
 body { background: var(--bg); color: var(--ink); font: 15px/1.5 var(--f-body); }
@@ -358,6 +380,13 @@ div[data-layer*="netlify"] {
         <span id="sideAlertBadge" class="chip sm warn" style="display:none">0</span>
       </div>
 
+      <div class="side-alerts-widget" data-act="themeModal" title="Changer le thème visuel" style="margin-bottom:8px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+          <span style="font-weight:700;font-size:.85rem">Thème visuel</span>
+        </div>
+      </div>
+
       <div class="user-card" id="userCard" data-act="accountModal" title="Gérer votre compte et la synchronisation">
         <div class="user-avatar" id="userAvatar">A</div>
         <div class="user-meta">
@@ -378,6 +407,9 @@ div[data-layer*="netlify"] {
       </div>
     </div>
     <div class="actions">
+      <button class="btn sm" data-act="themeModal" title="Changer le thème visuel" style="padding:6px 9px">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+      </button>
       <button class="btn sm" data-act="alertsCenterModal" title="Alertes & Notifications" style="padding:6px 9px;position:relative">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
         <span id="headerAlertBadge" class="badge-dot" style="display:none">0</span>
@@ -1624,7 +1656,8 @@ function gestCard(m) {
     <div class="gl"><span class="hint num">J${Math.max(0, d)} · mise bas ${left >= 0 ? relDay(left) : `en retard de ${-left} j`} (${fmtShort(m.due)})</span>
     <div class="actions">${m.status === "Accouplé" && d >= 9 ? `<button class="btn sm" data-act="mst" data-id="${m.id}" data-v="Gestation confirmée">Gestation confirmée</button>` : ""}
     ${d >= 26 ? `<button class="btn sm pri" data-act="kindle" data-id="${m.id}">Mise bas</button>` : ""}
-    <button class="btn sm ghost" data-act="mst" data-id="${m.id}" data-v="Échoué">Échec</button></div></div></div>`;
+    <button class="btn sm ghost" data-act="mst" data-id="${m.id}" data-v="Échoué">Échec</button>
+    <button class="btn sm ghost danger" data-act="del" data-kind="mating" data-id="${m.id}" title="Supprimer la saillie" aria-label="Supprimer la saillie">${ICON.trash}</button></div></div></div>`;
 }
 
 /* ---------- Views ---------- */
@@ -1685,9 +1718,12 @@ VIEWS.accueil = () => {
       ${al.length ? `<div class="list">${al.slice(0, 8).map((a) => `<div class="li">${sevIco(a)}<div class="grow"><div class="t">${esc(a.title)}</div><div class="d">${esc(a.sub)}</div>${a.act ? `<div class="actions" style="margin-top:6px">${a.act.map(([l, act, id, v]) => `<button class="btn sm" data-act="${act}" ${id ? `data-id="${id}"` : ""} ${v ? `data-v="${esc(v)}"` : ""}>${esc(l)}</button>`).join("")}</div>` : ""}</div></div>`).join("")}</div>` : emptyBox("check", "Tout est à jour", "Les palpations, nids, mises bas, soins et rappels apparaîtront ici le jour venu.")}
     </section>
     <section class="card"><div class="row-h"><h2>Ration du jour</h2><span class="chip ${fedToday ? "ok" : "warn"}">${fedToday ? `${nf1.format(fedToday / 1000)} kg distribués` : "Pas encore nourris"}</span></div>
-      <div style="display:flex;align-items:baseline;gap:8px"><span style="font-family:var(--f-display);font-size:2.2rem;font-weight:800" class="num">${nf1.format(rt.grams / 1000)}</span><span class="hint">kg recommandés</span></div>
+      <div style="display:flex;align-items:baseline;gap:8px"><span style="font-family:var(--f-display);font-size:2.2rem;font-weight:800" class="num">${nf1.format(rt.grams / 1000)}</span><span class="hint">kg calculés selon le cheptel</span></div>
       <div class="list" style="margin:8px 0 12px">${[["Mâles adultes", rt.c.mal, 120], ["Femelles au repos", rt.c.fem, 120], ["Femelles gestantes", rt.c.gest, 180], ["Femelles allaitantes", rt.c.lact, 280], ["Jeunes 1–2 mois", rt.c.y1, 50], ["Jeunes 2–4 mois", rt.c.y2, 90], ["Lapins en engraissement", rt.fat, 110]].filter((x) => x[1]).map(([l, n, g]) => `<div class="li" style="padding:6px 0"><div class="grow d">${l} <span class="num">× ${n}</span></div><span class="num hint">${g} g</span><b class="num" style="min-width:64px;text-align:right">${nf1.format((n * g) / 1000)} kg</b></div>`).join("") || `<p class="hint">Ajoutez des lapins pour calculer la ration.</p>`}</div>
-      <button class="btn pri" data-act="feed" data-v="${rt.grams}">${ICON.grain}Enregistrer la distribution</button>
+      <div class="actions" style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn pri" data-act="feedQuick" title="Distribuer la ration conseillée et la déduire automatiquement du stock">${ICON.grain}Distribuer la ration (${nf1.format(rt.grams / 1000)} kg)</button>
+        <button class="btn sm" data-act="feed" data-v="${rt.grams}">${ICON.edit}Ajuster</button>
+      </div>
     </section>
   </div>
   <section class="card"><div class="row-h"><h2>Gestations en cours</h2><a class="btn sm ghost" href="#saillies">Tout voir</a></div>
@@ -1970,7 +2006,7 @@ VIEWS.lapins = () => {
         <span>📊 Répartition par tranche d'âge (7 tranches)</span>
         <span class="chip sm ok">${baseList.length} lapins</span>
       </div>
-      <span class="hint" style="font-size:0.8rem">Afficher / Masquer ▸</span>
+      <svg class="chevron-rot" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
     </summary>
     <div style="margin-top:10px">
       <p class="hint" style="margin-bottom:8px">Cliquez sur une tranche d'âge pour filtrer automatiquement la liste :</p>
@@ -2005,7 +2041,7 @@ VIEWS.lapins = () => {
         <span>⚖️ Filtres précis (Âge min/max et Poids min/max)</span>
         ${(ui.minAgeM !== "" || ui.maxAgeM !== "" || ui.minWeight !== "" || ui.maxWeight !== "") ? `<span class="chip warn sm">Actif</span>` : ""}
       </div>
-      <span class="hint" style="font-size:0.8rem">Afficher / Masquer ▸</span>
+      <svg class="chevron-rot" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
     </summary>
     <div style="margin-top:10px">
       <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(130px, 1fr));gap:10px">
@@ -2159,7 +2195,7 @@ VIEWS.lapin = ({ id }) => {
       ${tr.length ? `<div class="list">${tr.map(treatRow).join("")}</div>` : emptyBox("syringe", "Aucun soin enregistré", "Vaccins, vermifuges et traitements sanitaires.")}</section>
     <section class="card"><div class="row-h"><h2>Reproduction</h2></div>
       ${mts.length ? `<div class="tiles" style="margin-bottom:12px"><div class="tile"><span class="l">Portées</span><span class="v">${done.length}</span></div><div class="tile"><span class="l">Nés vivants</span><span class="v">${born}</span><span class="s">${done.length ? nf1.format(born / done.length) + " par portée" : ""}</span></div><div class="tile"><span class="l">Réussite</span><span class="v">${rate == null ? "—" : rate + " %"}</span></div></div>
-      <div class="list">${mts.map((m) => `<div class="li"><span class="ico ${m.status === "Mise bas" ? "ok" : m.status === "Échoué" ? "bad" : "clay"}">${ICON.heart}</span><div class="grow"><div class="t">× ${esc(rname(m.male === id ? m.female : m.male))}</div><div class="d">Saillie ${fmtDate(m.date)}${m.status === "Mise bas" ? ` · ${Number(m.alive) || 0} vivants, ${Number(m.dead) || 0} morts-nés` : ` · prévue ${fmtShort(m.due)}`}</div></div>${mstChip(m.status)}</div>`).join("")}</div>` : emptyBox("heart", "Aucune saillie", "L'historique de reproduction apparaîtra ici.")}
+      <div class="list">${mts.map((m) => `<div class="li"><span class="ico ${m.status === "Mise bas" ? "ok" : m.status === "Échoué" ? "bad" : "clay"}">${ICON.heart}</span><div class="grow"><div class="t">× ${esc(rname(m.male === id ? m.female : m.male))}</div><div class="d">Saillie ${fmtDate(m.date)}${m.status === "Mise bas" ? ` · ${Number(m.alive) || 0} vivants, ${Number(m.dead) || 0} morts-nés` : ` · prévue ${fmtShort(m.due)}`}</div></div>${mstChip(m.status)}<button class="btn sm ghost danger" data-act="del" data-kind="mating" data-id="${m.id}" title="Supprimer la saillie" aria-label="Supprimer la saillie">${ICON.trash}</button></div>`).join("")}</div>` : emptyBox("heart", "Aucune saillie", "L'historique de reproduction apparaîtra ici.")}
       ${kids.length ? `<h3 style="margin:14px 0 6px">Descendants (${kids.length})</h3><div class="actions">${kids.map((k) => `<a class="chip ${sexCls(k) === "u" ? "" : sexCls(k)}" href="#lapin-${k.id}" style="text-decoration:none">${sexSym(k)} ${esc(k.name)}</a>`).join("")}</div>` : ""}
     </section>
   </div>`;
@@ -2230,7 +2266,7 @@ function batchCard(b) {
   return `<section class="card"><div class="row-h"><div><h2>${esc(b.code)}</h2><span class="hint">${b.mating ? `Portée de ${esc(rname(byId(S.matings, b.mating)?.female))} · ` : ""}${b.cage ? `<span class="tag">${esc(b.cage)}</span>` : ""}</span></div>${b.status === "Quarantaine" ? `<span class="chip bad">Quarantaine</span>` : left <= 0 ? `<span class="chip ok">Prêt à vendre</span>` : `<span class="chip info">J${days} post-sevrage</span>`}</div>
     <dl class="kv" style="margin:0 0 12px"><div><dt>Effectif</dt><dd class="num">${b.current} / ${b.initial}</dd></div><div><dt>Mortalité</dt><dd class="${mort > 0.1 ? "neg" : ""}">${nf1.format(mort * 100)} %</dd></div><div><dt>Poids moyen</dt><dd>${b.avgWeight ? nf0.format(b.avgWeight) + " g" : "—"}</dd></div><div><dt>Date de vente visée</dt><dd>${fmtDate(b.target)}</dd></div></dl>
     <div class="bar"><i style="width:${pc}%"></i></div><p class="hint" style="margin:6px 0 12px">${left > 0 ? `${left} jours avant la date de vente prévue` : "Prêt pour la vente"}</p>
-    <div class="actions"><button class="btn sm" data-act="bweight" data-id="${b.id}">${ICON.scale}Poids moyen</button><button class="btn sm" data-act="bdeath" data-id="${b.id}">Perte</button><button class="btn sm pri" data-act="sell" data-id="${b.id}">${ICON.coins}Vendre</button><button class="btn sm ghost" data-act="editbatch" data-id="${b.id}" aria-label="Modifier">${ICON.edit}</button></div></section>`;
+    <div class="actions"><button class="btn sm" data-act="bweight" data-id="${b.id}">${ICON.scale}Poids moyen</button><button class="btn sm" data-act="bdeath" data-id="${b.id}">Perte</button><button class="btn sm pri" data-act="sell" data-id="${b.id}">${ICON.coins}Vendre</button><button class="btn sm ghost" data-act="editbatch" data-id="${b.id}" aria-label="Modifier">${ICON.edit}</button><button class="btn sm ghost danger" data-act="del" data-kind="batch" data-id="${b.id}" title="Supprimer le lot" aria-label="Supprimer le lot">${ICON.trash}</button></div></section>`;
 }
 
 VIEWS.stocks = () => {
@@ -2240,7 +2276,7 @@ VIEWS.stocks = () => {
   const m0 = today().slice(0, 7); const monthSpend = items.filter((i) => i.date.startsWith(m0)).reduce((s, i) => s + (Number(i.price) || 0), 0);
   const last7 = feeds.filter((f) => diff(f.date, today()) < 7).reduce((s, f) => s + Number(f.grams || 0), 0) / 1000;
   const lvl = stock <= 0 ? "bad" : days != null && days < 7 ? "bad" : days != null && days < 14 ? "warn" : "";
-  return `<div class="head"><div><h1>Stocks & Alimentation</h1><p>Approvisionnements et distributions journalières</p></div><div class="actions"><button class="btn" data-act="feed" data-v="${rt.grams}">${ICON.grain}Distribution</button><button class="btn pri" data-act="newitem">${ICON.plus}Nouvel achat</button></div></div>
+  return `<div class="head"><div><h1>Stocks & Alimentation</h1><p>Approvisionnements et distributions journalières</p></div><div class="actions"><button class="btn pri" data-act="feedQuick" title="Distribuer la ration conseillée du cheptel et la déduire automatiquement du stock">${ICON.grain}Distribuer la ration (${nf1.format(rt.grams / 1000)} kg)</button><button class="btn" data-act="feed" data-v="${rt.grams}">${ICON.edit}Ajuster</button><button class="btn" data-act="newitem">${ICON.plus}Nouvel achat</button></div></div>
   <div class="tiles"><div class="tile ${lvl}"><span class="l">Stock d'aliment disponible</span><span class="v">${nf1.format(stock)} kg</span><span class="s">${days != null ? `≈ ${nf0.format(days)} jours d'autonomie` : "Enregistrez vos lapins pour estimer"}</span></div>
   <div class="tile"><span class="l">Distribué (7 derniers jours)</span><span class="v">${nf1.format(last7)} kg</span><span class="s">${nf1.format(last7 / 7)} kg / jour</span></div>
   <div class="tile"><span class="l">Dépenses approvisionnement (ce mois)</span><span class="v" style="font-size:1.35rem">${fcfa(monthSpend)}</span></div></div>
@@ -2495,7 +2531,65 @@ function unauthorizedDomainModal() {
     </div>
   </div>`;
 
-  sheet("Autorisation du domaine dans Firebase", body);
+/* ---------- Theme Management & Modal ---------- */
+function getActiveTheme() {
+  return localStorage.getItem("abv_theme") || "sage";
+}
+
+function setTheme(theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+  localStorage.setItem("abv_theme", theme);
+  const metaTheme = document.querySelector('meta[name="theme-color"]');
+  if (metaTheme) {
+    if (theme === "dark") metaTheme.content = "#101512";
+    else if (theme === "terracotta") metaTheme.content = "#B45309";
+    else if (theme === "emerald") metaTheme.content = "#15803D";
+    else metaTheme.content = "#3E5A47";
+  }
+  toast(`Thème appliqué : ${themeLabel(theme)}`);
+}
+
+function themeLabel(theme) {
+  switch (theme) {
+    case "dark": return "🌙 Nuit Éleveur (Sombre)";
+    case "terracotta": return "🌾 Terre & Argile";
+    case "emerald": return "🌲 Forêt Émeraude";
+    default: return "🌿 Nature Sauge (Clair)";
+  }
+}
+
+function themeModal() {
+  const current = getActiveTheme();
+  const themes = [
+    { id: "sage", name: "🌿 Nature Sauge", desc: "Clair, naturel et reposant (par défaut)", previewBg: "#F6F5EF", previewPri: "#3E5A47", previewCard: "#FFFFFF" },
+    { id: "dark", name: "🌙 Nuit Éleveur", desc: "Fond sombre haute lisibilité, idéal le soir au clapier", previewBg: "#101512", previewPri: "#7CB88F", previewCard: "#18201B" },
+    { id: "terracotta", name: "🌾 Terre & Argile", desc: "Palette chaude et ambrée, style ferme cunicole", previewBg: "#F9F6F0", previewPri: "#B45309", previewCard: "#FFFFFF" },
+    { id: "emerald", name: "🌲 Forêt Émeraude", desc: "Vert végétal éclatant, contraste moderne", previewBg: "#F0FDF4", previewPri: "#15803D", previewCard: "#FFFFFF" }
+  ];
+
+  const body = `
+  <div style="display:flex;flex-direction:column;gap:14px">
+    <p class="hint">Choisissez l'ambiance visuelle la plus confortable pour gérer votre élevage :</p>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      ${themes.map(t => {
+        const isSel = current === t.id;
+        return `
+        <div class="card" style="cursor:pointer;padding:12px 14px;border-radius:14px;border:2px solid ${isSel ? 'var(--sage)' : 'var(--line)'};background:${isSel ? 'var(--surface-2)' : 'var(--surface)'};transition:all .15s ease;display:flex;align-items:center;justify-content:space-between;gap:12px" onclick="setTheme('${t.id}');closeModal();render();">
+          <div style="display:flex;align-items:center;gap:12px;min-width:0">
+            <div style="width:38px;height:38px;border-radius:10px;background:${t.previewBg};border:1.5px solid var(--line);display:flex;align-items:center;justify-content:center;box-shadow:0 1px 3px rgba(0,0,0,0.08);flex:none">
+              <div style="width:18px;height:18px;border-radius:50%;background:${t.previewPri}"></div>
+            </div>
+            <div>
+              <b style="font-size:0.95rem;display:block;color:var(--ink)">${t.name}</b>
+              <span class="hint" style="font-size:0.78rem">${t.desc}</span>
+            </div>
+          </div>
+          ${isSel ? `<span class="chip ok sm" style="font-weight:700">Actif</span>` : `<button type="button" class="btn sm ghost" style="padding:4px 10px;font-size:0.8rem">Appliquer</button>`}
+        </div>`;
+      }).join("")}
+    </div>
+  </div>`;
+  sheet("Thème d'affichage", body);
 }
 
 /* ---------- Account Modal (Email & Google Auth + Cloud Settings) ---------- */
@@ -2611,50 +2705,36 @@ function accountModal() {
       <div id="paneGoogleAuth" style="display:none;flex-direction:column;gap:12px">
         <h3 style="margin:0;font-size:1rem">Connexion Google pour PWA & Mobile</h3>
 
-        <!-- Guide Erreur 400 origin_mismatch -->
-        <div style="background:var(--warn-soft);color:var(--warn);border:1px solid rgba(154,82,8,0.25);padding:12px;border-radius:12px;font-size:0.82rem;line-height:1.45">
-          <div style="font-weight:700;display:flex;align-items:center;gap:6px;margin-bottom:6px">
-            <span>⚠️</span>
-            <span>Résolution de l'« Erreur 400 : origin_mismatch » :</span>
-          </div>
-          <p style="margin:0 0 8px">
-            Google bloque l'accès si l'adresse exacte de votre application n'est pas inscrite dans les <b>Origines JavaScript autorisées</b> de votre console Google Cloud.
-          </p>
-          <div style="background:var(--surface);padding:8px 10px;border-radius:8px;border:1px solid var(--line);font-family:var(--f-mono);font-size:0.75rem;word-break:break-all;display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px">
-            <span id="txtCurrentOriginDisplay" style="color:var(--ink)"></span>
-            <button type="button" class="btn sm pri" id="btnCopyOriginUrl" style="flex:none;padding:3px 10px;font-size:0.75rem">
-              📋 Copier l'URL
-            </button>
-          </div>
-          <div style="font-size:0.78rem;color:var(--ink)">
-            <b>Pour débloquer en 1 minute :</b><br>
-            1. Ouvrez <a href="https://console.cloud.google.com/apis/credentials?project=gen-lang-client-0349652531" target="_blank" rel="noopener" style="color:var(--sage);font-weight:700;text-decoration:underline">Google Cloud &gt; Identifiants</a>.<br>
-            2. Cliquez sur votre <b>client Web</b> (OAuth 2.0).<br>
-            3. Dans <b>« Origines JavaScript autorisées »</b>, cliquez sur <b>+ Ajouter un URI</b> et collez l'URL copiée.<br>
-            4. Cliquez sur <b>Enregistrer</b>. Le bouton 1-clic fonctionnera immédiatement !
+        <!-- Statut domaine configuré -->
+        <div style="background:var(--ok-soft);color:var(--ok);border:1px solid rgba(30,107,52,0.25);padding:10px 12px;border-radius:12px;font-size:0.83rem;display:flex;align-items:center;gap:8px">
+          <span style="font-size:1.1rem">✅</span>
+          <div>
+            <b>Connexion Google prête & sécurisée</b>
+            <div style="font-size:0.75rem;color:var(--muted)">Origine autorisée dans Google Cloud. Authentification directe en 1 clic.</div>
           </div>
         </div>
 
-        <div style="text-align:center">
-          <div style="font-size:0.78rem;font-weight:700;color:var(--muted);margin-bottom:4px">Bouton officiel Google (One-Tap / FedCM direct) :</div>
+        <div style="text-align:center;padding:12px 8px;background:var(--surface-2);border-radius:14px;border:1px solid var(--line)">
+          <div style="font-size:0.88rem;font-weight:700;color:var(--ink);margin-bottom:8px">Cliquez ci-dessous pour vous connecter :</div>
           <!-- Bouton officiel Google Identity Services (Direct & sans redirection) -->
-          <div id="g_id_signin_container" style="display:flex;justify-content:center;width:100%;min-height:44px;margin:2px 0"></div>
+          <div id="g_id_signin_container" style="display:flex;justify-content:center;width:100%;min-height:44px;margin:4px 0"></div>
+          <p class="hint" style="font-size:0.74rem;margin-top:8px">Connexion directe intégrée à la page • Aucun mot de passe requis • Session permanente.</p>
         </div>
 
-        <!-- Bouton Google direct Pop-up -->
-        <button type="button" class="btn" id="btnGoogleSignIn" style="background:#FFFFFF;color:#3c4043;border:1.5px solid #dadce0;font-weight:600;display:flex;align-items:center;justify-content:center;gap:10px;padding:10px 16px;width:100%;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.08);cursor:pointer">
-          <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.616z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/><path fill="#FBBC05" d="M3.964 10.707c-.18-.54-.282-1.117-.282-1.707s.102-1.167.282-1.707V4.961H.957C.347 6.175 0 7.55 0 9s.348 2.825.957 4.039l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.961L3.964 7.293C4.672 5.166 6.656 3.58 9 3.58z"/></svg>
-          <span style="font-size:0.92rem">Connexion Google (Fenêtre Pop-up classique)</span>
-        </button>
-
-        <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.8rem">
-          <button type="button" class="btn ghost sm" id="btnGoogleSignInSwitch" style="color:var(--muted);cursor:pointer;padding:4px 6px">
-            Changer de compte
-          </button>
-          <button type="button" class="btn ghost sm" id="btnGoogleSignInRedirect" style="color:var(--sage);cursor:pointer;padding:4px 6px" title="Redirection complète">
-            ${ICON.cloud} Redirection complète
-          </button>
-        </div>
+        <!-- Aide déploiement / autre domaine (repliable) -->
+        <details style="font-size:0.8rem;border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:var(--surface)">
+          <summary style="cursor:pointer;font-weight:600;display:flex;justify-content:space-between;align-items:center">
+            <span>⚙️ Configuration de l'URL Google Cloud</span>
+            <svg class="chevron-rot" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+          </summary>
+          <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line)">
+            <p class="hint" style="margin-bottom:6px">Adresse actuelle de votre application :</p>
+            <div style="background:var(--surface-2);padding:6px 8px;border-radius:6px;font-family:var(--f-mono);font-size:0.72rem;word-break:break-all;display:flex;align-items:center;justify-content:space-between;gap:6px">
+              <span id="txtCurrentOriginDisplay"></span>
+              <button type="button" class="btn sm" id="btnCopyOriginUrl" style="flex:none;padding:2px 8px;font-size:0.72rem">📋 Copier</button>
+            </div>
+          </div>
+        </details>
 
         <div id="authDiagnosticBox" style="display:none;background:var(--warn-soft);color:var(--warn);padding:10px 12px;border-radius:10px;font-size:0.84rem;line-height:1.4"></div>
 
@@ -2837,28 +2917,6 @@ function accountModal() {
       } else {
         prompt("Copiez cette URL pour Google Cloud :", origin);
       }
-    });
-  }
-
-  // Google buttons
-  const btnGoogle = $("#btnGoogleSignIn");
-  if (btnGoogle) {
-    btnGoogle.addEventListener("click", () => {
-      signInWithGoogle('popup', false);
-    });
-  }
-
-  const btnGoogleRedirect = $("#btnGoogleSignInRedirect");
-  if (btnGoogleRedirect) {
-    btnGoogleRedirect.addEventListener("click", () => {
-      signInWithGoogle('redirect', false);
-    });
-  }
-
-  const btnGoogleSwitch = $("#btnGoogleSignInSwitch");
-  if (btnGoogleSwitch) {
-    btnGoogleSwitch.addEventListener("click", () => {
-      signInWithGoogle('popup', true);
     });
   }
 
@@ -3056,31 +3114,120 @@ function sheet(title, body) {
 function field(f, v) {
   const id = "f_" + f.k; const val = v ?? f.def ?? "";
   let input;
-  if (f.type === "select") input = `<select id="${id}" name="${f.k}" ${f.req ? "required" : ""}>${f.opts.map((o) => { const [ov, ol] = Array.isArray(o) ? o : [o, o]; return `<option value="${esc(ov)}" ${String(ov) === String(val) ? "selected" : ""}>${esc(ol)}</option>`; }).join("")}</select>`;
-  else if (f.type === "textarea") input = `<textarea id="${id}" name="${f.k}">${esc(val)}</textarea>`;
-  else if (f.type === "check") return `<label class="check full"><input type="checkbox" id="${id}" name="${f.k}" ${val ? "checked" : ""}>${esc(f.label)}</label>`;
+  if (f.type === "select") input = `<select id="${id}" name="${f.k}" ${f.req ? "required" : ""} class="form-input">${f.opts.map((o) => { const [ov, ol] = Array.isArray(o) ? o : [o, o]; return `<option value="${esc(ov)}" ${String(ov) === String(val) ? "selected" : ""}>${esc(ol)}</option>`; }).join("")}</select>`;
+  else if (f.type === "textarea") input = `<textarea id="${id}" name="${f.k}" class="form-input" rows="${f.rows || 3}" placeholder="${esc(f.ph || "")}">${esc(val)}</textarea>`;
+  else if (f.type === "check") return `<label class="check full"><input type="checkbox" id="${id}" name="${f.k}" ${val ? "checked" : ""}><span>${esc(f.label)}</span></label>`;
   else if (f.type === "html") return `<div class="full" id="${id}">${f.html || ""}</div>`;
-  else input = `<input id="${id}" name="${f.k}" type="${f.type || "text"}" value="${esc(val)}" ${f.req ? "required" : ""} ${f.step ? `step="${f.step}"` : ""} ${f.min != null ? `min="${f.min}"` : ""} ${f.ph ? `placeholder="${esc(f.ph)}"` : ""}>`;
-  return `<div class="field ${f.full ? "full" : ""}"><label for="${id}">${esc(f.label)}</label>${input}${f.hint ? `<span class="hint">${esc(f.hint)}</span>` : ""}</div>`;
+  else input = `<input id="${id}" name="${f.k}" type="${f.type || "text"}" value="${esc(val)}" ${f.req ? "required" : ""} ${f.step ? `step="${f.step}"` : ""} ${f.min != null ? `min="${f.min}"` : ""} ${f.ph ? `placeholder="${esc(f.ph)}"` : ""} class="form-input">`;
+  return `<div class="field ${f.full ? "full" : ""}" id="wrap_${id}"><label for="${id}">${esc(f.label)}${f.req ? ' <span style="color:var(--bad);font-weight:700">*</span>' : ''}</label>${input}${f.hint ? `<span class="hint">${esc(f.hint)}</span>` : ""}<span class="field-err" style="display:none;color:var(--bad);font-size:0.75rem;font-weight:600;margin-top:2px"></span></div>`;
 }
 function form({ title, fields, values = {}, submit = "Enregistrer", onSubmit, onInput }) {
-  sheet(title, `<form class="form" id="mform" novalidate>${fields.map((f) => field(f, values[f.k])).join("")}<div class="full actions" style="justify-content:flex-end"><button type="button" class="btn ghost" data-act="close">Annuler</button><button type="submit" class="btn pri">${esc(submit)}</button></div></form>`);
+  sheet(title, `<form class="form" id="mform" novalidate>${fields.map((f) => field(f, values[f.k])).join("")}<div class="full actions" style="justify-content:flex-end;margin-top:12px"><button type="button" class="btn ghost" data-act="close">Annuler</button><button type="submit" class="btn pri" id="btnFormSubmit">${esc(submit)}</button></div></form>`);
   const fm = $("#mform");
-  const read = () => { const o = {}; fields.forEach((f) => { const el = fm.elements[f.k]; if (!el) return; o[f.k] = f.type === "check" ? el.checked : f.type === "number" ? (el.value === "" ? "" : Number(el.value)) : el.value.trim(); }); return o; };
-  if (onInput) { fm.addEventListener("input", () => onInput(read(), fm)); fm.addEventListener("change", () => onInput(read(), fm)); onInput(read(), fm); }
-  fm.addEventListener("submit", async (e) => {
-    e.preventDefault(); const v = read();
-    const miss = fields.find((f) => f.req && (v[f.k] === "" || v[f.k] == null));
-    if (miss) { toast(`Renseignez « ${miss.label} ».`); fm.elements[miss.k]?.focus(); return; }
-    const btn = fm.querySelector('[type="submit"]'); btn.disabled = true;
-    const ok = await onSubmit(v); btn.disabled = false;
-    if (ok !== false) closeModal();
+  const read = () => {
+    const o = {};
+    fields.forEach((f) => {
+      const el = fm.elements[f.k];
+      if (!el) return;
+      if (f.type === "check") {
+        o[f.k] = el.checked;
+      } else if (f.type === "number") {
+        const raw = String(el.value).trim().replace(",", ".");
+        o[f.k] = raw === "" ? "" : Number(raw);
+      } else {
+        o[f.k] = el.value.trim();
+      }
+    });
+    return o;
+  };
+
+  // Suppression instantanée de l'état d'erreur lors de la saisie
+  fm.addEventListener("input", (e) => {
+    const wrap = e.target.closest(".field");
+    if (wrap) {
+      e.target.style.borderColor = "";
+      const errEl = wrap.querySelector(".field-err");
+      if (errEl) errEl.style.display = "none";
+    }
   });
-  setTimeout(() => fm.querySelector("input:not([type=checkbox]),select")?.focus(), 30);
+
+  if (onInput) {
+    fm.addEventListener("input", () => onInput(read(), fm));
+    fm.addEventListener("change", () => onInput(read(), fm));
+    onInput(read(), fm);
+  }
+
+  fm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const v = read();
+
+    // Réinitialiser les indicateurs d'erreur
+    fm.querySelectorAll(".field-err").forEach((el) => (el.style.display = "none"));
+    fm.querySelectorAll("input, select, textarea").forEach((el) => (el.style.borderColor = ""));
+
+    let firstInvalid = null;
+    for (const f of fields) {
+      if (f.req) {
+        const val = v[f.k];
+        const isBlank = val === "" || val == null || (typeof val === "number" && isNaN(val));
+        if (isBlank) {
+          const wrap = $(`#wrap_f_${f.k}`);
+          const el = fm.elements[f.k];
+          if (wrap && el) {
+            el.style.borderColor = "var(--bad)";
+            const errEl = wrap.querySelector(".field-err");
+            if (errEl) {
+              errEl.textContent = `Ce champ est requis.`;
+              errEl.style.display = "block";
+            }
+            if (!firstInvalid) firstInvalid = el;
+          }
+        }
+      }
+    }
+
+    if (firstInvalid) {
+      toast("Veuillez renseigner les champs requis (*)");
+      firstInvalid.focus();
+      return;
+    }
+
+    const btn = $("#btnFormSubmit") || fm.querySelector('[type="submit"]');
+    const origText = btn ? btn.innerHTML : submit;
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = `Enregistrement…`;
+    }
+
+    try {
+      const ok = await onSubmit(v);
+      if (ok !== false) {
+        closeModal();
+      }
+    } catch (err) {
+      console.error("Form submit error:", err);
+      toast("Une erreur est survenue lors de l'enregistrement.");
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = origText;
+      }
+    }
+  });
+
+  setTimeout(() => fm.querySelector("input:not([type=checkbox]),select")?.focus(), 40);
 }
 function confirmBox(text, label, onYes) {
   sheet("Confirmer l'opération", `<p>${esc(text)}</p><div class="actions" style="justify-content:flex-end"><button class="btn ghost" data-act="close">Annuler</button><button class="btn pri" id="yes" style="background:var(--bad);color:var(--surface)">${esc(label)}</button></div>`);
-  $("#yes").addEventListener("click", async () => { $("#yes").disabled = true; await onYes(); closeModal(); });
+  $("#yes").addEventListener("click", async () => {
+    closeModal();
+    try {
+      await onYes();
+    } catch (err) {
+      console.error("Confirmation execution error:", err);
+      toast("Une erreur est survenue lors de l'opération.");
+    }
+  });
 }
 let toastT; function toast(m) { const t = $("#toast"); t.textContent = m; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => (t.hidden = true), 3200); }
 const rabOpts = (filter, none = "— Aucun —") => [["", none], ...S.rabbits.filter(filter).sort((a, b) => a.name.localeCompare(b.name, "fr")).map((r) => [r.id, `${r.name}${r.cage ? " · " + r.cage : ""}${isActive(r) ? "" : " (" + r.status + ")"}`])];
@@ -3184,12 +3331,27 @@ function itemForm() {
     } });
 }
 function feedForm(grams) {
-  form({ title: "Distribution d'aliment", fields: [{ k: "kg", label: "Quantité totale distribuée (kg)", type: "number", step: "0.1", min: 0, req: true, def: grams ? +(grams / 1000).toFixed(1) : "", hint: grams ? `Ration conseillée pour le cheptel : ${nf1.format(grams / 1000)} kg` : "" }, { k: "date", label: "Date de distribution", type: "date", req: true, def: today() }, { k: "notes", label: "Remarques", full: true }],
+  const rt = ration();
+  const recKg = grams ? +(grams / 1000).toFixed(1) : +(rt.grams / 1000).toFixed(1);
+  form({
+    title: "Distribution d'aliment",
+    submit: "Enregistrer la distribution",
+    fields: [
+      { k: "kg", label: "Quantité à distribuer (kg)", type: "number", step: "0.1", min: 0.1, req: true, def: recKg || 1, hint: rt.grams ? `Ration calculée selon l'effectif actuel (${rt.grams} g) : ${nf1.format(rt.grams / 1000)} kg` : "Se déduit automatiquement du stock" },
+      { k: "date", label: "Date de distribution", type: "date", req: true, def: today() },
+      { k: "notes", label: "Remarques (facultatif)", full: true, ph: "ex. Granulés croissance, verdure ou foin" }
+    ],
     onSubmit: async (v) => {
-      const ok = await save("feed", { grams: Math.round(v.kg * 1000), date: v.date, notes: v.notes });
-      if (ok) { closeModal(); toast(`${nf1.format(v.kg)} kg déduits du stock`); }
+      const kg = Number(v.kg) || 0;
+      const ok = await save("feed", { grams: Math.round(kg * 1000), date: v.date, notes: v.notes });
+      if (ok) {
+        closeModal();
+        const left = feedStock();
+        toast(`✅ ${nf1.format(kg)} kg distribués et déduits du stock (${nf1.format(left)} kg restants)`);
+      }
       return ok;
-    } });
+    }
+  });
 }
 function txForm(type) {
   form({ title: type === "in" ? "Enregistrer une recette" : "Enregistrer une dépense", fields: [
@@ -3205,18 +3367,19 @@ function batchForm(matingId, b) {
   const m = matingId ? byId(S.matings, matingId) : null; b = b || {};
   const wean = b.weaning || (m?.birthDate ? addDays(m.birthDate, WEANING) : today());
   const litters = [["", "— Aucune —"], ...S.matings.filter((x) => x.status === "Mise bas").map((x) => [x.id, `${rname(x.female)} · ${fmtShort(x.birthDate || x.due)}`])];
-  form({ title: b.id ? `Modifier le lot ${b.code}` : "Nouveau lot en engraissement", values: { ...b, mating: b.mating ?? matingId ?? "" }, fields: [
-      { k: "code", label: "Code du lot", req: true, def: `LOT-${today().slice(0, 7)}-${String.fromCharCode(65 + (S.batches.length % 26))}` },
+  const defInitial = m ? (Number(m.alive) || 6) : (b.initial || 6);
+  form({ title: b.id ? `Modifier le lot ${b.code}` : "Nouveau lot en engraissement", values: { ...b, mating: b.mating ?? matingId ?? "", initial: defInitial }, fields: [
+      { k: "code", label: "Code du lot", req: true, def: b.code || `LOT-${today().slice(0, 7)}-${String.fromCharCode(65 + (S.batches.length % 26))}` },
       { k: "mating", label: "Portée d'origine", type: "select", opts: litters },
       { k: "weaning", label: "Date de sevrage", type: "date", req: true, def: wean },
-      { k: "initial", label: "Nombre de sujets au sevrage", type: "number", min: 1, req: true, def: m ? Number(m.alive) || "" : "" },
-      { k: "cage", label: "Cage ou parc", ph: "ex. Parc 1, Cage E" }, { k: "avgWeight", label: "Poids moyen estimé (g)", type: "number", min: 0 },
+      { k: "initial", label: "Nombre de sujets au sevrage", type: "number", min: 1, req: true, def: defInitial },
+      { k: "cage", label: "Cage ou parc", ph: "ex. Parc 1, Cage E" }, { k: "avgWeight", label: "Poids moyen estimé (g)", type: "number", min: 0, def: b.avgWeight || "" },
       { k: "target", label: "Date visée de commercialisation", type: "date", def: b.target || addDays(wean, FATTEN_DAYS) },
-      { k: "status", label: "Statut", type: "select", opts: ["Actif", "Quarantaine", "Vendu"], def: "Actif" }],
+      { k: "status", label: "Statut", type: "select", opts: ["Actif", "Quarantaine", "Vendu"], def: b.status || "Actif" }],
     onSubmit: async (v) => {
       const obj = { ...b, ...v, target: v.target || addDays(v.weaning, FATTEN_DAYS), current: b.id ? b.current : v.initial, deaths: b.deaths || 0 };
       const ok = await save("batch", obj);
-      if (ok) { closeModal(); toast("Lot enregistré"); go("engraissement"); }
+      if (ok) { toast("Lot enregistré avec succès"); go("engraissement"); }
       return ok;
     } });
 }
@@ -3251,30 +3414,76 @@ async function bulk(docs, label) {
 const A = {
   close: closeModal,
   overlay: (el, e) => { if (e.target === el) closeModal(); },
-  more: () => sheet("Navigation", `<div class="morelist">${NAV.filter((n) => !BOTTOM.includes(n.id)).map((n) => `<a class="nav-a" href="#${n.id}" data-act="close">${ICON[n.icon]}<span>${n.label}</span></a>`).join("")}<button class="btn ghost" data-act="alertsCenterModal" style="justify-content:flex-start;padding:10px 12px;font-size:1rem;color:var(--ink)">${ICON.bell}<span>Centre d'alertes & notifications</span></button><button class="btn ghost" data-act="accountModal" style="justify-content:flex-start;padding:10px 12px;font-size:1rem;color:var(--ink)">${ICON.cloud}<span>Compte Google & Synchronisation</span></button></div>`),
+  more: () => sheet("Navigation", `<div class="morelist">${NAV.filter((n) => !BOTTOM.includes(n.id)).map((n) => `<a class="nav-a" href="#${n.id}" data-act="close">${ICON[n.icon]}<span>${n.label}</span></a>`).join("")}<button class="btn ghost" data-act="alertsCenterModal" style="justify-content:flex-start;padding:10px 12px;font-size:1rem;color:var(--ink)">${ICON.bell}<span>Centre d'alertes & notifications</span></button><button class="btn ghost" data-act="themeModal" style="justify-content:flex-start;padding:10px 12px;font-size:1rem;color:var(--ink)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg><span>Changer de thème visuel</span></button><button class="btn ghost" data-act="accountModal" style="justify-content:flex-start;padding:10px 12px;font-size:1rem;color:var(--ink)">${ICON.cloud}<span>Compte Google & Synchronisation</span></button></div>`),
   ui: (el) => { ui[el.dataset.k] = el.dataset.v; render(); },
   accountModal: () => accountModal(),
   alertsCenterModal: () => alertsCenterModal(),
+  themeModal: () => themeModal(),
   unauthorizedDomainModal: () => unauthorizedDomainModal(),
   resetFilters: () => { ui.q = ""; ui.sex = "all"; ui.stage = "all"; ui.breed = "all"; ui.st = "actifs"; ui.ageBracket = "all"; ui.minAgeM = ""; ui.maxAgeM = ""; ui.minWeight = ""; ui.maxWeight = ""; render(); },
   resetCustomMetrics: () => { ui.minAgeM = ""; ui.maxAgeM = ""; ui.minWeight = ""; ui.maxWeight = ""; render(); },
   newrabbit: () => rabbitForm(), editrabbit: (el) => rabbitForm(rab(el.dataset.id)),
-  status: (el) => { const r = rab(el.dataset.id); form({ title: `Statut de ${r.name}`, values: r, fields: [{ k: "status", label: "Statut", type: "select", opts: STATUSES, full: true, hint: "Un animal vendu, abattu ou décédé passe dans la rubrique « Sortis »." }], onSubmit: async (v) => { const ok = await save("rabbit", { ...r, status: v.status }); if (ok) { closeModal(); toast("Statut mis à jour"); } return ok; } }); },
-  delrabbit: (el) => { const r = rab(el.dataset.id); confirmBox(`Supprimer définitivement la fiche de ${r.name} ainsi que ses pesées et soins ? Pour un animal vendu ou décédé, modifiez plutôt son statut.`, "Supprimer", async () => {
+  status: (el) => { const r = rab(el.dataset.id); form({ title: `Statut de ${r.name}`, values: r, fields: [{ k: "status", label: "Statut", type: "select", opts: STATUSES, full: true, hint: "Un animal vendu, abattu ou décédé passe dans la rubrique « Sortis »." }], onSubmit: async (v) => { const ok = await save("rabbit", { ...r, status: v.status }); if (ok) toast("Statut mis à jour"); return ok; } }); },
+  delrabbit: (el) => { const r = rab(el.dataset.id); if (!r) return; confirmBox(`Supprimer définitivement la fiche de ${r.name} ainsi que ses pesées et soins ? Pour un animal vendu ou décédé, modifiez plutôt son statut.`, "Supprimer", async () => {
+    toast(`Suppression de ${r.name}…`);
     for (const w of S.weights.filter((x) => x.rabbit === r.id)) await removeDoc("weight", w.id);
     for (const x of S.treatments.filter((x) => x.rabbit === r.id)) await removeDoc("treatment", x.id);
-    if (await removeDoc("rabbit", r.id)) { toast("Fiche supprimée"); go("lapins"); } }); },
+    if (await removeDoc("rabbit", r.id)) { toast("Fiche supprimée avec succès"); go("lapins"); } }); },
   newmating: (el) => matingForm(el.dataset.id), kindle: (el) => kindleForm(el.dataset.id),
   mst: async (el) => { const m = byId(S.matings, el.dataset.id); if (m && (await save("mating", { ...m, status: el.dataset.v }))) toast(`${rname(m.female)} : ${el.dataset.v}`); },
   newweight: (el) => weightForm(el.dataset.id), newtreat: (el) => treatForm(el.dataset.id),
-  newitem: () => itemForm(), feed: (el) => feedForm(Number(el.dataset.v) || 0), newtx: (el) => txForm(el.dataset.v),
+  newitem: () => itemForm(), feed: (el) => feedForm(Number(el.dataset.v) || 0),
+  feedQuick: async () => {
+    const rt = ration();
+    if (!rt.grams || rt.grams <= 0) {
+      toast("Enregistrez d'abord des lapins actifs pour calculer la ration.");
+      return;
+    }
+    const kg = +(rt.grams / 1000).toFixed(1);
+    const ok = await save("feed", { grams: rt.grams, date: today(), notes: `Distribution quotidienne automatique (${kg} kg)` });
+    if (ok) {
+      const left = feedStock();
+      toast(`✅ ${nf1.format(kg)} kg distribués — Stock restant : ${nf1.format(left)} kg`);
+      render();
+    }
+  },
+  newtx: (el) => txForm(el.dataset.v),
   newbatch: (el) => batchForm(el.dataset.id), editbatch: (el) => batchForm(null, byId(S.batches, el.dataset.id)), sell: (el) => sellForm(el.dataset.id),
-  bdeath: (el) => { const b = byId(S.batches, el.dataset.id); form({ title: `Perte sur le lot ${b.code}`, fields: [{ k: "n", label: "Nombre de lapereaux décédés", type: "number", min: 1, req: true, def: 1 }], onSubmit: async (v) => { const ok = await save("batch", { ...b, current: Math.max(0, b.current - v.n), deaths: (Number(b.deaths) || 0) + v.n }); if (ok) { closeModal(); toast("Perte enregistrée"); } return ok; } }); },
-  bweight: (el) => { const b = byId(S.batches, el.dataset.id); form({ title: `Poids moyen du lot ${b.code}`, fields: [{ k: "avgWeight", label: "Poids moyen mesuré (g)", type: "number", min: 0, req: true, def: b.avgWeight || "" }], onSubmit: async (v) => { const ok = await save("batch", { ...b, avgWeight: v.avgWeight }); if (ok) { closeModal(); toast("Poids moyen enregistré"); } return ok; } }); },
+  bdeath: (el) => { const b = byId(S.batches, el.dataset.id); form({ title: `Perte sur le lot ${b.code}`, fields: [{ k: "n", label: "Nombre de lapereaux décédés", type: "number", min: 1, req: true, def: 1 }], onSubmit: async (v) => { const ok = await save("batch", { ...b, current: Math.max(0, b.current - v.n), deaths: (Number(b.deaths) || 0) + v.n }); if (ok) toast("Perte enregistrée"); return ok; } }); },
+  bweight: (el) => { const b = byId(S.batches, el.dataset.id); form({ title: `Poids moyen du lot ${b.code}`, fields: [{ k: "avgWeight", label: "Poids moyen mesuré (g)", type: "number", min: 0, req: true, def: b.avgWeight || "" }], onSubmit: async (v) => { const ok = await save("batch", { ...b, avgWeight: v.avgWeight }); if (ok) toast("Poids moyen enregistré"); return ok; } }); },
   newrem: () => remForm(),
   remtoggle: async (el) => { const r = byId(S.reminders, el.dataset.id); if (r) await save("reminder", { ...r, done: !r.done }); },
   remdone: async (el) => { const r = byId(S.reminders, el.dataset.id); if (r && (await save("reminder", { ...r, done: true }))) toast("Tâche clôturée"); },
-  del: (el) => { const k = el.dataset.kind, id = el.dataset.id; confirmBox("Supprimer définitivement cet enregistrement ?", "Supprimer", async () => { if (await removeDoc(k, id)) toast("Supprimé"); }); },
+  del: (el) => {
+    const k = el.dataset.kind, id = el.dataset.id;
+    let desc = "cet enregistrement";
+    if (k === "batch") {
+      const b = byId(S.batches, id);
+      desc = `le lot ${b?.code || ""}`;
+    } else if (k === "mating") {
+      const m = byId(S.matings, id);
+      desc = m ? `la saillie de ${rname(m.female)}` : "cette saillie";
+    } else if (k === "rabbit") {
+      const r = rab(id);
+      desc = `la fiche de ${r?.name || ""}`;
+    } else if (k === "item") {
+      const it = byId(S.inventory, id);
+      desc = it ? `l'approvisionnement « ${it.name} »` : "cet approvisionnement";
+    } else if (k === "feed") {
+      desc = "cette distribution d'aliment";
+    } else if (k === "tx") {
+      desc = "cette opération financière";
+    } else if (k === "treatment") {
+      desc = "ce soin vétérinaire";
+    } else if (k === "weight") {
+      desc = "cette pesée";
+    } else if (k === "reminder") {
+      desc = "ce rappel";
+    }
+    confirmBox(`Supprimer définitivement ${desc} ? Cette action est irréversible.`, "Supprimer", async () => {
+      if (await removeDoc(k, id)) toast("Suppression effectuée avec succès");
+    });
+  },
   wipe: () => confirmBox("Réinitialiser l'intégralité du cheptel ? Toutes vos données d'élevage seront effacées.", "Tout réinitialiser", async () => {
     for (const [kind, key] of Object.entries(KIND)) for (const x of S[key].slice()) await removeDoc(kind, x.id);
     localStorage.removeItem(getUserDataKey());
@@ -3355,6 +3564,7 @@ window.addEventListener("load", purgeNetlifyWatermark);
 setInterval(purgeNetlifyWatermark, 1000);
 
 // Boot application
+try { setTheme(getActiveTheme()); } catch (e) {}
 const initialDocs = Object.values(getLocalData());
 ingest(initialDocs);
 updateUserUI();

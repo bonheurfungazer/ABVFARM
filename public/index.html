@@ -19,6 +19,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 
 <!-- jsPDF & AutoTable for official PDF herd inventory -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -887,7 +888,17 @@ function handleAuthError(err) {
   let detail = err.message || err.code || "";
 
   if (err.code === "auth/popup-closed-by-user" || err.code === "auth/cancelled-popup-request") {
-    toast("Connexion Google annulée.");
+    if (diag) {
+      diag.style.display = "block";
+      diag.innerHTML = `
+        <div style="font-weight:700;margin-bottom:6px">La fenêtre pop-up Google s'est refermée ou a été bloquée.</div>
+        <div style="margin-bottom:8px">Sur smartphone ou si votre navigateur bloque les pop-ups, cliquez ci-dessous pour vous connecter par redirection sécurisée :</div>
+        <button type="button" class="btn pri sm" style="width:100%" onclick="signInWithGoogle('redirect')">
+          Continuer par redirection directe Google
+        </button>
+      `;
+    }
+    toast("Pop-up fermée. Cliquez ci-dessous sur 'Redirection directe'.");
     return;
   }
 
@@ -895,7 +906,7 @@ function handleAuthError(err) {
     msg = "La fenêtre pop-up Google a été bloquée par votre navigateur.";
     if (diag) {
       diag.style.display = "block";
-      diag.innerHTML = `<b>Pop-up bloquée :</b> Votre navigateur ou smartphone a bloqué la fenêtre pop-up Google.<br><button type="button" class="btn pri sm" style="margin-top:8px" onclick="signInWithGoogle('redirect')">Continuer par redirection sécurisée</button>`;
+      diag.innerHTML = `<b>Pop-up bloquée :</b> Votre navigateur ou smartphone a bloqué la fenêtre pop-up Google.<br><button type="button" class="btn pri sm" style="margin-top:8px;width:100%" onclick="signInWithGoogle('redirect')">Continuer par redirection sécurisée Google</button>`;
     }
     toast(msg);
     return;
@@ -927,7 +938,7 @@ function handleAuthError(err) {
   toast(msg);
 }
 
-function signInWithGoogle(mode = "popup") {
+function signInWithGoogle(mode = "auto") {
   if (!window.firebaseAuth) {
     if (typeof firebase !== "undefined" && firebase.auth) {
       initFirebaseSync();
@@ -938,9 +949,12 @@ function signInWithGoogle(mode = "popup") {
     return;
   }
 
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+  const effectiveMode = (mode === "auto") ? (isMobile ? "redirect" : "popup") : mode;
+
   const provider = getGoogleProvider();
 
-  if (mode === "redirect") {
+  if (effectiveMode === "redirect") {
     toast("Redirection vers Google en cours…");
     window.firebaseAuth.signInWithRedirect(provider).catch((err) => {
       handleAuthError(err);
@@ -957,6 +971,47 @@ function signInWithGoogle(mode = "popup") {
   }).catch((err) => {
     handleAuthError(err);
   });
+}
+
+function renderGoogleSignInButton(containerId = "g_id_signin_container") {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  if (window.google && window.google.accounts && window.google.accounts.id) {
+    try {
+      google.accounts.id.initialize({
+        client_id: "921975845975-snhp3hpml9kngq6vlij40blhanb3n167.apps.googleusercontent.com",
+        callback: (res) => {
+          if (res && res.credential) {
+            toast("Authentification Google en cours…");
+            if (window.firebaseAuth && typeof firebase !== "undefined") {
+              const cred = firebase.auth.GoogleAuthProvider.credential(res.credential);
+              window.firebaseAuth.signInWithCredential(cred).then((result) => {
+                if (result && result.user) {
+                  handleUserAuthenticated(result.user, `Connecté avec Google : ${result.user.displayName || result.user.email}`);
+                  closeModal();
+                }
+              }).catch((err) => {
+                handleAuthError(err);
+              });
+            }
+          }
+        },
+        auto_select: false
+      });
+      google.accounts.id.renderButton(container, {
+        type: "standard",
+        theme: "outline",
+        size: "large",
+        text: "continue_with",
+        shape: "rectangular",
+        logo_alignment: "left",
+        width: 280
+      });
+    } catch (e) {
+      console.warn("GIS renderButton notice:", e);
+    }
+  }
 }
 
 /* ---------- Derived data ---------- */
@@ -2203,14 +2258,19 @@ function accountModal() {
       <h3>Connexion via Compte Google</h3>
       <p class="hint">Connectez-vous avec votre compte Google pour sauvegarder automatiquement tout votre cheptel dans le Cloud Firebase. Vos données restent accessibles sur tous vos appareils, même hors-ligne.</p>
       
-      <button type="button" class="btn" id="btnGoogleSignIn" style="background:#FFFFFF;color:#3c4043;border:1.5px solid #dadce0;font-weight:600;display:flex;align-items:center;justify-content:center;gap:10px;padding:11px 16px;width:100%;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.08);cursor:pointer">
+      <!-- Bouton Google principal -->
+      <button type="button" class="btn" id="btnGoogleSignIn" style="background:#FFFFFF;color:#3c4043;border:1.5px solid #dadce0;font-weight:600;display:flex;align-items:center;justify-content:center;gap:10px;padding:12px 16px;width:100%;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.08);cursor:pointer">
         <svg width="20" height="20" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.616z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/><path fill="#FBBC05" d="M3.964 10.707c-.18-.54-.282-1.117-.282-1.707s.102-1.167.282-1.707V4.961H.957C.347 6.175 0 7.55 0 9s.348 2.825.957 4.039l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.961L3.964 7.293C4.672 5.166 6.656 3.58 9 3.58z"/></svg>
         <span style="font-size:0.95rem">Continuer avec Google</span>
       </button>
 
-      <button type="button" class="btn ghost sm" id="btnGoogleSignInRedirect" style="font-size:0.8rem;color:var(--muted);text-decoration:underline;cursor:pointer">
-        Se connecter par redirection (si pop-up bloquée)
+      <!-- Bouton de redirection directe (très fiable sur smartphone et si les popups sont bloquées) -->
+      <button type="button" class="btn pri sm" id="btnGoogleSignInRedirect" style="width:100%;padding:10px 12px;font-size:0.86rem;cursor:pointer">
+        ${ICON.cloud} Se connecter par redirection directe (Anti-blocage pop-up)
       </button>
+
+      <!-- Conteneur officiel Google Identity Services si disponible -->
+      <div id="g_id_signin_container" style="display:flex;justify-content:center;margin-top:2px"></div>
 
       <div id="authDiagnosticBox" style="display:none;background:var(--warn-soft);color:var(--warn);padding:10px 12px;border-radius:10px;font-size:0.84rem;line-height:1.4"></div>
     </div>
@@ -2259,7 +2319,7 @@ function accountModal() {
   const btnGoogle = $("#btnGoogleSignIn");
   if (btnGoogle) {
     btnGoogle.addEventListener("click", () => {
-      signInWithGoogle('popup');
+      signInWithGoogle('auto');
     });
   }
 
@@ -2269,6 +2329,8 @@ function accountModal() {
       signInWithGoogle('redirect');
     });
   }
+
+  renderGoogleSignInButton("g_id_signin_container");
 
   const btnSaveFarm = $("#btnSaveFarm");
   if (btnSaveFarm) {

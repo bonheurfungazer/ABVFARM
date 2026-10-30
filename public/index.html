@@ -206,6 +206,19 @@ main { min-width: 0; padding-block: 20px 110px; padding-left: max(16px, env(safe
 .sx { font-size: 1.3rem; line-height: 1; font-weight: 800; }
 
 .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.chip-bar { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+.chip-bar::-webkit-scrollbar { display: none; }
+.chip-btn { border: 1.5px solid var(--line); background: var(--surface); color: var(--muted); padding: 5px 11px; border-radius: 999px; font-size: .8rem; font-weight: 700; white-space: nowrap; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: background .12s ease, color .12s ease, border-color .12s ease; }
+.chip-btn:hover { background: var(--surface-2); color: var(--ink); }
+.chip-btn[aria-pressed="true"] { background: var(--sage); color: var(--sage-ink); border-color: transparent; }
+.chip-btn .badge { background: rgba(0,0,0,0.08); padding: 1px 6px; border-radius: 999px; font-size: .72rem; }
+.chip-btn[aria-pressed="true"] .badge { background: rgba(255,255,255,0.28); color: #fff; }
+.filter-select { border: 1.5px solid var(--line); border-radius: 11px; background: var(--surface); padding: 7px 10px; font-size: .82rem; font-weight: 600; color: var(--ink); outline: none; cursor: pointer; }
+.filter-select:focus { border-color: var(--sage); }
+.view-toggle { display: inline-flex; background: var(--surface-2); border-radius: 10px; padding: 2px; gap: 2px; }
+.view-toggle button { border: 0; background: transparent; padding: 6px 9px; border-radius: 8px; cursor: pointer; color: var(--muted); display: grid; place-items: center; }
+.view-toggle button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
+.view-toggle svg { width: 16px; height: 16px; }
 .seg { display: inline-flex; background: var(--surface-2); border-radius: 12px; padding: 3px; gap: 2px; flex-wrap: wrap; }
 .seg button { border: 0; background: transparent; padding: 6px 11px; border-radius: 9px; font-weight: 600; font-size: .84rem; cursor: pointer; color: var(--muted); }
 .seg button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
@@ -283,6 +296,9 @@ dialog { border: 0; padding: 0; background: transparent; max-width: 100vw; max-h
 .toast { position: fixed; left: 50%; bottom: calc(86px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 60; background: var(--ink); color: var(--bg); padding: 10px 18px; border-radius: 12px; font-weight: 600; font-size: .9rem; box-shadow: var(--shadow); max-width: calc(100vw - 32px); text-align: center; }
 @media (min-width: 900px) { .toast { bottom: 28px; } }
 .loading { display: grid; place-items: center; min-height: 50vh; color: var(--muted); gap: 10px; }
+.badge-dot { position: absolute; top: -3px; right: -3px; min-width: 18px; height: 18px; border-radius: 999px; background: var(--bad); color: #fff; font-size: 0.68rem; font-weight: 800; display: flex; align-items: center; justify-content: center; padding: 0 4px; box-shadow: 0 0 0 2px var(--surface); line-height: 1; }
+.side-alerts-widget { display: flex; align-items: center; justify-content: space-between; padding: 9px 12px; border-radius: 12px; background: var(--surface-2); margin-bottom: 8px; cursor: pointer; transition: background .12s ease; text-decoration: none; color: inherit; }
+.side-alerts-widget:hover { background: var(--sage-soft); color: var(--sage-soft-ink); }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 </style>
 </head>
@@ -306,6 +322,14 @@ dialog { border: 0; padding: 0; background: transparent; max-width: 100vw; max-h
 
     <!-- Account & Cloud Synchronization Widget -->
     <div class="side-account">
+      <div class="side-alerts-widget" id="sideAlertsBtn" data-act="alertsCenterModal" title="Centre de notifications & alertes">
+        <div style="display:flex;align-items:center;gap:8px">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+          <span style="font-weight:700;font-size:.85rem">Alertes</span>
+        </div>
+        <span id="sideAlertBadge" class="chip sm warn" style="display:none">0</span>
+      </div>
+
       <button class="btn sm" id="btnInstallPWA" onclick="installPWA()" style="display:none;background:var(--sage-soft);color:var(--sage-soft-ink);border:none;margin-bottom:4px;width:100%;font-size:.8rem">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
         <span>Installer sur téléphone</span>
@@ -330,6 +354,10 @@ dialog { border: 0; padding: 0; background: transparent; max-width: 100vw; max-h
       </div>
     </div>
     <div class="actions">
+      <button class="btn sm" data-act="alertsCenterModal" title="Alertes & Notifications" style="padding:6px 9px;position:relative">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+        <span id="headerAlertBadge" class="badge-dot" style="display:none">0</span>
+      </button>
       <button class="btn sm" id="btnInstallMobile" onclick="installPWA()" style="display:none;padding:6px 9px;background:var(--sage-soft);color:var(--sage-soft-ink);border:none" title="Installer l'application sur votre téléphone">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
       </button>
@@ -439,6 +467,9 @@ const ICON = {
   user: I('<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>'),
   cloud: I('<path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/>'),
   phone: I('<rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/>'),
+  grid: I('<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>'),
+  list: I('<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>'),
+  refresh: I('<path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>'),
 };
 
 /* ---------- Utils ---------- */
@@ -721,12 +752,20 @@ async function signInWithGoogle() {
       closeModal();
     }
   } catch (err) {
-    console.warn("Popup notice, switching to redirect:", err);
+    console.warn("Popup notice, handling auth error:", err);
+    if (err.code === "auth/unauthorized-domain") {
+      unauthorizedDomainModal();
+      return;
+    }
     if (err.code === "auth/popup-blocked" || err.code === "auth/cancelled-popup-request" || err.code === "auth/popup-closed-by-user") {
       try {
         await window.firebaseAuth.signInWithRedirect(provider);
       } catch (redirectErr) {
-        toast("Erreur de redirection Google : " + redirectErr.message);
+        if (redirectErr.code === "auth/unauthorized-domain") {
+          unauthorizedDomainModal();
+        } else {
+          toast("Erreur de redirection Google : " + redirectErr.message);
+        }
       }
     } else {
       toast("Erreur Google : " + (err.message || "Impossible de se connecter"));
@@ -820,6 +859,195 @@ function alerts() {
   return out.sort((a, b) => order[a.sev] - order[b.sev]);
 }
 
+/* ---------- Offline Audio Chime & Vibration Engine ---------- */
+function playAlertChime() {
+  try {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return;
+    const ctx = new AudioContextClass();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(587.33, ctx.currentTime); // Ré 5
+    osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.12); // La 5
+
+    gain.gain.setValueAtTime(0.18, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.45);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.45);
+  } catch (e) {
+    // Audio restricted prior to user touch
+  }
+}
+
+function triggerVibration() {
+  try {
+    if ("vibrate" in navigator) {
+      navigator.vibrate([150, 60, 150]);
+    }
+  } catch (e) {}
+}
+
+/* ---------- Notification Manager (100% Hors-Ligne & En Ligne) ---------- */
+const LS_NOTIF_PREFS = "abv_notif_prefs_v1";
+const LS_NOTIF_LOG = "abv_notif_log_v1";
+
+function getNotifPrefs() {
+  try {
+    return JSON.parse(localStorage.getItem(LS_NOTIF_PREFS) || '{"sound":true,"vibrate":true,"autoNotify":true}');
+  } catch (e) {
+    return { sound: true, vibrate: true, autoNotify: true };
+  }
+}
+
+function saveNotifPrefs(prefs) {
+  try {
+    localStorage.setItem(LS_NOTIF_PREFS, JSON.stringify(prefs));
+  } catch (e) {}
+}
+
+async function requestNotificationPermission() {
+  if (!("Notification" in window)) {
+    toast("Les notifications système ne sont pas supportées par ce navigateur.");
+    return false;
+  }
+  try {
+    const permission = await Notification.requestPermission();
+    if (permission === "granted") {
+      toast("Notifications ABV Farm activées sur cet appareil !");
+      playAlertChime();
+      triggerVibration();
+      sendOfflineNotification("ABV Farm • Notifications actives", {
+        body: "Vos alertes de saillies, palpations, nids, mises bas et soins s'afficheront même hors-ligne.",
+        tag: "abv-welcome"
+      });
+      return true;
+    } else {
+      toast("Autorisation refusée ou en attente.");
+      return false;
+    }
+  } catch (err) {
+    console.warn("Notification notice:", err);
+    return false;
+  }
+}
+
+function sendOfflineNotification(title, options = {}) {
+  const prefs = getNotifPrefs();
+  if (prefs.sound) playAlertChime();
+  if (prefs.vibrate) triggerVibration();
+
+  if (!("Notification" in window) || Notification.permission !== "granted") {
+    return;
+  }
+
+  // 1. Envoi au Service Worker pour affichage fiable même en arrière-plan ou hors-ligne
+  if ("serviceWorker" in navigator && navigator.serviceWorker.controller) {
+    navigator.serviceWorker.controller.postMessage({
+      type: "SHOW_NOTIFICATION",
+      title,
+      options: {
+        body: options.body || "",
+        icon: "./icon-192.png",
+        badge: "./icon-192.png",
+        tag: options.tag || "abv-alert",
+        url: options.url || "./#rappels"
+      }
+    });
+  } else if (navigator.serviceWorker && navigator.serviceWorker.ready) {
+    navigator.serviceWorker.ready.then((reg) => {
+      reg.showNotification(title, {
+        body: options.body || "",
+        icon: "./icon-192.png",
+        badge: "./icon-192.png",
+        tag: options.tag || "abv-alert",
+        data: { url: options.url || "./#rappels" }
+      });
+    }).catch(() => {
+      try { new Notification(title, { body: options.body, icon: "./icon-192.png" }); } catch (e) {}
+    });
+  } else {
+    // 2. Repli direct Notification API
+    try {
+      new Notification(title, {
+        body: options.body,
+        icon: "./icon-192.png"
+      });
+    } catch (e) {}
+  }
+}
+
+// Vérification et dispatch périodique des alertes urgentes
+function checkAndNotifyUrgentAlerts(force = false) {
+  const al = alerts();
+  updateAlertBadges(al);
+
+  const prefs = getNotifPrefs();
+  if (!prefs.autoNotify && !force) return;
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+
+  const urgent = al.filter((a) => a.sev === "bad" || a.sev === "warn");
+  if (!urgent.length) return;
+
+  const todayKey = today();
+  let log = {};
+  try { log = JSON.parse(localStorage.getItem(LS_NOTIF_LOG) || "{}"); } catch (e) {}
+
+  const toNotify = urgent.filter((a) => {
+    const key = `${todayKey}_${a.title}`;
+    return force || !log[key];
+  });
+
+  if (toNotify.length > 0) {
+    const first = toNotify[0];
+    const more = toNotify.length - 1;
+    const body = more > 0 
+      ? `${first.sub} (+ ${more} autre${more > 1 ? "s" : ""} alerte${more > 1 ? "s" : ""})`
+      : first.sub;
+
+    sendOfflineNotification(`ABV Farm • ${first.title}`, {
+      body,
+      tag: `abv-daily-${todayKey}`
+    });
+
+    toNotify.forEach((a) => {
+      log[`${todayKey}_${a.title}`] = true;
+    });
+    try { localStorage.setItem(LS_NOTIF_LOG, JSON.stringify(log)); } catch (e) {}
+  }
+}
+
+function updateAlertBadges(al) {
+  if (!al) al = alerts();
+  const count = al.length;
+  const headerBadge = $("#headerAlertBadge");
+  const sideBadge = $("#sideAlertBadge");
+
+  if (headerBadge) {
+    if (count > 0) {
+      headerBadge.textContent = count > 99 ? "99+" : count;
+      headerBadge.style.display = "flex";
+      headerBadge.style.background = al.some((a) => a.sev === "bad") ? "var(--bad)" : "var(--warn)";
+    } else {
+      headerBadge.style.display = "none";
+    }
+  }
+
+  if (sideBadge) {
+    if (count > 0) {
+      sideBadge.textContent = count;
+      sideBadge.style.display = "inline-flex";
+      sideBadge.className = `chip sm ${al.some((a) => a.sev === "bad") ? "bad" : "warn"}`;
+    } else {
+      sideBadge.style.display = "none";
+    }
+  }
+}
+
 /* ---------- Routing ---------- */
 const NAV = [
   { id: "accueil", label: "Accueil", icon: "home" },
@@ -832,7 +1060,7 @@ const NAV = [
   { id: "donnees", label: "Données & PDF", icon: "data" },
 ];
 const BOTTOM = ["accueil", "lapins", "saillies", "rappels"];
-let ui = { q: "", sex: "all", st: "actifs", txf: "all" };
+let ui = { q: "", sex: "all", st: "actifs", stage: "all", breed: "all", sort: "name_asc", viewMode: "grid", ageBracket: "all", minAgeM: "", maxAgeM: "", minWeight: "", maxWeight: "", txf: "all" };
 function route() {
   const h = decodeURIComponent(location.hash.slice(1));
   if (h.startsWith("lapin-")) return { name: "lapin", id: h.slice(6) };
@@ -852,6 +1080,7 @@ function renderNav() {
 function render() {
   renderNav();
   updateUserUI();
+  updateAlertBadges();
   if (!ready) return;
   const r = route(); const v = VIEWS[r.name] || VIEWS.accueil;
   $("#main").innerHTML = `<div class="wrap">${v(r)}</div>`;
@@ -955,27 +1184,430 @@ VIEWS.accueil = () => {
 };
 function earsSvg() { return `<svg class="ears" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8.2 2.5c1.3-.3 2.3 1.5 2.4 4.4.1 1.4 0 2.6-.2 3.4.5-.2 1-.2 1.6-.2s1.1 0 1.6.2c-.2-.8-.3-2-.2-3.4.1-2.9 1.1-4.7 2.4-4.4 1.4.4 1.6 3 .6 5.9-.4 1.1-.9 2.1-1.4 2.8 1.9 1 3.1 2.8 3.1 4.9 0 3.2-2.7 5.4-6.1 5.4s-6.1-2.2-6.1-5.4c0-2.1 1.2-3.9 3.1-4.9-.5-.7-1-1.7-1.4-2.8-1-2.9-.8-5.5.6-5.9Z"/></svg>`; }
 
+// Définition des tranches d'âge en cuniculture
+const AGE_BRACKETS = [
+  { id: "0-1m", label: "0 – 1 mois", desc: "< 30 j (au nid)", minD: 0, maxD: 29 },
+  { id: "1-2m", label: "1 – 2 mois", desc: "30 à 59 j (sevrés)", minD: 30, maxD: 59 },
+  { id: "2-3m", label: "2 – 3 mois", desc: "60 à 89 j (croissance)", minD: 60, maxD: 89 },
+  { id: "3-5m", label: "3 – 5 mois", desc: "90 à 149 j (sub-adultes)", minD: 90, maxD: 149 },
+  { id: "5-12m", label: "5 – 12 mois", desc: "5 m à 1 an (reproducteurs)", minD: 150, maxD: 364 },
+  { id: "1-2y", label: "1 – 2 ans", desc: "12 à 24 m (confirmés)", minD: 365, maxD: 729 },
+  { id: "2y+", label: "+ de 2 ans", desc: "2 ans et + (seniors)", minD: 730, maxD: 99999 }
+];
+
 VIEWS.lapins = () => {
-  const q = ui.q.trim().toLowerCase();
-  let list = S.rabbits.filter((r) => ui.st === "actifs" ? isActive(r) : !isActive(r));
-  if (ui.sex !== "all") list = list.filter((r) => r.sex === ui.sex);
-  if (q) list = list.filter((r) => [r.name, r.cage, r.breed].some((v) => String(v || "").toLowerCase().includes(q)));
-  list.sort((a, b) => (a.name || "").localeCompare(b.name || "", "fr"));
-  const seg = (k, opts) => `<div class="seg" role="group">${opts.map(([v, l]) => `<button type="button" data-act="ui" data-k="${k}" data-v="${v}" aria-pressed="${ui[k] === v}">${l}</button>`).join("")}</div>`;
-  const nArch = S.rabbits.filter((r) => !isActive(r)).length;
-  afterHooks.push(() => { const i = $("#q"); if (i) { i.addEventListener("input", () => { ui.q = i.value; const pos = i.selectionStart; render(); const j = $("#q"); if (j) { j.focus(); j.setSelectionRange(pos, pos); } }); } });
-  return `<div class="head"><div><h1>Cheptel cunicole</h1><p>${S.rabbits.filter(isActive).length} actifs · ${nArch} archivés</p></div><div class="actions"><button class="btn" data-act="exportpdf">${ICON.fileText}Inventaire PDF</button><button class="btn pri" data-act="newrabbit">${ICON.plus}Ajouter un lapin</button></div></div>
-  <div class="toolbar"><label class="search">${ICON.search}<input id="q" type="search" placeholder="Nom, cage ou race" value="${esc(ui.q)}" aria-label="Rechercher"></label>
-  ${seg("sex", [["all", "Tous"], ["Male", "♂ Mâles"], ["Female", "♀ Femelles"], ["Indéterminé", "Indét."]])}${seg("st", [["actifs", "Actifs"], ["archives", "Sortis"]])}</div>
-  ${list.length ? `<div class="grid g3">${list.map(rabbitCard).join("")}</div>` : `<div class="card">${emptyBox("rabbit", S.rabbits.length ? "Aucun lapin ne correspond au filtre" : "Aucun lapin enregistré pour le moment", S.rabbits.length ? "Modifiez votre recherche." : "Enregistrez vos reproducteurs (nom, sexe, date de naissance, race et cage).", `<button class="btn pri" data-act="newrabbit">${ICON.plus}Ajouter un lapin</button>`)}</div>`}`;
+  const q = (ui.q || "").trim().toLowerCase();
+  const t = today();
+
+  // Liste de base selon le statut (Actifs, Sortis / Archivés, ou Tous)
+  const allAct = S.rabbits.filter(isActive);
+  const allArch = S.rabbits.filter((r) => !isActive(r));
+  let baseList = ui.st === "archives" ? allArch : ui.st === "all" ? S.rabbits : allAct;
+
+  // Calcul statistique des tranches d'âge sur la base active/affichée
+  const ageDistribution = AGE_BRACKETS.map((b) => {
+    const rabbitsInB = baseList.filter((r) => {
+      const a = age(r);
+      return a >= b.minD && a <= b.maxD;
+    });
+    const males = rabbitsInB.filter((r) => r.sex === "Male").length;
+    const females = rabbitsInB.filter((r) => r.sex === "Female").length;
+    const indet = rabbitsInB.length - males - females;
+    return {
+      ...b,
+      count: rabbitsInB.length,
+      males,
+      females,
+      indet,
+      percent: baseList.length ? Math.round((rabbitsInB.length / baseList.length) * 100) : 0
+    };
+  });
+
+  // Pré-calcul des compteurs pour les puces rapides d'état
+  const counts = {
+    all: baseList.length,
+    male: baseList.filter((r) => r.sex === "Male").length,
+    female: baseList.filter((r) => r.sex === "Female").length,
+    gest: baseList.filter((r) => S.matings.some((m) => m.female === r.id && ["Accouplé", "Gestation confirmée"].includes(m.status))).length,
+    lact: baseList.filter((r) => S.matings.some((m) => m.female === r.id && m.status === "Mise bas" && m.birthDate && diff(m.birthDate, t) <= 45)).length,
+    mature: baseList.filter((r) => age(r) >= MATURE_DAYS).length,
+    young: baseList.filter((r) => { const a = age(r); return a >= 0 && a < MATURE_DAYS; }).length,
+    treat: baseList.filter((r) => underWithdrawal(r.id) != null).length
+  };
+
+  let list = baseList.slice();
+
+  // 1. Filtre par Tranche d'Âge cliquée dans la section répartition
+  if (ui.ageBracket && ui.ageBracket !== "all") {
+    const br = AGE_BRACKETS.find((b) => b.id === ui.ageBracket);
+    if (br) {
+      list = list.filter((r) => {
+        const a = age(r);
+        return a >= br.minD && a <= br.maxD;
+      });
+    }
+  }
+
+  // 2. Filtre par Stade / État physiologique
+  if (ui.stage && ui.stage !== "all") {
+    list = list.filter((r) => {
+      const a = age(r);
+      const isGest = S.matings.some((m) => m.female === r.id && ["Accouplé", "Gestation confirmée"].includes(m.status));
+      const isLact = S.matings.some((m) => m.female === r.id && m.status === "Mise bas" && m.birthDate && diff(m.birthDate, t) <= 45);
+      const isTreat = underWithdrawal(r.id) != null;
+      switch (ui.stage) {
+        case "male": return r.sex === "Male";
+        case "female": return r.sex === "Female";
+        case "gest": return isGest;
+        case "lact": return isLact;
+        case "mature": return a >= MATURE_DAYS;
+        case "young": return a >= 0 && a < MATURE_DAYS;
+        case "treat": return isTreat;
+        default: return true;
+      }
+    });
+  }
+
+  // 3. Filtre par Sexe direct si sélectionné
+  if (ui.sex && ui.sex !== "all") {
+    list = list.filter((r) => r.sex === ui.sex);
+  }
+
+  // 4. Filtre par Race
+  if (ui.breed && ui.breed !== "all") {
+    list = list.filter((r) => (r.breed || "").trim().toLowerCase() === ui.breed.toLowerCase());
+  }
+
+  // 5. Filtre précis par Âge saisi par l'utilisateur (en mois)
+  if (ui.minAgeM !== "" && !isNaN(Number(ui.minAgeM))) {
+    const minDays = Number(ui.minAgeM) * 30.44;
+    list = list.filter((r) => age(r) >= minDays);
+  }
+  if (ui.maxAgeM !== "" && !isNaN(Number(ui.maxAgeM))) {
+    const maxDays = Number(ui.maxAgeM) * 30.44;
+    list = list.filter((r) => {
+      const a = age(r);
+      return a >= 0 && a <= maxDays;
+    });
+  }
+
+  // 6. Filtre précis par Poids saisi par l'utilisateur (en kg)
+  if (ui.minWeight !== "" && !isNaN(Number(ui.minWeight))) {
+    const minW = Number(ui.minWeight);
+    list = list.filter((r) => {
+      const w = lastWeight(r.id);
+      return w != null && w >= minW;
+    });
+  }
+  if (ui.maxWeight !== "" && !isNaN(Number(ui.maxWeight))) {
+    const maxW = Number(ui.maxWeight);
+    list = list.filter((r) => {
+      const w = lastWeight(r.id);
+      return w != null && w <= maxW;
+    });
+  }
+
+  // 7. Recherche textuelle (Nom, Cage, Race, Notes)
+  if (q) {
+    list = list.filter((r) => [r.name, r.cage, r.breed, r.notes].some((v) => String(v || "").toLowerCase().includes(q)));
+  }
+
+  // 8. Tri intelligent
+  list.sort((a, b) => {
+    switch (ui.sort) {
+      case "name_desc": return (b.name || "").localeCompare(a.name || "", "fr");
+      case "age_desc": return age(b) - age(a);
+      case "age_asc": return age(a) - age(b);
+      case "weight_desc": return (lastWeight(b.id) || 0) - (lastWeight(a.id) || 0);
+      case "weight_asc": return (lastWeight(a.id) || 0) - (lastWeight(b.id) || 0);
+      case "cage_asc": return (a.cage || "").localeCompare(b.cage || "", "fr", { numeric: true });
+      case "name_asc":
+      default:
+        return (a.name || "").localeCompare(b.name || "", "fr");
+    }
+  });
+
+  const allBreeds = Array.from(new Set(S.rabbits.map((r) => (r.breed || "").trim()).filter(Boolean))).sort();
+  const hasActiveFilters = (ui.stage && ui.stage !== "all") || (ui.sex && ui.sex !== "all") || (ui.breed && ui.breed !== "all") || ui.st !== "actifs" || (ui.ageBracket && ui.ageBracket !== "all") || ui.minAgeM !== "" || ui.maxAgeM !== "" || ui.minWeight !== "" || ui.maxWeight !== "" || q;
+
+  afterHooks.push(() => {
+    const input = $("#q");
+    if (input) {
+      input.addEventListener("input", () => {
+        ui.q = input.value;
+        const pos = input.selectionStart;
+        render();
+        const next = $("#q");
+        if (next) { next.focus(); next.setSelectionRange(pos, pos); }
+      });
+    }
+    const breedSel = $("#filterBreed");
+    if (breedSel) breedSel.addEventListener("change", (e) => { ui.breed = e.target.value; render(); });
+    const sortSel = $("#filterSort");
+    if (sortSel) sortSel.addEventListener("change", (e) => { ui.sort = e.target.value; render(); });
+
+    // Inputs d'âge et de poids saisis par l'utilisateur
+    const inpMinAge = $("#inpMinAge");
+    if (inpMinAge) inpMinAge.addEventListener("input", (e) => { ui.minAgeM = e.target.value; render(); });
+    const inpMaxAge = $("#inpMaxAge");
+    if (inpMaxAge) inpMaxAge.addEventListener("input", (e) => { ui.maxAgeM = e.target.value; render(); });
+    const inpMinWeight = $("#inpMinWeight");
+    if (inpMinWeight) inpMinWeight.addEventListener("input", (e) => { ui.minWeight = e.target.value; render(); });
+    const inpMaxWeight = $("#inpMaxWeight");
+    if (inpMaxWeight) inpMaxWeight.addEventListener("input", (e) => { ui.maxWeight = e.target.value; render(); });
+  });
+
+  return `
+  <div class="head">
+    <div>
+      <h1>Cheptel cunicole</h1>
+      <p><b>${allAct.length}</b> actifs · <b>${allArch.length}</b> archivés / sortis</p>
+    </div>
+    <div class="actions">
+      <button class="btn" data-act="exportpdf">${ICON.fileText}Inventaire PDF</button>
+      <button class="btn pri" data-act="newrabbit">${ICON.plus}Ajouter un lapin</button>
+    </div>
+  </div>
+
+  <!-- SECTION DÉDIÉE : Répartition & Effectif par tranche d'âge -->
+  <section class="card" style="padding:16px;background:var(--surface)">
+    <div class="row-h" style="margin-bottom:10px">
+      <div style="display:flex;align-items:center;gap:8px">
+        ${ICON.tree}
+        <h2>Répartition & Effectif par Âge</h2>
+      </div>
+      <div class="actions">
+        ${ui.ageBracket && ui.ageBracket !== 'all' ? `
+          <button class="btn sm ghost" data-act="ui" data-k="ageBracket" data-v="all" style="color:var(--bad);font-size:0.78rem">
+            ${ICON.x} Voir tous les âges
+          </button>
+        ` : ""}
+        <span class="chip ok">${baseList.length} lapins analysés</span>
+      </div>
+    </div>
+    <p class="hint" style="margin-bottom:12px">Cliquez sur une tranche d'âge pour filtrer automatiquement la liste des animaux :</p>
+    
+    <div class="grid g3" style="gap:10px">
+      ${ageDistribution.map((st) => {
+        const isSelected = ui.ageBracket === st.id;
+        return `
+        <div class="tile" style="cursor:pointer;border-color:${isSelected ? 'var(--sage)' : 'var(--line)'};background:${isSelected ? 'var(--sage-soft)' : 'var(--surface-2)'};padding:10px 12px;border-radius:12px;transition:all .15s ease" data-act="ui" data-k="ageBracket" data-v="${isSelected ? 'all' : st.id}" title="Filtrer pour ${esc(st.label)}">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start">
+            <b style="font-size:0.9rem;color:${isSelected ? 'var(--sage-soft-ink)' : 'inherit'}">${esc(st.label)}</b>
+            <span class="v" style="font-size:1.35rem;color:${isSelected ? 'var(--sage)' : st.count ? 'var(--ink)' : 'var(--muted)'}">${st.count}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:0.75rem;color:var(--muted);margin-top:4px">
+            <span>${esc(st.desc)}</span>
+            ${st.count ? `<span style="font-weight:700">${st.males} ♂ · ${st.females} ♀</span>` : "<span>0 lapin</span>"}
+          </div>
+          <div class="bar" style="margin-top:6px;height:5px">
+            <i style="width:${st.percent}%;background:${isSelected ? 'var(--sage)' : 'var(--clay)'}"></i>
+          </div>
+        </div>
+        `;
+      }).join("")}
+    </div>
+  </section>
+
+  <!-- Puces d'état rapides (Chips bar) -->
+  <div class="chip-bar" role="toolbar" aria-label="Filtres rapides d'élevage">
+    <button type="button" class="chip-btn" data-act="ui" data-k="stage" data-v="all" aria-pressed="${!ui.stage || ui.stage === 'all'}">
+      <span>Tous</span>
+      <span class="badge">${counts.all}</span>
+    </button>
+    <button type="button" class="chip-btn" data-act="ui" data-k="stage" data-v="female" aria-pressed="${ui.stage === 'female'}">
+      <span>♀ Femelles</span>
+      <span class="badge">${counts.female}</span>
+    </button>
+    <button type="button" class="chip-btn" data-act="ui" data-k="stage" data-v="male" aria-pressed="${ui.stage === 'male'}">
+      <span>♂ Mâles</span>
+      <span class="badge">${counts.male}</span>
+    </button>
+    <button type="button" class="chip-btn" data-act="ui" data-k="stage" data-v="gest" aria-pressed="${ui.stage === 'gest'}">
+      <span>🤰 Gestantes</span>
+      <span class="badge">${counts.gest}</span>
+    </button>
+    <button type="button" class="chip-btn" data-act="ui" data-k="stage" data-v="lact" aria-pressed="${ui.stage === 'lact'}">
+      <span>🤱 Allaitantes</span>
+      <span class="badge">${counts.lact}</span>
+    </button>
+    <button type="button" class="chip-btn" data-act="ui" data-k="stage" data-v="mature" aria-pressed="${ui.stage === 'mature'}">
+      <span>🐇 Reproducteurs (≥5m)</span>
+      <span class="badge">${counts.mature}</span>
+    </button>
+    <button type="button" class="chip-btn" data-act="ui" data-k="stage" data-v="young" aria-pressed="${ui.stage === 'young'}">
+      <span>🌱 Jeunes (<5m)</span>
+      <span class="badge">${counts.young}</span>
+    </button>
+    <button type="button" class="chip-btn" data-act="ui" data-k="stage" data-v="treat" aria-pressed="${ui.stage === 'treat'}">
+      <span>💊 Sous soin / Délai</span>
+      <span class="badge">${counts.treat}</span>
+    </button>
+  </div>
+
+  <!-- Barre d'outils et sélecteurs de filtres -->
+  <div class="toolbar" style="gap:10px">
+    <label class="search" style="flex:1 1 220px">
+      ${ICON.search}
+      <input id="q" type="search" placeholder="Rechercher par nom, cage, race…" value="${esc(ui.q)}" aria-label="Rechercher">
+      ${ui.q ? `<button type="button" data-act="ui" data-k="q" data-v="" style="border:none;background:none;cursor:pointer;color:var(--muted);padding:0" title="Effacer">${ICON.x}</button>` : ""}
+    </label>
+
+    <!-- Filtre par Race -->
+    <select id="filterBreed" class="filter-select" aria-label="Filtrer par race">
+      <option value="all" ${!ui.breed || ui.breed === "all" ? "selected" : ""}>Toutes les races (${counts.all})</option>
+      ${allBreeds.map((b) => `<option value="${esc(b)}" ${ui.breed === b ? "selected" : ""}>Race : ${esc(b)}</option>`).join("")}
+    </select>
+
+    <!-- Filtre par Statut (Actifs / Archivés) -->
+    <div class="seg" role="group">
+      <button type="button" data-act="ui" data-k="st" data-v="actifs" aria-pressed="${ui.st === 'actifs'}">Actifs</button>
+      <button type="button" data-act="ui" data-k="st" data-v="archives" aria-pressed="${ui.st === 'archives'}">Sortis (${allArch.length})</button>
+      <button type="button" data-act="ui" data-k="st" data-v="all" aria-pressed="${ui.st === 'all'}">Tous</button>
+    </div>
+
+    <!-- Sélecteur de Tri enrichi (Âge, Poids, Nom, Cage) -->
+    <select id="filterSort" class="filter-select" aria-label="Trier la liste">
+      <option value="age_desc" ${ui.sort === "age_desc" ? "selected" : ""}>Âge : du + âgé au + jeune</option>
+      <option value="age_asc" ${ui.sort === "age_asc" ? "selected" : ""}>Âge : du + jeune au + âgé</option>
+      <option value="weight_desc" ${ui.sort === "weight_desc" ? "selected" : ""}>Poids : du + lourd au + léger</option>
+      <option value="weight_asc" ${ui.sort === "weight_asc" ? "selected" : ""}>Poids : du + léger au + lourd</option>
+      <option value="name_asc" ${ui.sort === "name_asc" ? "selected" : ""}>Nom (A → Z)</option>
+      <option value="name_desc" ${ui.sort === "name_desc" ? "selected" : ""}>Nom (Z → A)</option>
+      <option value="cage_asc" ${ui.sort === "cage_asc" ? "selected" : ""}>Numéro de cage</option>
+    </select>
+
+    <!-- Bascule d'affichage Grille / Tableau -->
+    <div class="view-toggle" role="group" aria-label="Mode d'affichage">
+      <button type="button" data-act="ui" data-k="viewMode" data-v="grid" aria-pressed="${ui.viewMode !== 'table'}" title="Vue Cartes">${ICON.grid}</button>
+      <button type="button" data-act="ui" data-k="viewMode" data-v="table" aria-pressed="${ui.viewMode === 'table'}" title="Vue Tableau compact">${ICON.list}</button>
+    </div>
+
+    ${hasActiveFilters ? `
+      <button class="btn sm ghost" data-act="resetFilters" style="color:var(--bad);gap:4px">
+        ${ICON.refresh}<span>Réinitialiser</span>
+      </button>
+    ` : ""}
+  </div>
+
+  <!-- PANNEAU : Filtrage précis selon Âge donné et Poids donné -->
+  <section class="card" style="padding:14px 16px;background:var(--surface-2);border-color:var(--line)">
+    <div class="row-h" style="margin-bottom:8px">
+      <h3 style="font-size:0.92rem;display:flex;align-items:center;gap:6px">
+        ${ICON.scale}
+        <span>Filtre précis par âge & poids donnés</span>
+      </h3>
+      ${(ui.minAgeM !== "" || ui.maxAgeM !== "" || ui.minWeight !== "" || ui.maxWeight !== "") ? `
+        <button class="btn sm ghost" data-act="resetCustomMetrics" style="color:var(--bad);padding:3px 8px;font-size:0.76rem">
+          Effacer âge/poids
+        </button>
+      ` : `<span class="hint" style="font-size:0.75rem">Saisissez les seuils souhaités</span>`}
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(130px, 1fr));gap:10px">
+      <div class="field">
+        <label style="font-size:0.75rem">Âge minimum (mois)</label>
+        <input type="number" id="inpMinAge" step="0.5" min="0" placeholder="ex. 3" value="${esc(ui.minAgeM || '')}" style="padding:6px 9px;font-size:0.85rem">
+      </div>
+      <div class="field">
+        <label style="font-size:0.75rem">Âge maximum (mois)</label>
+        <input type="number" id="inpMaxAge" step="0.5" min="0" placeholder="ex. 6" value="${esc(ui.maxAgeM || '')}" style="padding:6px 9px;font-size:0.85rem">
+      </div>
+      <div class="field">
+        <label style="font-size:0.75rem">Poids minimum (kg)</label>
+        <input type="number" id="inpMinWeight" step="0.1" min="0" placeholder="ex. 2.2" value="${esc(ui.minWeight || '')}" style="padding:6px 9px;font-size:0.85rem">
+      </div>
+      <div class="field">
+        <label style="font-size:0.75rem">Poids maximum (kg)</label>
+        <input type="number" id="inpMaxWeight" step="0.1" min="0" placeholder="ex. 4.0" value="${esc(ui.maxWeight || '')}" style="padding:6px 9px;font-size:0.85rem">
+      </div>
+    </div>
+  </section>
+
+  <!-- Résumé du filtrage -->
+  <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.82rem;color:var(--muted);padding:0 2px">
+    <span>Affichage de <b>${list.length}</b> lapin${list.length > 1 ? "s" : ""} sur <b>${baseList.length}</b></span>
+    ${hasActiveFilters ? `<span class="chip warn">Filtre actif</span>` : ""}
+  </div>
+
+  <!-- Contenu : Cartes ou Tableau -->
+  ${list.length ? (
+    ui.viewMode === "table" ? `
+      <div class="card" style="padding:0;overflow:hidden">
+        <div class="tablewrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Lapin & Sexe</th>
+                <th>Cage</th>
+                <th>Race</th>
+                <th>Âge</th>
+                <th class="r">Dernier poids</th>
+                <th>Statut & Stade</th>
+                <th class="r">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${list.map(rabbitTableRow).join("")}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    ` : `
+      <div class="grid g3">${list.map(rabbitCard).join("")}</div>
+    `
+  ) : `
+    <div class="card">
+      ${emptyBox("rabbit", S.rabbits.length ? "Aucun lapin ne correspond à ces critères" : "Aucun lapin enregistré pour le moment", S.rabbits.length ? "Essayez de réinitialiser vos critères d'âge, de poids ou de race." : "Enregistrez vos reproducteurs (nom, sexe, date de naissance, race et cage).", hasActiveFilters ? `<button class="btn sm" data-act="resetFilters">${ICON.refresh}Réinitialiser tous les filtres</button>` : `<button class="btn pri" data-act="newrabbit">${ICON.plus}Ajouter un lapin</button>`)}
+    </div>
+  `}`;
 };
+
 function rabbitCard(r) {
   const a = age(r), w = lastWeight(r.id), wd = underWithdrawal(r.id);
   const gest = S.matings.find((m) => m.female === r.id && ["Accouplé", "Gestation confirmée"].includes(m.status));
+  const lact = S.matings.find((m) => m.female === r.id && m.status === "Mise bas" && m.birthDate && diff(m.birthDate, today()) <= 45);
   return `<a class="rcard ${isActive(r) ? sexCls(r) : "off"}" href="#lapin-${r.id}">
     <div class="top"><div style="min-width:0"><div class="nm">${esc(r.name)}</div><div class="hint">${esc(r.breed || "Race non précisée")}</div></div><span class="sx">${sexSym(r)}</span></div>
     <div class="facts"><span>Âge <b>${ageLabel(a)}</b></span><span>Poids <b>${w != null ? nf2.format(w) + " kg" : "—"}</b></span></div>
-    <div class="actions">${r.cage ? `<span class="tag">CAGE ${esc(r.cage)}</span>` : ""}${!isActive(r) ? statusChip(r.status) : ""}${isActive(r) && a >= MATURE_DAYS ? `<span class="chip ok">Reproducteur</span>` : ""}${gest ? `<span class="chip clay">Gestante · J${diff(gest.date, today())}</span>` : ""}${wd ? `<span class="chip bad">Délai d'attente</span>` : ""}</div></a>`;
+    <div class="actions">
+      ${r.cage ? `<span class="tag">CAGE ${esc(r.cage)}</span>` : ""}
+      ${!isActive(r) ? statusChip(r.status) : ""}
+      ${isActive(r) && a >= MATURE_DAYS ? `<span class="chip ok">Reproducteur</span>` : ""}
+      ${gest ? `<span class="chip clay">Gestante · J${diff(gest.date, today())}</span>` : ""}
+      ${lact ? `<span class="chip info">Allaitante</span>` : ""}
+      ${wd ? `<span class="chip bad">Délai d'attente</span>` : ""}
+    </div>
+  </a>`;
+}
+
+function rabbitTableRow(r) {
+  const a = age(r), w = lastWeight(r.id), wd = underWithdrawal(r.id);
+  const gest = S.matings.find((m) => m.female === r.id && ["Accouplé", "Gestation confirmée"].includes(m.status));
+  const lact = S.matings.find((m) => m.female === r.id && m.status === "Mise bas" && m.birthDate && diff(m.birthDate, today()) <= 45);
+  return `<tr>
+    <td>
+      <a href="#lapin-${r.id}" style="font-weight:700;color:inherit;text-decoration:none;display:flex;align-items:center;gap:6px">
+        <span class="sx ${sexCls(r)}" style="font-size:1.15rem">${sexSym(r)}</span>
+        <span>${esc(r.name)}</span>
+      </a>
+    </td>
+    <td>${r.cage ? `<span class="tag">CAGE ${esc(r.cage)}</span>` : '<span class="hint">—</span>'}</td>
+    <td class="hint">${esc(r.breed || "—")}</td>
+    <td class="num">${ageLabel(a)}</td>
+    <td class="r num"><b>${w != null ? nf2.format(w) + " kg" : "—"}</b></td>
+    <td>
+      ${!isActive(r) ? statusChip(r.status) : gest ? `<span class="chip clay">Gestante · J${diff(gest.date, today())}</span>` : lact ? `<span class="chip info">Allaitante</span>` : a >= MATURE_DAYS ? `<span class="chip ok">Reproducteur</span>` : `<span class="chip">Jeune</span>`}
+      ${wd ? `<span class="chip bad">Délai d'attente</span>` : ""}
+    </td>
+    <td class="r">
+      <div class="actions" style="justify-content:flex-end">
+        <button class="btn sm ghost" data-act="newweight" data-id="${r.id}" title="Ajouter une pesée">${ICON.scale}</button>
+        <button class="btn sm ghost" data-act="newtreat" data-id="${r.id}" title="Ajouter un soin">${ICON.syringe}</button>
+        <a class="btn sm" href="#lapin-${r.id}">Fiche</a>
+      </div>
+    </td>
+  </tr>`;
 }
 
 VIEWS.lapin = ({ id }) => {
@@ -1312,6 +1944,48 @@ function exportHerdPDF() {
   }
 }
 
+/* ---------- Unauthorized Domain Modal (Firebase Config Help) ---------- */
+function unauthorizedDomainModal() {
+  const currentHost = window.location.hostname || "abv-farm.netlify.app";
+  const body = `
+  <div style="display:flex;flex-direction:column;gap:14px">
+    <div class="banner warn" style="flex-direction:column;align-items:flex-start;gap:6px">
+      <div style="display:flex;align-items:center;gap:8px;font-weight:700">
+        ${ICON.alert}
+        <span>Action requise sur la console Firebase</span>
+      </div>
+      <p style="font-size:0.86rem;line-height:1.4">Google bloque la connexion car le nom de domaine de votre site web (<b>${esc(currentHost)}</b>) n'a pas encore été autorisé dans la console Firebase.</p>
+    </div>
+
+    <div class="card" style="box-shadow:none;border-color:var(--line);background:var(--surface-2)">
+      <h3 style="margin-bottom:10px">Comment autoriser votre domaine en 1 minute :</h3>
+      <ol style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:10px;font-size:0.88rem;line-height:1.45">
+        <li>
+          Ouvrez la console de votre projet Firebase :<br>
+          <a href="https://console.firebase.google.com/project/gen-lang-client-0349652531/authentication/settings" target="_blank" rel="noopener noreferrer" style="color:var(--sage);font-weight:700;text-decoration:underline;display:inline-block;margin-top:3px;word-break:break-all">
+            console.firebase.google.com/project/gen-lang-client-0349652531/authentication/settings
+          </a>
+        </li>
+        <li>Dans l'onglet <b>Paramètres (Settings)</b>, descendez à la section <b>Domaines autorisés (Authorized domains)</b>.</li>
+        <li>
+          Cliquez sur <b>Ajouter un domaine</b> et collez le domaine suivant :<br>
+          <code style="background:var(--bg);padding:4px 8px;border-radius:6px;font-family:var(--f-mono);font-size:.85rem;display:inline-block;margin-top:3px;font-weight:700;border:1px solid var(--line)">${esc(currentHost)}</code>
+        </li>
+        <li>Cliquez sur <b>Enregistrer</b>. Vous pourrez vous connecter avec Google immédiatement !</li>
+      </ol>
+    </div>
+
+    <p class="hint" style="line-height:1.4">💡 <i>En attendant, vos données sont <b>100% enregistrées en local</b> sur votre appareil et vous pouvez gérer votre élevage sans interruption !</i></p>
+
+    <div class="actions" style="justify-content:flex-end">
+      <button class="btn ghost" data-act="close">Compris</button>
+      <a class="btn pri" href="https://console.firebase.google.com/project/gen-lang-client-0349652531/authentication/settings" target="_blank" rel="noopener noreferrer">${ICON.cloud}Ouvrir Firebase Console</a>
+    </div>
+  </div>`;
+
+  sheet("Autorisation du domaine dans Firebase", body);
+}
+
 /* ---------- Account Modal (Google Auth & Cloud Settings) ---------- */
 function accountModal() {
   const isLogged = userSession.isLoggedIn;
@@ -1346,6 +2020,9 @@ function accountModal() {
       <button type="button" class="btn" id="btnGoogleSignIn" style="background:#FFFFFF;color:#3c4043;border:1.5px solid #dadce0;font-weight:600;display:flex;align-items:center;justify-content:center;gap:10px;padding:11px 16px;width:100%;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.08);cursor:pointer">
         <svg width="20" height="20" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.616z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/><path fill="#FBBC05" d="M3.964 10.707c-.18-.54-.282-1.117-.282-1.707s.102-1.167.282-1.707V4.961H.957C.347 6.175 0 7.55 0 9s.348 2.825.957 4.039l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.961L3.964 7.293C4.672 5.166 6.656 3.58 9 3.58z"/></svg>
         <span style="font-size:0.95rem">Continuer avec Google</span>
+      </button>
+      <button type="button" class="btn ghost sm" data-act="unauthorizedDomainModal" style="font-size:0.78rem;color:var(--muted);margin-top:-4px">
+        ${ICON.alert} Un problème avec l'autorisation de domaine ? Voir l'aide
       </button>
     </div>
     ` : `
@@ -1437,6 +2114,118 @@ function accountModal() {
       closeModal();
     });
   }
+}
+
+function alertsCenterModal() {
+  const al = alerts();
+  const prefs = getNotifPrefs();
+  const notifSupport = "Notification" in window;
+  const perm = notifSupport ? Notification.permission : "unsupported";
+
+  let statusBadge = "";
+  if (perm === "granted") {
+    statusBadge = `<span class="chip ok">Notifications actives</span>`;
+  } else if (perm === "denied") {
+    statusBadge = `<span class="chip bad">Bloquées par le navigateur</span>`;
+  } else {
+    statusBadge = `<span class="chip warn">En attente d'autorisation</span>`;
+  }
+
+  const body = `
+  <div style="display:flex;flex-direction:column;gap:14px">
+    <!-- Notification System Status Card -->
+    <div class="card" style="box-shadow:none;border-color:var(--line);background:var(--surface-2)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:6px">
+        <h3 style="display:flex;align-items:center;gap:6px">${ICON.bell}Statut des alertes</h3>
+        ${statusBadge}
+      </div>
+      <p class="hint" style="margin-bottom:12px">Fonctionne <b>100% hors-ligne</b> : même sans connexion Internet ni réseau, vos alertes d'élevage (mises bas, palpations, boîtes à nids, sevrages, stocks) sont calculées et déclenchées directement sur votre appareil.</p>
+      
+      <div class="actions" style="flex-wrap:wrap;gap:8px">
+        ${perm !== "granted" ? `<button class="btn sm pri" id="btnReqNotif">${ICON.bell}Activer les alertes sur cet appareil</button>` : ""}
+        <button class="btn sm" id="btnTestNotif">${ICON.alert}Tester une alerte sonore</button>
+      </div>
+    </div>
+
+    <!-- Preferences Toggles -->
+    <div class="card" style="box-shadow:none;border-color:var(--line)">
+      <h3 style="margin-bottom:10px">Préférences d'alerte</h3>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <label class="check">
+          <input type="checkbox" id="prefSound" ${prefs.sound ? "checked" : ""}>
+          <span>Signal sonore (carillon discret de rappel)</span>
+        </label>
+        <label class="check">
+          <input type="checkbox" id="prefVibrate" ${prefs.vibrate ? "checked" : ""}>
+          <span>Vibration sur smartphone</span>
+        </label>
+        <label class="check">
+          <input type="checkbox" id="prefAuto" ${prefs.autoNotify ? "checked" : ""}>
+          <span>Vérification automatique en arrière-plan</span>
+        </label>
+      </div>
+    </div>
+
+    <!-- Active Alerts List -->
+    <div class="card" style="box-shadow:none;border-color:var(--line)">
+      <div class="row-h">
+        <h3>Tâches & Alertes du jour</h3>
+        <span class="chip ${al.some((a) => a.sev === "bad") ? "bad" : al.length ? "warn" : "ok"}">${al.length} active${al.length > 1 ? "s" : ""}</span>
+      </div>
+      ${al.length ? `
+        <div class="list" style="margin-top:6px">
+          ${al.map((a) => `
+            <div class="li">
+              ${sevIco(a)}
+              <div class="grow">
+                <div class="t">${esc(a.title)}</div>
+                <div class="d">${esc(a.sub)}</div>
+                ${a.act ? `<div class="actions" style="margin-top:6px">${a.act.map(([l, act, id, v]) => `<button class="btn sm" data-act="${act}" ${id ? `data-id="${id}"` : ""} ${v ? `data-v="${esc(v)}"` : ""}>${esc(l)}</button>`).join("")}</div>` : ""}
+              </div>
+            </div>
+          `).join("")}
+        </div>
+      ` : emptyBox("check", "Tout est à jour", "Aucune tâche urgente ni retard détecté dans l'élevage.")}
+    </div>
+  </div>`;
+
+  sheet("Centre de Notifications & Alertes Cheptel", body);
+
+  const btnReq = $("#btnReqNotif");
+  if (btnReq) {
+    btnReq.addEventListener("click", async () => {
+      const ok = await requestNotificationPermission();
+      if (ok) {
+        closeModal();
+        alertsCenterModal();
+      }
+    });
+  }
+
+  const btnTest = $("#btnTestNotif");
+  if (btnTest) {
+    btnTest.addEventListener("click", () => {
+      sendOfflineNotification("ABV Farm • Test d'alerte hors-ligne", {
+        body: "Le carillon et le système d'alerte fonctionnent parfaitement même sans Internet !",
+        tag: "abv-test-" + Date.now()
+      });
+      toast("Alerte sonore et notification envoyées !");
+    });
+  }
+
+  const pSound = $("#prefSound");
+  const pVib = $("#prefVibrate");
+  const pAuto = $("#prefAuto");
+  const onPrefChange = () => {
+    saveNotifPrefs({
+      sound: pSound ? pSound.checked : true,
+      vibrate: pVib ? pVib.checked : true,
+      autoNotify: pAuto ? pAuto.checked : true
+    });
+  };
+  if (pSound) pSound.addEventListener("change", onPrefChange);
+  if (pVib) pVib.addEventListener("change", onPrefChange);
+  if (pAuto) pAuto.addEventListener("change", onPrefChange);
 }
 
 /* ---------- Modals & Forms ---------- */
@@ -1600,9 +2389,13 @@ async function bulk(docs, label) {
 const A = {
   close: closeModal,
   overlay: (el, e) => { if (e.target === el) closeModal(); },
-  more: () => sheet("Navigation", `<div class="morelist">${NAV.filter((n) => !BOTTOM.includes(n.id)).map((n) => `<a class="nav-a" href="#${n.id}" data-act="close">${ICON[n.icon]}<span>${n.label}</span></a>`).join("")}<button class="btn ghost" data-act="accountModal" style="justify-content:flex-start;padding:10px 12px;font-size:1rem;color:var(--ink)">${ICON.cloud}<span>Compte Google & Synchronisation</span></button></div>`),
+  more: () => sheet("Navigation", `<div class="morelist">${NAV.filter((n) => !BOTTOM.includes(n.id)).map((n) => `<a class="nav-a" href="#${n.id}" data-act="close">${ICON[n.icon]}<span>${n.label}</span></a>`).join("")}<button class="btn ghost" data-act="alertsCenterModal" style="justify-content:flex-start;padding:10px 12px;font-size:1rem;color:var(--ink)">${ICON.bell}<span>Centre d'alertes & notifications</span></button><button class="btn ghost" data-act="accountModal" style="justify-content:flex-start;padding:10px 12px;font-size:1rem;color:var(--ink)">${ICON.cloud}<span>Compte Google & Synchronisation</span></button></div>`),
   ui: (el) => { ui[el.dataset.k] = el.dataset.v; render(); },
   accountModal: () => accountModal(),
+  alertsCenterModal: () => alertsCenterModal(),
+  unauthorizedDomainModal: () => unauthorizedDomainModal(),
+  resetFilters: () => { ui.q = ""; ui.sex = "all"; ui.stage = "all"; ui.breed = "all"; ui.st = "actifs"; ui.ageBracket = "all"; ui.minAgeM = ""; ui.maxAgeM = ""; ui.minWeight = ""; ui.maxWeight = ""; render(); },
+  resetCustomMetrics: () => { ui.minAgeM = ""; ui.maxAgeM = ""; ui.minWeight = ""; ui.maxWeight = ""; render(); },
   newrabbit: () => rabbitForm(), editrabbit: (el) => rabbitForm(rab(el.dataset.id)),
   status: (el) => { const r = rab(el.dataset.id); form({ title: `Statut de ${r.name}`, values: r, fields: [{ k: "status", label: "Statut", type: "select", opts: STATUSES, full: true, hint: "Un animal vendu, abattu ou décédé passe dans la rubrique « Sortis »." }], onSubmit: async (v) => save("rabbit", { ...r, status: v.status }) }); },
   delrabbit: (el) => { const r = rab(el.dataset.id); confirmBox(`Supprimer définitivement la fiche de ${r.name} ainsi que ses pesées et soins ? Pour un animal vendu ou décédé, modifiez plutôt son statut.`, "Supprimer", async () => {
@@ -1672,6 +2465,9 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape" && $("#moda
 const initialDocs = Object.values(getLocalData());
 ingest(initialDocs);
 updateUserUI();
+updateAlertBadges();
+checkAndNotifyUrgentAlerts(false);
+setInterval(() => checkAndNotifyUrgentAlerts(false), 15 * 60 * 1000);
 initFirebaseSync();
 </script>
 

@@ -1,4 +1,4 @@
-const CACHE_NAME = "abv-farm-pwa-v2";
+const CACHE_NAME = "abv-farm-pwa-v4";
 const ASSETS_TO_CACHE = [
   "./",
   "./index.html",
@@ -44,7 +44,6 @@ self.addEventListener("fetch", (event) => {
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
       if (cachedResponse) {
-        // Fetch in background to update cache
         fetch(event.request).then((networkResponse) => {
           if (networkResponse && networkResponse.status === 200) {
             caches.open(CACHE_NAME).then((cache) => cache.put(event.request, networkResponse));
@@ -60,7 +59,6 @@ self.addEventListener("fetch", (event) => {
         caches.open(CACHE_NAME).then((cache) => cache.put(event.request, responseToCache));
         return networkResponse;
       }).catch(() => {
-        // Fallback for navigation requests
         if (event.request.mode === "navigate") {
           return caches.match("./index.html");
         }
@@ -68,3 +66,43 @@ self.addEventListener("fetch", (event) => {
     })
   );
 });
+
+// ---------- Notifications hors-ligne & background ----------
+self.addEventListener("message", (event) => {
+  if (event.data && event.data.type === "SHOW_NOTIFICATION") {
+    const { title, options } = event.data;
+    const notificationOptions = {
+      body: options?.body || "",
+      icon: options?.icon || "./icon-192.png",
+      badge: options?.badge || "./icon-192.png",
+      tag: options?.tag || "abv-farm-alert",
+      renotify: true,
+      vibrate: [200, 100, 200],
+      data: { url: options?.url || "./#rappels" }
+    };
+    event.waitUntil(
+      self.registration.showNotification(title, notificationOptions)
+    );
+  }
+});
+
+// Notification click: ouvre ou amène au premier plan l'application ABV Farm
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const targetUrl = event.notification.data?.url || "./#rappels";
+
+  event.waitUntil(
+    clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if ("focus" in client) {
+          client.navigate(targetUrl);
+          return client.focus();
+        }
+      }
+      if (clients.openWindow) {
+        return clients.openWindow(targetUrl);
+      }
+    })
+  );
+});
+

@@ -357,10 +357,6 @@ div[data-layer*="netlify"] {
         <span id="sideAlertBadge" class="chip sm warn" style="display:none">0</span>
       </div>
 
-      <button class="btn sm" id="btnInstallPWA" onclick="installPWA()" style="display:none;background:var(--sage-soft);color:var(--sage-soft-ink);border:none;margin-bottom:4px;width:100%;font-size:.8rem">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
-        <span>Installer sur téléphone</span>
-      </button>
       <div class="user-card" id="userCard" data-act="accountModal" title="Gérer votre compte et la synchronisation">
         <div class="user-avatar" id="userAvatar">A</div>
         <div class="user-meta">
@@ -384,9 +380,6 @@ div[data-layer*="netlify"] {
       <button class="btn sm" data-act="alertsCenterModal" title="Alertes & Notifications" style="padding:6px 9px;position:relative">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
         <span id="headerAlertBadge" class="badge-dot" style="display:none">0</span>
-      </button>
-      <button class="btn sm" id="btnInstallMobile" onclick="installPWA()" style="display:none;padding:6px 9px;background:var(--sage-soft);color:var(--sage-soft-ink);border:none" title="Installer l'application sur votre téléphone">
-        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
       </button>
       <button class="btn sm" data-act="accountModal" title="Compte Google & Cloud" style="padding:6px 9px">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
@@ -424,18 +417,10 @@ let deferredPrompt = null;
 window.addEventListener("beforeinstallprompt", (e) => {
   e.preventDefault();
   deferredPrompt = e;
-  const btn1 = $("#btnInstallPWA");
-  const btn2 = $("#btnInstallMobile");
-  if (btn1) btn1.style.display = "inline-flex";
-  if (btn2) btn2.style.display = "inline-flex";
 });
 
 window.addEventListener("appinstalled", () => {
   deferredPrompt = null;
-  const btn1 = $("#btnInstallPWA");
-  const btn2 = $("#btnInstallMobile");
-  if (btn1) btn1.style.display = "none";
-  if (btn2) btn2.style.display = "none";
   toast("Application ABV Farm installée avec succès sur votre téléphone !");
 });
 
@@ -564,7 +549,7 @@ function loadUserSession() {
   }
 }
 
-function saveUserSession(session) {
+function saveUserSession(session = {}) {
   userSession = { ...userSession, ...session };
   try { localStorage.setItem(LS_USER_KEY, JSON.stringify(userSession)); } catch (e) {}
   updateUserUI();
@@ -652,6 +637,10 @@ async function removeDoc(kind, id) {
 
 /* ---------- Firebase Google Auth & Cloud Setup ---------- */
 function initFirebaseSync() {
+  if (typeof firebase === "undefined" || !firebase.apps) {
+    console.warn("SDK Firebase non disponible.");
+    return;
+  }
   try {
     const firebaseConfig = {
       apiKey: "AIzaSyCS-dwArbSOKZJM3F5DiY84R0FGdxmzcCk",
@@ -679,24 +668,24 @@ function initFirebaseSync() {
       console.log("Firestore offline persistence notice:", err.code);
     });
 
-    // Check redirect auth result (for mobile browsers)
+    // Check redirect auth result (for mobile browsers or redirect logins)
     window.firebaseAuth.getRedirectResult().then((result) => {
       if (result && result.user) {
         handleUserAuthenticated(result.user, "Connexion Google réussie !");
       }
     }).catch((err) => {
       console.warn("Redirect auth notice:", err);
-      if (err.code === "auth/unauthorized-domain") {
-        unauthorizedDomainModal();
-      } else if (err.message && err.code !== "auth/popup-closed-by-user") {
-        toast("Notice Google : " + err.message);
-      }
+      handleAuthError(err);
     });
 
     // Listen to Auth State
     window.firebaseAuth.onAuthStateChanged((user) => {
       if (user) {
-        handleUserAuthenticated(user);
+        if (!userSession.isLoggedIn || userSession.uid !== user.uid) {
+          handleUserAuthenticated(user);
+        } else {
+          ensureCloudSyncListener(user.uid);
+        }
       } else {
         if (unsubscribeSnapshot) {
           try { unsubscribeSnapshot(); } catch (e) {}
@@ -713,48 +702,116 @@ function initFirebaseSync() {
 
 let unsubscribeSnapshot = null;
 
+function ensureCloudSyncListener(uid) {
+  if (unsubscribeSnapshot || !window.firebaseDb || !uid) return;
+  try {
+    unsubscribeSnapshot = window.firebaseDb.collection("users").doc(uid).collection("cheptel").onSnapshot((snap) => {
+      cloudSyncActive = true;
+      const cloudDocs = snap.docs.map((d) => d.data());
+      const all = getLocalData();
+      let updated = false;
+      cloudDocs.forEach((d) => {
+        if (d && d.kind && d.id) {
+          all[d.kind + "-" + d.id] = d;
+          updated = true;
+        }
+      });
+      if (updated || Object.keys(all).length > 0) {
+        setLocalData(all);
+        ingest(Object.values(all));
+      }
+      userSession.lastSync = new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+      updateUserUI();
+    }, (err) => {
+      console.warn("Cloud snapshot notice:", err);
+    });
+  } catch (e) {
+    console.warn("Cloud listener error:", e);
+  }
+}
+
 function handleUserAuthenticated(user, msg) {
   if (unsubscribeSnapshot) {
     try { unsubscribeSnapshot(); } catch (e) {}
     unsubscribeSnapshot = null;
   }
 
-  // Basculer l'identité sur l'UID connecté
+  // 1. Récupérer les données existantes avant de basculer
+  const guestKey = "abvfarm_data_guest";
+  let guestData = {};
+  try {
+    guestData = JSON.parse(localStorage.getItem(guestKey) || "{}");
+    if (!Object.keys(guestData).length) {
+      guestData = JSON.parse(localStorage.getItem(LS_DATA_KEY) || "{}");
+    }
+  } catch (e) {}
+
+  // Préserver les données en mémoire vive si présentes
+  if (S && Object.keys(guestData).length === 0) {
+    const memDocs = [
+      ...S.rabbits.map(x => ({ ...x, kind: 'rabbit' })),
+      ...S.matings.map(x => ({ ...x, kind: 'mating' })),
+      ...S.treatments.map(x => ({ ...x, kind: 'treatment' })),
+      ...S.weights.map(x => ({ ...x, kind: 'weight' })),
+      ...S.feed.map(x => ({ ...x, kind: 'feed' })),
+      ...S.inventory.map(x => ({ ...x, kind: 'inventory' })),
+      ...S.reminders.map(x => ({ ...x, kind: 'reminder' })),
+      ...S.batches.map(x => ({ ...x, kind: 'batch' })),
+      ...S.tx.map(x => ({ ...x, kind: 'tx' }))
+    ];
+    memDocs.forEach(d => { if (d.id) guestData[d.kind + '-' + d.id] = d; });
+  }
+
+  // 2. Basculer l'identité sur l'UID connecté
   userSession.isLoggedIn = true;
   userSession.isLocalProfile = false;
   userSession.uid = user.uid;
   userSession.email = user.email || userSession.email;
-  userSession.managerName = user.displayName || userSession.managerName || user.email?.split("@")[0];
+  userSession.managerName = user.displayName || userSession.managerName || (user.email ? user.email.split("@")[0] : "Éleveur");
   userSession.photoUrl = user.photoURL || null;
   saveUserSession(userSession);
   if (msg) toast(msg);
 
-  // Vider complètement la mémoire de la session précédente
-  ready = false;
-  S = blank();
+  // 3. Charger les données locales de l'utilisateur ou migrer les données existantes
+  let userLocalData = getLocalData();
+  if (Object.keys(userLocalData).length === 0 && Object.keys(guestData).length > 0) {
+    userLocalData = { ...guestData };
+    setLocalData(userLocalData);
+  } else if (Object.keys(guestData).length > 0) {
+    userLocalData = { ...guestData, ...userLocalData };
+    setLocalData(userLocalData);
+  }
 
-  // Basculer immédiatement et uniquement sur les données locales isolées de l'UID connecté
-  const userLocalData = getLocalData();
+  // Afficher immédiatement les données dans l'application
   ingest(Object.values(userLocalData));
+  updateUserUI();
 
-  // Charger et écouter son cheptel Cloud dédié (/users/{uid}/cheptel/)
+  // 4. Synchroniser avec Cloud Firestore
   if (window.firebaseDb && user.uid) {
-    unsubscribeSnapshot = window.firebaseDb.collection("users").doc(user.uid).collection("cheptel").onSnapshot((snap) => {
-      cloudSyncActive = true;
-      const cloudDocs = snap.docs.map((d) => d.data());
-      const all = getLocalData();
-      cloudDocs.forEach((d) => {
+    // Créer ou mettre à jour le profil utilisateur
+    window.firebaseDb.collection("users").doc(user.uid).set({
+      userId: user.uid,
+      email: user.email || "",
+      displayName: userSession.managerName || "",
+      farmName: userSession.farmName || "ABV Farm",
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge: true }).catch((err) => console.warn("UserProfile sync notice:", err));
+
+    // Sauvegarder les fiches existantes dans le cloud Firestore
+    const docsToPush = Object.values(userLocalData);
+    if (docsToPush.length > 0) {
+      docsToPush.forEach((d) => {
         if (d && d.kind && d.id) {
-          all[d.kind + "-" + d.id] = d;
+          window.firebaseDb.collection("users").doc(user.uid).collection("cheptel").doc(d.kind + "-" + d.id).set({
+            ...d,
+            updatedAt: new Date().toISOString()
+          }, { merge: true }).catch((err) => console.warn("Push doc notice:", err));
         }
       });
-      setLocalData(all);
-      ingest(Object.values(all));
-      userSession.lastSync = new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
-      updateUserUI();
-    }, (err) => {
-      console.warn("Snapshot notice:", err);
-    });
+    }
+
+    // Écouter les mises à jour cloud en temps réel
+    ensureCloudSyncListener(user.uid);
   }
 }
 
@@ -811,40 +868,94 @@ function updateUserUI() {
 }
 
 /* ---------- Google Authentication Handler ---------- */
-function signInWithGoogle() {
-  if (!window.firebaseAuth) {
-    toast("Service d'authentification indisponible. Réessayez.");
-    return;
-  }
-
+function getGoogleProvider() {
   const provider = new firebase.auth.GoogleAuthProvider();
   provider.addScope("profile");
   provider.addScope("email");
-  
-  toast("Connexion avec Google en cours…");
+  provider.setCustomParameters({
+    prompt: "select_account"
+  });
+  return provider;
+}
 
+function handleAuthError(err) {
+  if (!err) return;
+  console.error("Auth notice/error:", err);
+
+  const diag = $("#authDiagnosticBox");
+  let msg = "Impossible de se connecter avec Google.";
+  let detail = err.message || err.code || "";
+
+  if (err.code === "auth/popup-closed-by-user" || err.code === "auth/cancelled-popup-request") {
+    toast("Connexion Google annulée.");
+    return;
+  }
+
+  if (err.code === "auth/popup-blocked") {
+    msg = "La fenêtre pop-up Google a été bloquée par votre navigateur.";
+    if (diag) {
+      diag.style.display = "block";
+      diag.innerHTML = `<b>Pop-up bloquée :</b> Votre navigateur ou smartphone a bloqué la fenêtre pop-up Google.<br><button type="button" class="btn pri sm" style="margin-top:8px" onclick="signInWithGoogle('redirect')">Continuer par redirection sécurisée</button>`;
+    }
+    toast(msg);
+    return;
+  }
+
+  if (err.code === "auth/unauthorized-domain") {
+    const currentHost = window.location.hostname || "domaine actuel";
+    msg = `Domaine Firebase à vérifier : ${currentHost}`;
+    if (diag) {
+      diag.style.display = "block";
+      diag.innerHTML = `<b>Domaine :</b> Si votre domaine est déjà renseigné dans Firebase, vérifiez qu'il correspond exactement à <code>${esc(currentHost)}</code> (sans https:// ni / à la fin).<br><span style="font-size:0.8rem;color:var(--muted)">Vos données d'élevage sont conservées et 100% sécurisées sur cet appareil.</span>`;
+    }
+    unauthorizedDomainModal();
+    return;
+  }
+
+  if (err.code === "auth/operation-not-allowed") {
+    msg = "Le fournisseur Google n'est pas activé dans la console Firebase (Authentication > Sign-in method > Google > Activer).";
+  } else if (err.code === "auth/network-request-failed") {
+    msg = "Erreur de réseau : vérifiez votre connexion Internet.";
+  } else if (detail) {
+    msg = "Notice Google : " + detail;
+  }
+
+  if (diag) {
+    diag.style.display = "block";
+    diag.textContent = msg;
+  }
+  toast(msg);
+}
+
+function signInWithGoogle(mode = "popup") {
+  if (!window.firebaseAuth) {
+    if (typeof firebase !== "undefined" && firebase.auth) {
+      initFirebaseSync();
+    }
+  }
+  if (!window.firebaseAuth) {
+    toast("Service Firebase en cours de chargement... Réessayez dans un instant.");
+    return;
+  }
+
+  const provider = getGoogleProvider();
+
+  if (mode === "redirect") {
+    toast("Redirection vers Google en cours…");
+    window.firebaseAuth.signInWithRedirect(provider).catch((err) => {
+      handleAuthError(err);
+    });
+    return;
+  }
+
+  toast("Connexion avec Google en cours…");
   window.firebaseAuth.signInWithPopup(provider).then((result) => {
     if (result && result.user) {
       handleUserAuthenticated(result.user, `Connecté avec Google : ${result.user.displayName || result.user.email}`);
       closeModal();
     }
   }).catch((err) => {
-    console.warn("Popup notice, handling auth error:", err);
-    if (err.code === "auth/unauthorized-domain") {
-      unauthorizedDomainModal();
-      return;
-    }
-    if (err.code === "auth/popup-blocked" || err.code === "auth/cancelled-popup-request" || err.code === "auth/popup-closed-by-user") {
-      window.firebaseAuth.signInWithRedirect(provider).catch((redirectErr) => {
-        if (redirectErr.code === "auth/unauthorized-domain") {
-          unauthorizedDomainModal();
-        } else {
-          toast("Erreur Google : " + (redirectErr.message || redirectErr.code));
-        }
-      });
-    } else {
-      toast("Erreur Google : " + (err.message || "Impossible de se connecter"));
-    }
+    handleAuthError(err);
   });
 }
 
@@ -2033,24 +2144,24 @@ function unauthorizedDomainModal() {
     </div>
 
     <div class="card" style="box-shadow:none;border-color:var(--line);background:var(--surface-2)">
-      <h3 style="margin-bottom:10px">Comment autoriser votre domaine en 1 minute :</h3>
+      <h3 style="margin-bottom:10px">Vérification du domaine autorisé dans Firebase :</h3>
       <ol style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:10px;font-size:0.88rem;line-height:1.45">
         <li>
-          Ouvrez la console de votre projet Firebase :<br>
+          Ouvrez la console Firebase :<br>
           <a href="https://console.firebase.google.com/project/gen-lang-client-0349652531/authentication/settings" target="_blank" rel="noopener noreferrer" style="color:var(--sage);font-weight:700;text-decoration:underline;display:inline-block;margin-top:3px;word-break:break-all">
             console.firebase.google.com/project/gen-lang-client-0349652531/authentication/settings
           </a>
         </li>
-        <li>Dans l'onglet <b>Paramètres (Settings)</b>, descendez à la section <b>Domaines autorisés (Authorized domains)</b>.</li>
+        <li>Dans l'onglet <b>Paramètres (Settings)</b>, vérifiez la liste <b>Domaines autorisés (Authorized domains)</b>.</li>
         <li>
-          Cliquez sur <b>Ajouter un domaine</b> et collez le domaine suivant :<br>
+          Assurez-vous que le nom d'hôte exact ci-dessous y figure (<b>sans https:// ni / à la fin</b>) :<br>
           <code style="background:var(--bg);padding:4px 8px;border-radius:6px;font-family:var(--f-mono);font-size:.85rem;display:inline-block;margin-top:3px;font-weight:700;border:1px solid var(--line)">${esc(currentHost)}</code>
         </li>
-        <li>Cliquez sur <b>Enregistrer</b>. Vous pourrez vous connecter avec Google immédiatement !</li>
+        <li>Cliquez sur <b>Enregistrer</b>. En cas de délai de propagation, vous pouvez continuer à gérer votre élevage : vos données sont 100% enregistrées en local.</li>
       </ol>
     </div>
 
-    <p class="hint" style="line-height:1.4">💡 <i>En attendant, vos données sont <b>100% enregistrées en local</b> sur votre appareil et vous pouvez gérer votre élevage sans interruption !</i></p>
+    <p class="hint" style="line-height:1.4">💡 <i>Vos données d'élevage sont <b>sauvegardées en local sur cet appareil</b> et seront synchronisées dans le Cloud dès que la session Google est active.</i></p>
 
     <div class="actions" style="justify-content:flex-end">
       <button class="btn ghost" data-act="close">Compris</button>
@@ -2090,15 +2201,18 @@ function accountModal() {
     <!-- Google Sign-In Card -->
     <div class="card" style="box-shadow:none;border-color:var(--line);display:flex;flex-direction:column;gap:12px">
       <h3>Connexion via Compte Google</h3>
-      <p class="hint">Connectez-vous en un clic avec votre compte Google pour sauvegarder automatiquement tout votre élevage dans le Cloud Firebase. Vos données restent accessibles depuis votre téléphone ou votre ordinateur, même hors-ligne.</p>
+      <p class="hint">Connectez-vous avec votre compte Google pour sauvegarder automatiquement tout votre cheptel dans le Cloud Firebase. Vos données restent accessibles sur tous vos appareils, même hors-ligne.</p>
       
       <button type="button" class="btn" id="btnGoogleSignIn" style="background:#FFFFFF;color:#3c4043;border:1.5px solid #dadce0;font-weight:600;display:flex;align-items:center;justify-content:center;gap:10px;padding:11px 16px;width:100%;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.08);cursor:pointer">
         <svg width="20" height="20" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.616z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/><path fill="#FBBC05" d="M3.964 10.707c-.18-.54-.282-1.117-.282-1.707s.102-1.167.282-1.707V4.961H.957C.347 6.175 0 7.55 0 9s.348 2.825.957 4.039l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.961L3.964 7.293C4.672 5.166 6.656 3.58 9 3.58z"/></svg>
         <span style="font-size:0.95rem">Continuer avec Google</span>
       </button>
-      <button type="button" class="btn ghost sm" data-act="unauthorizedDomainModal" style="font-size:0.78rem;color:var(--muted)">
-        ${ICON.alert} Information sur le domaine Firebase
+
+      <button type="button" class="btn ghost sm" id="btnGoogleSignInRedirect" style="font-size:0.8rem;color:var(--muted);text-decoration:underline;cursor:pointer">
+        Se connecter par redirection (si pop-up bloquée)
       </button>
+
+      <div id="authDiagnosticBox" style="display:none;background:var(--warn-soft);color:var(--warn);padding:10px 12px;border-radius:10px;font-size:0.84rem;line-height:1.4"></div>
     </div>
     ` : `
     <!-- Logged in controls -->
@@ -2145,7 +2259,14 @@ function accountModal() {
   const btnGoogle = $("#btnGoogleSignIn");
   if (btnGoogle) {
     btnGoogle.addEventListener("click", () => {
-      signInWithGoogle();
+      signInWithGoogle('popup');
+    });
+  }
+
+  const btnGoogleRedirect = $("#btnGoogleSignInRedirect");
+  if (btnGoogleRedirect) {
+    btnGoogleRedirect.addEventListener("click", () => {
+      signInWithGoogle('redirect');
     });
   }
 

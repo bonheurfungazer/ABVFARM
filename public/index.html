@@ -3236,11 +3236,55 @@ function confirmBox(text, label, onYes) {
 let toastT; function toast(m) { const t = $("#toast"); t.textContent = m; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => (t.hidden = true), 3200); }
 const rabOpts = (filter, none = "— Aucun —") => [["", none], ...S.rabbits.filter(filter).sort((a, b) => a.name.localeCompare(b.name, "fr")).map((r) => [r.id, `${r.name}${r.cage ? " · " + r.cage : ""}${isActive(r) ? "" : " (" + r.status + ")"}`])];
 
+const RABBIT_NAMES_FEMALE = [
+  "Adrienne", "Bella", "Cannelle", "Dahlia", "Esmée", "Flora", "Gazelle", "Hermione",
+  "Iris", "Joy", "Kira", "Louna", "Maya", "Nala", "Olympe", "Perle", "Rosalie",
+  "Sadie", "Tatiana", "Uptown", "Violette", "Wendy", "Xena", "Yasmine", "Zélie",
+  "Blanche", "Chloé", "Dixie", "Étoile", "Fifi", "Gisèle", "Lola", "Mimi", "Pépette"
+];
+const RABBIT_NAMES_MALE = [
+  "Arthur", "Brondon", "César", "Darius", "Éclair", "Flocon", "Gaston", "Hector",
+  "Igor", "Jules", "Kaiser", "Léo", "Nespoli", "Oscar", "Pablo", "Ramsès",
+  "Samy", "Théo", "Ulysse", "Vulkan", "Winston", "Xavier", "Yoda", "Zeus",
+  "Buster", "Caramel", "Félix", "Milo", "Nemo", "Pacha", "Rocky", "Simba", "Titan"
+];
+const RABBIT_NAMES_INDET = [
+  "Pompon", "Cacahuète", "Noisette", "Bambou", "Boubou", "Peluche", "Chou",
+  "Toby", "Titus", "Timon", "Tango", "Simba", "Sacha", "Sirius", "Twist", "Cookie"
+];
+
+function generateAutoRabbitName(sex = "Female") {
+  const yr = String(new Date().getFullYear()).slice(-2);
+  const nextNum = (S.rabbits || []).length + 1;
+  const numFormatted = String(nextNum).padStart(3, "0");
+  const code = `ABV-${yr}-${numFormatted}`;
+
+  const list = sex === "Female" ? RABBIT_NAMES_FEMALE : (sex === "Male" ? RABBIT_NAMES_MALE : RABBIT_NAMES_INDET);
+  const usedNames = new Set((S.rabbits || []).map(r => (r.name || "").split(" ")[0]));
+  const available = list.filter(n => !usedNames.has(n));
+  const pool = available.length > 0 ? available : list;
+
+  const baseName = pool[Math.floor(Math.random() * pool.length)];
+  return `${baseName} (${code})`;
+}
+
 function rabbitForm(r) {
-  const editing = !!r; r = r || {};
-  form({ title: editing ? `Modifier ${r.name}` : "Nouveau reproducteur", values: r, submit: editing ? "Enregistrer" : "Ajouter",
+  const editing = !!r;
+  r = r || {};
+  const initialValues = editing ? r : {
+    name: generateAutoRabbitName("Female"),
+    sex: "Female",
+    birth: today(),
+    ...r
+  };
+
+  form({
+    title: editing ? `Modifier ${r.name}` : "Nouveau reproducteur",
+    values: initialValues,
+    submit: editing ? "Enregistrer" : "Ajouter",
     fields: [
       { k: "name", label: "Nom ou numéro d'identification", req: true, ph: "ex. Éclair, F-04, B-12" },
+      { k: "autoname_hint", type: "html", full: true },
       { k: "sex", label: "Sexe", type: "select", opts: [["Female", "♀ Femelle"], ["Male", "♂ Mâle"], ["Indéterminé", "Indéterminé"]], def: "Female" },
       { k: "birth", label: "Date de naissance", type: "date", req: true, def: today() },
       { k: "breed", label: "Race / Souche", ph: "ex. Néo-Zélandais, Californien, Papillon" },
@@ -3250,7 +3294,25 @@ function rabbitForm(r) {
       { k: "mother", label: "Mère", type: "select", opts: rabOpts((x) => x.sex === "Female" && x.id !== r.id) },
       { k: "notes", label: "Notes & antécédents", type: "textarea", full: true },
     ],
+    onInput: (v, fm) => {
+      const hintWrap = $("#f_autoname_hint");
+      if (hintWrap && !editing) {
+        if (!hintWrap.dataset.inited) {
+          hintWrap.dataset.inited = "true";
+          hintWrap.innerHTML = `<button type="button" class="btn sm ghost" id="btnGenNewName" style="margin-top:-6px;margin-bottom:8px;font-size:0.8rem;gap:4px">🎲 Proposer un autre nom automatique</button>`;
+          const btn = $("#btnGenNewName");
+          if (btn) {
+            btn.addEventListener("click", () => {
+              const currentSex = fm.elements["sex"] ? fm.elements["sex"].value : "Female";
+              const newName = generateAutoRabbitName(currentSex);
+              if (fm.elements["name"]) fm.elements["name"].value = newName;
+            });
+          }
+        }
+      }
+    },
     onSubmit: async (v) => {
+      delete v.autoname_hint;
       const w = v.weight; delete v.weight;
       const obj = { ...r, ...v, status: r.status || "Actif" };
       const ok = await save("rabbit", obj); if (!ok) return false;
@@ -3259,7 +3321,8 @@ function rabbitForm(r) {
       toast(editing ? "Fiche mise à jour" : `${obj.name} enregistré`);
       if (!editing) go("lapin-" + obj.id);
       return true;
-    } });
+    }
+  });
 }
 function matingForm(preId) {
   const pre = rab(preId); const males = (x) => x.sex === "Male" && isActive(x), females = (x) => x.sex === "Female" && isActive(x);

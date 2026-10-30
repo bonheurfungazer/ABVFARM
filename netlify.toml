@@ -1,0 +1,9 @@
+[build]
+  # Dossier contenant la version Web prête à être déployée
+  publish = "public"
+  command = ""
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

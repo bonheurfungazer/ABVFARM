@@ -667,22 +667,34 @@ function initFirebaseSync() {
     window.firebaseDb = db;
     window.firebaseAuth = firebase.auth();
 
-    // Set local persistence once at boot
-    window.firebaseAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch((err) => {
-      console.warn("Persistence notice:", err);
-    });
-
     // Enable offline persistence
     db.enablePersistence({ synchronizeTabs: true }).catch((err) => {
       console.log("Firestore offline persistence notice:", err.code);
     });
 
-    // Check redirect auth result (for mobile browsers or redirect logins)
+    // Check redirect auth result FIRST (for mobile browsers or redirect logins)
+    const hasPendingRedirect = sessionStorage.getItem("abv_auth_pending") || localStorage.getItem("abv_auth_pending_time");
+    if (hasPendingRedirect) {
+      toast("Vérification de la session Google…");
+    }
+
     window.firebaseAuth.getRedirectResult().then((result) => {
+      sessionStorage.removeItem("abv_auth_pending");
+      localStorage.removeItem("abv_auth_pending_time");
       if (result && result.user) {
         handleUserAuthenticated(result.user, "Connexion Google réussie !");
+      } else if (hasPendingRedirect) {
+        console.warn("Redirect result returned null despite pending auth redirect flag.");
+        setTimeout(() => {
+          if (!window.firebaseAuth.currentUser && !userSession.isLoggedIn) {
+            toast("Session de redirection non reçue (sécurité Chrome mobile). Utilisez la connexion par e-mail.");
+          }
+        }, 1200);
       }
+      return window.firebaseAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
     }).catch((err) => {
+      sessionStorage.removeItem("abv_auth_pending");
+      localStorage.removeItem("abv_auth_pending_time");
       console.warn("Redirect auth notice:", err);
       handleAuthError(err);
     });
@@ -965,20 +977,49 @@ function signInWithGoogle(mode = "auto", forceSelect = false) {
   const provider = getGoogleProvider(forceSelect);
 
   if (mode === "redirect") {
+    try {
+      sessionStorage.setItem("abv_auth_pending", "google");
+      localStorage.setItem("abv_auth_pending_time", Date.now().toString());
+    } catch(e) {}
     toast("Redirection vers Google en cours…");
     window.firebaseAuth.signInWithRedirect(provider).catch((err) => {
+      sessionStorage.removeItem("abv_auth_pending");
+      localStorage.removeItem("abv_auth_pending_time");
       handleAuthError(err);
     });
     return;
   }
 
   toast("Connexion avec Google en cours…");
+  let popupFinished = false;
+  const timeoutId = setTimeout(() => {
+    if (!popupFinished && !userSession.isLoggedIn) {
+      const diag = $("#authDiagnosticBox");
+      if (diag) {
+        diag.style.display = "block";
+        diag.innerHTML = `
+          <div style="font-weight:700;margin-bottom:6px">⚠️ Information Mobile & PWA :</div>
+          <div style="font-size:0.83rem;line-height:1.4">
+            Sur mobile Android, Chrome isole les fenêtres pop-up et bloque la transmission du compte vers l'application.<br><br>
+            <b>Solutions directes :</b><br>
+            • Utilisez l'onglet <b>« Par Email »</b> (100% garanti sur mobile PWA)<br>
+            • Ou autorisez votre URL dans Google Cloud pour utiliser le bouton Google 1-clic direct ci-dessus.
+          </div>
+        `;
+      }
+    }
+  }, 12000);
+
   window.firebaseAuth.signInWithPopup(provider).then((result) => {
+    popupFinished = true;
+    clearTimeout(timeoutId);
     if (result && result.user) {
       handleUserAuthenticated(result.user, `Connecté avec Google : ${result.user.displayName || result.user.email}`);
       closeModal();
     }
   }).catch((err) => {
+    popupFinished = true;
+    clearTimeout(timeoutId);
     handleAuthError(err);
   });
 }
@@ -1225,11 +1266,12 @@ function runGoogleAuthDiagnostics() {
 
   let recommendation = `
     <div style="margin-top:10px;padding:10px;border-radius:8px;background:var(--surface);border:1px solid var(--line);font-size:0.83rem;line-height:1.45">
-      <b>🔍 Pourquoi la redirection Google peut perdre la session sur PWA :</b><br>
-      Dans une PWA installée ou sur smartphone, la redirection vers Google fait quitter l'application vers le navigateur externe. Au retour, le système d'exploitation ouvre parfois une nouvelle session isolée sans les cookies temporaires d'authentification.<br><br>
-      <b>✅ Solutions recommandées :</b><br>
-      1. <b>Bouton officiel Google (ci-dessus) :</b> Utilise Google Identity Services (GSI). Il authentifie directement sans quitter l'application PWA !<br>
-      2. <b>Onglet Par Email :</b> 100% stable sur PWA sans aucune dépendance aux redirections de fenêtres.<br>
+      <b>🔍 Analyse des 2 problèmes Google sur PWA :</b><br>
+      • <b>Erreur 400 origin_mismatch :</b> Google exige que votre URL (<code>${esc(currentOrigin)}</code>) soit inscrite dans vos identifiants Google Cloud (Origines JavaScript autorisées). Une fois inscrite, le bouton blanc Google 1-clic fonctionne immédiatement !<br>
+      • <b>Perte de session en pop-up / redirection :</b> Sur smartphone Android, le navigateur Chrome isole les fenêtres pop-up et bloque les cookies tiers (CHIPS) au retour de redirection.<br><br>
+      <b>✅ Solutions pour votre PWA :</b><br>
+      1. <b>Onglet Par Email :</b> 100% garanti sur mobile PWA, aucune redirection et session permanente.<br>
+      2. <b>Bouton 1-clic Google :</b> Ajoutez <code>${esc(currentOrigin)}</code> dans Google Cloud Console pour l'activer.<br>
       3. <b>Mode Local :</b> Enregistre toutes vos données directement sur votre téléphone.
     </div>
   `;
@@ -2522,7 +2564,15 @@ function accountModal() {
         </div>
 
         <div class="field">
-          <label style="font-size:0.8rem">Adresse e-mail</label>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+            <label style="font-size:0.8rem;margin:0">Adresse e-mail</label>
+            <div style="display:flex;align-items:center;gap:4px;font-size:0.75rem">
+              <span style="color:var(--muted)">Suggéré :</span>
+              <button type="button" class="btn sm ghost" id="btnChipPrefillEmail" style="padding:1px 6px;font-size:0.74rem;font-weight:700;color:var(--sage);background:var(--sage-soft);border:none;border-radius:6px;cursor:pointer">
+                lontiarcen@gmail.com
+              </button>
+            </div>
+          </div>
           <input type="email" id="emailInput" placeholder="votre-email@exemple.com" autocomplete="email">
         </div>
 
@@ -2560,25 +2610,48 @@ function accountModal() {
       <!-- TAB 2 : GOOGLE AUTH (OPTIMISÉ PWA) -->
       <div id="paneGoogleAuth" style="display:none;flex-direction:column;gap:12px">
         <h3 style="margin:0;font-size:1rem">Connexion Google pour PWA & Mobile</h3>
-        
-        <div class="banner info" style="margin:0;font-size:0.82rem;line-height:1.4">
-          💡 <b>Conseil PWA :</b> Sur application mobile ou PWA, utilisez le <b>bouton blanc officiel ci-dessous</b> : il s'authentifie en 1 clic sans quitter l'application.
+
+        <!-- Guide Erreur 400 origin_mismatch -->
+        <div style="background:var(--warn-soft);color:var(--warn);border:1px solid rgba(154,82,8,0.25);padding:12px;border-radius:12px;font-size:0.82rem;line-height:1.45">
+          <div style="font-weight:700;display:flex;align-items:center;gap:6px;margin-bottom:6px">
+            <span>⚠️</span>
+            <span>Résolution de l'« Erreur 400 : origin_mismatch » :</span>
+          </div>
+          <p style="margin:0 0 8px">
+            Google bloque l'accès si l'adresse exacte de votre application n'est pas inscrite dans les <b>Origines JavaScript autorisées</b> de votre console Google Cloud.
+          </p>
+          <div style="background:var(--surface);padding:8px 10px;border-radius:8px;border:1px solid var(--line);font-family:var(--f-mono);font-size:0.75rem;word-break:break-all;display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px">
+            <span id="txtCurrentOriginDisplay" style="color:var(--ink)"></span>
+            <button type="button" class="btn sm pri" id="btnCopyOriginUrl" style="flex:none;padding:3px 10px;font-size:0.75rem">
+              📋 Copier l'URL
+            </button>
+          </div>
+          <div style="font-size:0.78rem;color:var(--ink)">
+            <b>Pour débloquer en 1 minute :</b><br>
+            1. Ouvrez <a href="https://console.cloud.google.com/apis/credentials?project=gen-lang-client-0349652531" target="_blank" rel="noopener" style="color:var(--sage);font-weight:700;text-decoration:underline">Google Cloud &gt; Identifiants</a>.<br>
+            2. Cliquez sur votre <b>client Web</b> (OAuth 2.0).<br>
+            3. Dans <b>« Origines JavaScript autorisées »</b>, cliquez sur <b>+ Ajouter un URI</b> et collez l'URL copiée.<br>
+            4. Cliquez sur <b>Enregistrer</b>. Le bouton 1-clic fonctionnera immédiatement !
+          </div>
         </div>
 
-        <!-- Bouton officiel Google Identity Services (Direct & sans redirection) -->
-        <div id="g_id_signin_container" style="display:flex;justify-content:center;width:100%;min-height:44px;margin:4px 0"></div>
+        <div style="text-align:center">
+          <div style="font-size:0.78rem;font-weight:700;color:var(--muted);margin-bottom:4px">Bouton officiel Google (One-Tap / FedCM direct) :</div>
+          <!-- Bouton officiel Google Identity Services (Direct & sans redirection) -->
+          <div id="g_id_signin_container" style="display:flex;justify-content:center;width:100%;min-height:44px;margin:2px 0"></div>
+        </div>
 
         <!-- Bouton Google direct Pop-up -->
         <button type="button" class="btn" id="btnGoogleSignIn" style="background:#FFFFFF;color:#3c4043;border:1.5px solid #dadce0;font-weight:600;display:flex;align-items:center;justify-content:center;gap:10px;padding:10px 16px;width:100%;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.08);cursor:pointer">
           <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.616z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/><path fill="#FBBC05" d="M3.964 10.707c-.18-.54-.282-1.117-.282-1.707s.102-1.167.282-1.707V4.961H.957C.347 6.175 0 7.55 0 9s.348 2.825.957 4.039l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.961L3.964 7.293C4.672 5.166 6.656 3.58 9 3.58z"/></svg>
-          <span style="font-size:0.92rem">Connexion Google (Fenêtre Pop-up)</span>
+          <span style="font-size:0.92rem">Connexion Google (Fenêtre Pop-up classique)</span>
         </button>
 
         <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.8rem">
           <button type="button" class="btn ghost sm" id="btnGoogleSignInSwitch" style="color:var(--muted);cursor:pointer;padding:4px 6px">
             Changer de compte
           </button>
-          <button type="button" class="btn ghost sm" id="btnGoogleSignInRedirect" style="color:var(--sage);cursor:pointer;padding:4px 6px" title="Attention: déconseillé en PWA installée">
+          <button type="button" class="btn ghost sm" id="btnGoogleSignInRedirect" style="color:var(--sage);cursor:pointer;padding:4px 6px" title="Redirection complète">
             ${ICON.cloud} Redirection complète
           </button>
         </div>
@@ -2731,6 +2804,39 @@ function accountModal() {
       const farm = $("#regFarmName")?.value.trim() || userSession.farmName || "ABV Farm";
       const manager = $("#regManagerName")?.value.trim() || userSession.managerName || "Éleveur ABV";
       signInLocalProfile(email, farm, manager);
+    });
+  }
+
+  // Chip prefill for email
+  const btnChipEmail = $("#btnChipPrefillEmail");
+  if (btnChipEmail) {
+    btnChipEmail.addEventListener("click", () => {
+      const inp = $("#emailInput");
+      if (inp) {
+        inp.value = "lontiarcen@gmail.com";
+        $("#passInput")?.focus();
+        toast("E-mail lontiarcen@gmail.com inséré");
+      }
+    });
+  }
+
+  // Display and copy current origin URL for Google Cloud Console authorization
+  const orgEl = $("#txtCurrentOriginDisplay");
+  if (orgEl) orgEl.textContent = window.location.origin;
+
+  const btnCopyOrg = $("#btnCopyOriginUrl");
+  if (btnCopyOrg) {
+    btnCopyOrg.addEventListener("click", () => {
+      const origin = window.location.origin;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(origin).then(() => {
+          toast("URL d'origine copiée ! Ajoutez-la dans Google Cloud.");
+        }).catch(() => {
+          prompt("Copiez cette URL pour Google Cloud :", origin);
+        });
+      } else {
+        prompt("Copiez cette URL pour Google Cloud :", origin);
+      }
     });
   }
 

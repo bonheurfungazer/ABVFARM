@@ -168,16 +168,8 @@ service cloud.firestore {
     // User Profile
     match /users/{userId} {
       allow get, list: if isOwner(userId);
-      allow create: if isOwner(userId) &&
-                       isValidId(userId) &&
-                       isValidUserProfile(incoming()) &&
-                       incoming().createdAt is timestamp &&
-                       incoming().createdAt <= request.time;
-      allow update: if isOwner(userId) &&
-                       isValidUserProfile(incoming()) &&
-                       incoming().userId == existing().userId &&
-                       incoming().createdAt == existing().createdAt &&
-                       incoming().diff(existing()).affectedKeys().hasOnly(['email', 'displayName', 'farmName', 'updatedAt']);
+      allow create, update: if isOwner(userId) && isValidId(userId);
+
       // Cheptel documents subcollection used by Web App
       match /cheptel/{docId} {
         allow read, write: if isOwner(userId);

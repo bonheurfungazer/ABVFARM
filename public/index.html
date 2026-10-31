@@ -538,7 +538,8 @@ function ageLabel(days) {
 }
 
 /* ---------- Farm rules ---------- */
-const GESTATION = 31, MATURE_DAYS = 150, WEANING = 35, FATTEN_DAYS = 45;
+let GESTATION = 31, MATURE_DAYS = 150, WEANING = 35, FATTEN_DAYS = 45;
+try { const _p = JSON.parse(localStorage.getItem("abvfarm_params") || "null"); if (_p) { GESTATION = Number(_p.gestation) || GESTATION; MATURE_DAYS = Number(_p.mature) || MATURE_DAYS; WEANING = Number(_p.weaning) || WEANING; FATTEN_DAYS = Number(_p.fatten) || FATTEN_DAYS; } } catch (e) {}
 const STATUSES = ["Actif", "Vendu", "Mort", "Abattu", "Externe", "Donné"];
 const MATING_ST = ["Accouplé", "Gestation confirmée", "Mise bas", "Échoué"];
 const TREAT_TYPES = ["Vaccin", "Vermifuge", "Anti-coccidien", "Vitamines", "Antibiotique", "Autre soin"];
@@ -1674,6 +1675,10 @@ VIEWS.accueil = () => {
   const m0 = today().slice(0, 7); const monthTx = S.tx.filter((x) => x.date.startsWith(m0));
   const bal = monthTx.reduce((s, x) => s + (x.type === "in" ? 1 : -1) * (Number(x.amount) || 0), 0);
   const al = alerts();
+  const _kindled = S.matings.filter((m) => m.status === "Mise bas");
+  const _prolific = _kindled.length ? (_kindled.reduce((s, m) => s + (Number(m.alive) || 0), 0) / _kindled.length) : null;
+  const _mort = S.rabbits.filter((r) => r.status === "Mort").length;
+  const _sales = S.tx.filter((x) => x.type === "in").reduce((s, x) => s + (Number(x.amount) || 0), 0);
   const fedToday = S.feed.filter((f) => f.date === today()).reduce((s, f) => s + Number(f.grams || 0), 0);
   const h = new Date().getHours(); const hello = h < 12 ? "Bonjour" : h < 18 ? "Bon après-midi" : "Bonsoir";
 
@@ -1713,6 +1718,9 @@ VIEWS.accueil = () => {
     <div class="tile"><span class="l">Reproducteurs</span><span class="v">${mature}</span><span class="s">âgés de 5 mois et plus</span></div>
     <div class="tile"><span class="l">Gestations</span><span class="v">${gest.length}</span><span class="s">${gest[0] ? `prochaine ${relDay(diff(today(), gest[0].due))}` : "aucune en cours"}</span></div>
     <div class="tile ${stock <= 0 && S.inventory.length ? "bad" : stock < 10 && S.inventory.length ? "warn" : ""}"><span class="l">Stock d'aliment</span><span class="v">${nf1.format(stock)} kg</span><span class="s">${autonomy != null ? `≈ ${nf0.format(autonomy)} jours de ration` : "—"}</span></div>
+    <div class="tile"><span class="l">Prolificité moyenne</span><span class="v">${_prolific == null ? "—" : nf1.format(_prolific)}</span><span class="s">lapereaux vivants / portée (${_kindled.length} portées)</span></div>
+    <div class="tile"><span class="l">Mortalité enregistrée</span><span class="v">${_mort}</span><span class="s">lapins au statut Mort</span></div>
+    <div class="tile"><span class="l">Recettes totales</span><span class="v" style="font-size:1.35rem">${fcfa(_sales)}</span><span class="s">toutes périodes, toutes recettes</span></div>
     <div class="tile"><span class="l">Solde du mois</span><span class="v ${bal >= 0 ? "pos" : "neg"}" style="font-size:1.35rem">${bal >= 0 ? "+" : "−"}${fcfa(Math.abs(bal))}</span><span class="s">${monthTx.length} opération${monthTx.length > 1 ? "s" : ""}</span></div>
   </div>
   <div class="grid g2">
@@ -2349,6 +2357,7 @@ VIEWS.donnees = () => {
   <div class="grid g2">
     <section class="card"><h2>Application Téléphone (PWA)</h2><p class="hint" style="margin:6px 0 12px">Installez ABV Farm directement sur l'écran d'accueil de votre smartphone ou tablette pour l'ouvrir comme une application native sans ouvrir le navigateur.</p><button class="btn pri" onclick="installPWA()">${ICON.phone}Installer sur mon téléphone</button></section>
     <section class="card"><h2>Rapport officiel PDF</h2><p class="hint" style="margin:6px 0 12px">Document PDF complet prêt à l'impression : synthèse d'élevage, liste détaillée des lapins, gestations et indicateurs clés.</p><button class="btn pri" data-act="exportpdf">${ICON.fileText}Télécharger l'inventaire PDF</button></section>
+    <section class="card"><h2>Paramètres d'élevage</h2><p class="hint" style="margin:6px 0 12px">Durées utilisées pour les calculs (gestation, maturité, sevrage, engraissement). Modifiables selon ta race et ta conduite.</p><button class="btn" data-act="params">Modifier les paramètres</button></section>
     <section class="card"><h2>Sauvegarde fichier JSON</h2><p class="hint" style="margin:6px 0 12px">Archive locale complète de votre élevage pour sauvegarde externe ou transfert de machine.</p><button class="btn" data-act="export">${ICON.download}Exporter le fichier de sauvegarde</button></section>
     <section class="card"><h2>Restaurer à partir d'un fichier</h2><p class="hint" style="margin:6px 0 12px">Importez une sauvegarde au format JSON (supporte tous les formats ABV Farm).</p><button class="btn" data-act="import">${ICON.upload}Importer une sauvegarde</button></section>
     <section class="card full"><h2>Réinitialisation du cheptel</h2><p class="hint" style="margin:6px 0 12px">Supprime l'intégralité des fiches de cet élevage. Cette action est irréversible.</p><button class="btn danger" data-act="wipe">${ICON.trash}Réinitialiser l'élevage</button></section>
@@ -3255,7 +3264,8 @@ const RABBIT_NAMES_INDET = [
 
 function generateAutoRabbitName(sex = "Female") {
   const yr = String(new Date().getFullYear()).slice(-2);
-  const nextNum = (S.rabbits || []).length + 1;
+  const _nums = (S.rabbits || []).map(r => { const m = String(r.name || "").match(/ABV-\d{2}-(\d+)/); return m ? Number(m[1]) : 0; });
+  const nextNum = Math.max(0, ..._nums) + 1;
   const numFormatted = String(nextNum).padStart(3, "0");
   const code = `ABV-${yr}-${numFormatted}`;
 
@@ -3313,6 +3323,7 @@ function rabbitForm(r) {
     },
     onSubmit: async (v) => {
       delete v.autoname_hint;
+      if (v.cage && S.rabbits.some((x) => x.id !== r.id && isActive(x) && (x.cage || "").trim().toLowerCase() === v.cage.trim().toLowerCase())) toast("⚠️ Attention : cette cage est déjà occupée par un autre lapin actif. Vérifiez avant de valider.");
       const w = v.weight; delete v.weight;
       const obj = { ...r, ...v, status: r.status || "Actif" };
       const ok = await save("rabbit", obj); if (!ok) return false;
@@ -3346,6 +3357,7 @@ function matingForm(preId) {
       $("#f_risk").innerHTML = `<div class="risk ${rk.lvl}">${ICON[rk.lvl === "ok" ? "shield" : "alert"].replace("<svg", '<svg width="26" height="26" style="flex:none"')}<div><b class="num">F = ${nf2.format(f)} %</b> · ${rk.label}<div style="font-size:.85rem">${rk.tip}</div></div></div>${young.length ? `<p class="hint" style="margin-top:6px;color:var(--warn)">Attention : ${esc(young.join(", "))} a moins de 5 mois.</p>` : ""}`;
     },
     onSubmit: async (v) => {
+      const _f = offspringF(v.male, v.female); if (_f > 12.5) { toast(`⛔ Saillie bloquée : consanguinité trop élevée (F = ${nf2.format(_f)} % > 12,5 %). Choisissez un autre reproducteur.`); return false; }
       const pregnant = S.matings.some((m) => m.female === v.female && ["Accouplé", "Gestation confirmée"].includes(m.status));
       if (pregnant) { toast("⛔ Saillie impossible : cette femelle est déjà en gestation (saillie en cours non clôturée)."); return false; }
       const ok = await save("mating", { male: v.male, female: v.female, date: v.date, due: addDays(v.date, GESTATION), status: "Accouplé", notes: v.notes });
@@ -3438,7 +3450,7 @@ function batchForm(matingId, b) {
   const litters = [["", "— Aucune —"], ...S.matings.filter((x) => x.status === "Mise bas").map((x) => [x.id, `${rname(x.female)} · ${fmtShort(x.birthDate || x.due)}`])];
   const defInitial = m ? (Number(m.alive) || 6) : (b.initial || 6);
   form({ title: b.id ? `Modifier le lot ${b.code}` : "Nouveau lot en engraissement", values: { ...b, mating: b.mating ?? matingId ?? "", initial: defInitial }, fields: [
-      { k: "code", label: "Code du lot", req: true, def: b.code || `LOT-${today().slice(0, 7)}-${String.fromCharCode(65 + (S.batches.length % 26))}` },
+      { k: "code", label: "Code du lot", req: true, def: b.code || `LOT-${today().slice(0, 7)}-${String(S.batches.filter(x => (x.code || '').startsWith('LOT-' + today().slice(0, 7))).length + 1).padStart(3, '0')}` },
       { k: "mating", label: "Portée d'origine", type: "select", opts: litters },
       { k: "weaning", label: "Date de sevrage", type: "date", req: true, def: wean },
       { k: "initial", label: "Nombre de sujets au sevrage", type: "number", min: 1, req: true, def: defInitial },
@@ -3476,6 +3488,12 @@ function remForm() {
 
 /* ---------- Actions Handler ---------- */
 async function bulk(docs, label) {
+  try {
+    const _docs = []; for (const [kind, key] of Object.entries(KIND)) S[key].forEach((x) => { const { kind: _k, ...rest } = x; _docs.push({ kind, ...rest }); });
+    const _blob = new Blob([JSON.stringify({ app: "ABV Farm", version: 2, exported: today(), farm: userSession.farmName, docs: _docs }, null, 1)], { type: "application/json" });
+    const _url = URL.createObjectURL(_blob); const _a = document.createElement("a"); _a.href = _url; _a.download = `abvfarm-sauvegarde-avant-import-${today()}.json`;
+    document.body.appendChild(_a); _a.click(); _a.remove(); setTimeout(() => URL.revokeObjectURL(_url), 1000);
+  } catch (e) { console.warn("Sauvegarde avant import impossible", e); }
   let n = 0;
   const all = getLocalData();
   const batchDocsToCloud = [];
@@ -3528,6 +3546,7 @@ const A = {
   alertsCenterModal: () => alertsCenterModal(),
   themeModal: () => themeModal(),
   unauthorizedDomainModal: () => unauthorizedDomainModal(),
+  params: () => { form({ title: "Paramètres d'élevage", values: { gestation: GESTATION, mature: MATURE_DAYS, weaning: WEANING, fatten: FATTEN_DAYS }, fields: [{ k: "gestation", label: "Gestation (jours)", type: "number", min: 1, req: true }, { k: "mature", label: "Maturité (jours)", type: "number", min: 1, req: true }, { k: "weaning", label: "Sevrage (jours)", type: "number", min: 1, req: true }, { k: "fatten", label: "Engraissement (jours)", type: "number", min: 1, req: true }], onSubmit: async (v) => { localStorage.setItem("abvfarm_params", JSON.stringify(v)); GESTATION = Number(v.gestation); MATURE_DAYS = Number(v.mature); WEANING = Number(v.weaning); FATTEN_DAYS = Number(v.fatten); closeModal(); toast("Paramètres enregistrés"); render(); return true; } }); },
   resetFilters: () => { ui.q = ""; ui.sex = "all"; ui.stage = "all"; ui.breed = "all"; ui.st = "actifs"; ui.ageBracket = "all"; ui.minAgeM = ""; ui.maxAgeM = ""; ui.minWeight = ""; ui.maxWeight = ""; render(); },
   resetCustomMetrics: () => { ui.minAgeM = ""; ui.maxAgeM = ""; ui.minWeight = ""; ui.maxWeight = ""; render(); },
   newrabbit: () => rabbitForm(), editrabbit: (el) => rabbitForm(rab(el.dataset.id)),
@@ -3536,6 +3555,8 @@ const A = {
     toast(`Suppression de ${r.name}…`);
     for (const w of S.weights.filter((x) => x.rabbit === r.id)) await removeDoc("weight", w.id);
     for (const x of S.treatments.filter((x) => x.rabbit === r.id)) await removeDoc("treatment", x.id);
+    for (const m of S.matings.filter((x) => x.male === r.id || x.female === r.id)) await removeDoc("mating", m.id);
+    for (const k of S.rabbits.filter((x) => x.father === r.id || x.mother === r.id)) await save("rabbit", { ...k, father: k.father === r.id ? "" : k.father, mother: k.mother === r.id ? "" : k.mother });
     if (await removeDoc("rabbit", r.id)) { toast("Fiche supprimée avec succès"); go("lapins"); } }); },
   newmating: (el) => matingForm(el.dataset.id), kindle: (el) => kindleForm(el.dataset.id),
   mst: async (el) => { const m = byId(S.matings, el.dataset.id); if (m && (await save("mating", { ...m, status: el.dataset.v }))) toast(`${rname(m.female)} : ${el.dataset.v}`); },

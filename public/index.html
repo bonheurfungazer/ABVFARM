@@ -2342,7 +2342,7 @@ VIEWS.donnees = () => {
   <section class="card">
     <div class="row-h">
       <h2>Synchronisation & Sécurité des Données</h2>
-      <button class="btn sm" data-act="accountModal">${ICON.cloud}${userSession.isLoggedIn ? "Compte Synchronisé" : "Connexion Compte (Email / Google)"}</button>
+      <button class="btn sm" data-act="accountModal">${ICON.cloud}${(userSession.isLoggedIn && window.firebaseAuth && window.firebaseAuth.currentUser) ? "Compte Synchronisé" : (userSession.isLoggedIn ? "Compte local · non synchronisé" : "Connexion Compte (Email / Google)")}</button>
     </div>
     <p>Vos données sont protégées et enregistrées instantanément sur cet appareil pour vous garantir un fonctionnement continu avec ou sans connexion Internet. Connectez votre compte par Email ou Google pour une sauvegarde automatique et permanente dans le Cloud Firebase.</p>
   </section>
@@ -3346,6 +3346,8 @@ function matingForm(preId) {
       $("#f_risk").innerHTML = `<div class="risk ${rk.lvl}">${ICON[rk.lvl === "ok" ? "shield" : "alert"].replace("<svg", '<svg width="26" height="26" style="flex:none"')}<div><b class="num">F = ${nf2.format(f)} %</b> · ${rk.label}<div style="font-size:.85rem">${rk.tip}</div></div></div>${young.length ? `<p class="hint" style="margin-top:6px;color:var(--warn)">Attention : ${esc(young.join(", "))} a moins de 5 mois.</p>` : ""}`;
     },
     onSubmit: async (v) => {
+      const pregnant = S.matings.some((m) => m.female === v.female && ["Accouplé", "Gestation confirmée"].includes(m.status));
+      if (pregnant) { toast("⛔ Saillie impossible : cette femelle est déjà en gestation (saillie en cours non clôturée)."); return false; }
       const ok = await save("mating", { male: v.male, female: v.female, date: v.date, due: addDays(v.date, GESTATION), status: "Accouplé", notes: v.notes });
       if (ok) { closeModal(); toast("Saillie enregistrée"); }
       return ok;
@@ -3529,7 +3531,7 @@ const A = {
   resetFilters: () => { ui.q = ""; ui.sex = "all"; ui.stage = "all"; ui.breed = "all"; ui.st = "actifs"; ui.ageBracket = "all"; ui.minAgeM = ""; ui.maxAgeM = ""; ui.minWeight = ""; ui.maxWeight = ""; render(); },
   resetCustomMetrics: () => { ui.minAgeM = ""; ui.maxAgeM = ""; ui.minWeight = ""; ui.maxWeight = ""; render(); },
   newrabbit: () => rabbitForm(), editrabbit: (el) => rabbitForm(rab(el.dataset.id)),
-  status: (el) => { const r = rab(el.dataset.id); form({ title: `Statut de ${r.name}`, values: r, fields: [{ k: "status", label: "Statut", type: "select", opts: STATUSES, full: true, hint: "Un animal vendu, abattu ou décédé passe dans la rubrique « Sortis »." }], onSubmit: async (v) => { const ok = await save("rabbit", { ...r, status: v.status }); if (ok) toast("Statut mis à jour"); return ok; } }); },
+  status: (el) => { const r = rab(el.dataset.id); form({ title: `Statut de ${r.name}`, values: r, fields: [{ k: "status", label: "Statut", type: "select", opts: STATUSES, full: true, hint: "Un animal vendu, abattu ou décédé passe dans la rubrique « Sortis »." }, { k: "exitDate", label: "Date de sortie (vente, décès, abattage, don)", type: "date", def: today() }, { k: "exitPrice", label: "Prix / montant perçu (FCFA, si vente)", type: "number", min: 0 }, { k: "exitBuyer", label: "Acheteur / destinataire", ph: "ex. Client marché, voisin" }, { k: "exitCause", label: "Cause / motif", full: true, ph: "ex. Vente chair, maladie, don" }], onSubmit: async (v) => { const isExit = ["Vendu", "Mort", "Abattu", "Donné"].includes(v.status); if ((v.status === "Vendu" || v.status === "Abattu") && r.status !== v.status) { const wd = underWithdrawal(r.id); if (wd) { toast(`⛔ Vente / abattage interdit : délai d'attente jusqu'au ${fmtDate(wd)} (traitement en cours).`); return false; } } const obj = { ...r, status: v.status, exitDate: isExit ? (v.exitDate || today()) : "", exitPrice: isExit ? (Number(v.exitPrice) || 0) : 0, exitBuyer: isExit ? (v.exitBuyer || "") : "", exitCause: isExit ? (v.exitCause || "") : "" }; const ok = await save("rabbit", obj); if (ok) { if (v.status === "Vendu" && r.status !== "Vendu" && Number(v.exitPrice) > 0) await save("tx", { type: "in", cat: "Vente chair", amount: Number(v.exitPrice), date: v.exitDate || today(), label: `Vente ${r.name}${v.exitBuyer ? " → " + v.exitBuyer : ""}` }); toast("Statut mis à jour"); } return ok; } }); },
   delrabbit: (el) => { const r = rab(el.dataset.id); if (!r) return; confirmBox(`Supprimer définitivement la fiche de ${r.name} ainsi que ses pesées et soins ? Pour un animal vendu ou décédé, modifiez plutôt son statut.`, "Supprimer", async () => {
     toast(`Suppression de ${r.name}…`);
     for (const w of S.weights.filter((x) => x.rabbit === r.id)) await removeDoc("weight", w.id);
@@ -3590,10 +3592,17 @@ const A = {
       if (await removeDoc(k, id)) toast("Suppression effectuée avec succès");
     });
   },
-  wipe: () => confirmBox("Réinitialiser l'intégralité du cheptel ? Toutes vos données d'élevage seront effacées.", "Tout réinitialiser", async () => {
+  wipe: () => confirmBox("Réinitialiser l'intégralité du cheptel ? Toutes vos données d'élevage seront effacées. Une sauvegarde JSON sera d'abord téléchargée automatiquement.", "Tout réinitialiser", async () => {
+    try {
+      const docs = []; for (const [kind, key] of Object.entries(KIND)) S[key].forEach((x) => { const { kind: _k, ...rest } = x; docs.push({ kind, ...rest }); });
+      const data = JSON.stringify({ app: "ABV Farm", version: 2, exported: today(), farm: userSession.farmName, docs }, null, 1);
+      const blob = new Blob([data], { type: "application/json" }); const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href = url; a.download = `abvfarm-sauvegarde-avant-reinitialisation-${today()}.json`;
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) { console.warn("Sauvegarde avant réinitialisation impossible", e); toast("⚠️ Sauvegarde impossible : réinitialisation annulée."); return; }
     for (const [kind, key] of Object.entries(KIND)) for (const x of S[key].slice()) await removeDoc(kind, x.id);
     localStorage.removeItem(getUserDataKey());
-    toast("Élevage réinitialisé");
+    toast("Élevage réinitialisé (sauvegarde téléchargée)");
     render();
   }),
   exportpdf: () => exportHerdPDF(),

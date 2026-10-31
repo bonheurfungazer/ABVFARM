@@ -3622,24 +3622,6 @@ const A = {
     toast("Fichier de sauvegarde exporté");
   },
   import: () => $("#importFile").click(),
-  importRestoredDirect: async () => {
-    confirmBox("Importer directement les 145 fiches de votre sauvegarde (48 lapins sans doublons de noms, 8 saillies, pesées, soins, rations) dans l'application ?", "Importer maintenant", async () => {
-      try {
-        toast("Chargement des données de sauvegarde…");
-        const res = await fetch("abvfarm_backup_restored.json");
-        if (!res.ok) throw new Error("Fichier introuvable");
-        const j = await res.json();
-        const docs = parseBackupToDocs(j);
-        toast("Restauration en cours…");
-        const n = await bulk(docs, "Import");
-        toast(`✅ ${n} fiches importées avec succès !`);
-        go("lapins");
-      } catch (err) {
-        console.error(err);
-        toast("Impossible de charger la sauvegarde locale");
-      }
-    });
-  },
 };
 
 function parseBackupToDocs(j) {

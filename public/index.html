@@ -2198,7 +2198,7 @@ VIEWS.lapin = ({ id }) => {
   </div>
   <section class="card"><div class="row-h"><h2>Courbe de poids</h2><button class="btn sm" data-act="newweight" data-id="${id}">${ICON.plus}Pesée</button></div>
     ${ws.length >= 2 ? weightChart(ws) : ""}
-    ${ws.length ? `<div class="tablewrap"><table><thead><tr><th>Date</th><th class="r">Poids</th><th class="r">Écart</th><th>Note</th><th></th></tr></thead><tbody>${ws.slice().reverse().map((w, i, arr) => { const prev = arr[i + 1]; const dlt = prev ? w.kg - prev.kg : null; return `<tr><td>${fmtDate(w.date)}</td><td class="r"><b>${nf2.format(w.kg)} kg</b></td><td class="r ${dlt == null ? "" : dlt >= 0 ? "pos" : "neg"}">${dlt == null ? "—" : (dlt >= 0 ? "+" : "") + nf0.format(dlt * 1000) + " g"}</td><td class="hint">${esc(w.notes || "")}</td><td class="r"><button class="btn sm ghost" data-act="del" data-kind="weight" data-id="${w.id}" aria-label="Supprimer la pesée">${ICON.trash}</button></td></tr>`; }).join("")}</tbody></table></div>` : emptyBox("scale", "Aucune pesée", "Pesez régulièrement pour calculer le gain moyen quotidien (GMQ).")}
+    ${ws.length ? `<div class="tablewrap"><table><thead><tr><th>Date</th><th class="r">Poids</th><th class="r">Écart</th><th>Note</th><th></th></tr></thead><tbody>${ws.slice().reverse().map((w, i, arr) => { const prev = arr[i + 1]; const dlt = prev ? w.kg - prev.kg : null; return `<tr><td>${fmtDate(w.date)}</td><td class="r"><b>${nf2.format(w.kg)} kg</b></td><td class="r ${dlt == null ? "" : dlt >= 0 ? "pos" : "neg"}">${dlt == null ? "—" : (dlt >= 0 ? "+" : "") + nf0.format(dlt * 1000) + " g"}</td><td class="hint">${esc(w.notes || "")}</td><td class="r"><button class="btn sm ghost" data-act="editweight" data-id="${w.id}" aria-label="Modifier la pesée">${ICON.edit}</button><button class="btn sm ghost" data-act="del" data-kind="weight" data-id="${w.id}" aria-label="Supprimer la pesée">${ICON.trash}</button></td></tr>`; }).join("")}</tbody></table></div>` : emptyBox("scale", "Aucune pesée", "Pesez régulièrement pour calculer le gain moyen quotidien (GMQ).")}
   </section>
   <div class="grid g2">
     <section class="card"><div class="row-h"><h2>Soins & traitements</h2><button class="btn sm" data-act="newtreat" data-id="${id}">${ICON.plus}Soin</button></div>
@@ -2246,7 +2246,7 @@ function treatRow(x) {
   const cls = x.type === "Vaccin" ? "info" : x.type === "Antibiotique" ? "bad" : x.type === "Vitamines" ? "warn" : "ok";
   return `<div class="li"><span class="ico ${cls}">${ICON.syringe}</span><div class="grow"><div class="t">${esc(x.type)} · ${esc(x.product || "")}</div><div class="d">${fmtDate(x.date)}${x.dosage ? " · " + esc(x.dosage) : ""}${x.rabbit ? "" : " · tout l'élevage"}${x.next ? ` · rappel ${fmtShort(x.next)}` : ""}</div>
     ${wEnd ? `<div class="d ${active ? "neg" : "pos"}">${active ? `Délai d'attente jusqu'au ${fmtDate(wEnd)}` : `Délai d'attente terminé (${x.withdrawal} j)`}</div>` : ""}</div>
-    <button class="btn sm ghost" data-act="del" data-kind="treatment" data-id="${x.id}" aria-label="Supprimer le soin">${ICON.trash}</button></div>`;
+    <button class="btn sm ghost" data-act="edittreat" data-id="${x.id}" aria-label="Modifier le soin">${ICON.edit}</button><button class="btn sm ghost" data-act="del" data-kind="treatment" data-id="${x.id}" aria-label="Supprimer le soin">${ICON.trash}</button></div>`;
 }
 
 VIEWS.saillies = () => {
@@ -2309,7 +2309,7 @@ VIEWS.finances = () => {
     <section class="card"><div class="row-h"><h2>Répartition des charges</h2></div>${cats.length ? `<div class="list">${cats.map(([c, v]) => `<div class="li" style="flex-direction:column;align-items:stretch;gap:6px"><div style="display:flex;justify-content:space-between;gap:8px"><span class="t">${esc(c)}</span><b class="num">${fcfa(v)}</b></div><div class="bar"><i style="width:${(v / maxC) * 100}%;background:var(--clay)"></i></div></div>`).join("")}</div>` : `<p class="hint">Vos dépenses par poste apparaîtront dès la première saisie.</p>`}</section>
   </div>
   <section class="card"><div class="row-h"><h2>Journal des flux de trésorerie</h2><div class="seg" role="group">${[["all", "Toutes"], ["in", "Recettes"], ["out", "Dépenses"]].map(([v, l]) => `<button type="button" data-act="ui" data-k="txf" data-v="${v}" aria-pressed="${ui.txf === v}">${l}</button>`).join("")}</div></div>
-    ${list.length ? `<div class="tablewrap"><table><thead><tr><th>Date</th><th>Libellé</th><th>Catégorie</th><th class="r">Montant</th><th></th></tr></thead><tbody>${list.map((x) => `<tr><td>${fmtDate(x.date)}</td><td>${esc(x.label || "")}</td><td><span class="chip">${esc(x.cat)}</span></td><td class="r ${x.type === "in" ? "pos" : "neg"}">${x.type === "in" ? "+" : "−"}${fcfa(x.amount)}</td><td class="r"><button class="btn sm ghost" data-act="del" data-kind="tx" data-id="${x.id}" aria-label="Supprimer">${ICON.trash}</button></td></tr>`).join("")}</tbody></table></div>` : emptyBox("coins", "Aucune transaction enregistrée", "Ventes d'animaux, achats d'aliments et intrants vétérinaires.")}
+    ${list.length ? `<div class="tablewrap"><table><thead><tr><th>Date</th><th>Libellé</th><th>Catégorie</th><th class="r">Montant</th><th></th></tr></thead><tbody>${list.map((x) => `<tr><td>${fmtDate(x.date)}</td><td>${esc(x.label || "")}</td><td><span class="chip">${esc(x.cat)}</span></td><td class="r ${x.type === "in" ? "pos" : "neg"}">${x.type === "in" ? "+" : "−"}${fcfa(x.amount)}</td><td class="r"><button class="btn sm ghost" data-act="edittx" data-id="${x.id}" aria-label="Modifier">${ICON.edit}</button><button class="btn sm ghost" data-act="del" data-kind="tx" data-id="${x.id}" aria-label="Supprimer">${ICON.trash}</button></td></tr>`).join("")}</tbody></table></div>` : emptyBox("coins", "Aucune transaction enregistrée", "Ventes d'animaux, achats d'aliments et intrants vétérinaires.")}
   </section>`;
 };
 function monthChart() {
@@ -3375,23 +3375,23 @@ function kindleForm(id) {
       return ok;
     } });
 }
-function weightForm(rid) {
-  form({ title: `Pesée de ${rname(rid)}`, fields: [{ k: "kg", label: "Poids mesuré (kg)", type: "number", step: "0.01", min: 0, req: true, def: lastWeight(rid) ?? "" }, { k: "date", label: "Date de pesée", type: "date", req: true, def: today() }, { k: "notes", label: "Note", full: true }],
+function weightForm(rid, ex) {
+  form({ title: ex ? "Modifier la pesée" : `Pesée de ${rname(rid)}`, values: ex || {}, fields: [{ k: "kg", label: "Poids mesuré (kg)", type: "number", step: "0.01", min: 0, req: true, def: ex ? ex.kg : (lastWeight(rid) ?? "") }, { k: "date", label: "Date de pesée", type: "date", req: true, def: ex ? ex.date : today() }, { k: "notes", label: "Note", full: true, def: ex ? ex.notes : "" }],
     onSubmit: async (v) => {
-      const ok = await save("weight", { rabbit: rid, ...v });
-      if (ok) { closeModal(); toast("Pesée enregistrée"); }
+      const ok = await save("weight", { ...(ex || {}), rabbit: rid, ...v });
+      if (ok) { closeModal(); toast(ex ? "Pesée modifiée" : "Pesée enregistrée"); }
       return ok;
     } });
 }
-function treatForm(rid) {
-  form({ title: rid ? `Soin pour ${rname(rid)}` : "Soin collectif du cheptel", fields: [
+function treatForm(rid, ex) {
+  form({ title: ex ? "Modifier le soin" : (rid ? `Soin pour ${rname(rid)}` : "Soin collectif du cheptel"), values: ex || {}, fields: [
       { k: "type", label: "Type d'intervention", type: "select", opts: TREAT_TYPES }, { k: "product", label: "Nom du produit / médicament", req: true, ph: "ex. Ivermectine 1%, Vaccin VHD" },
       { k: "date", label: "Date d'administration", type: "date", req: true, def: today() }, { k: "dosage", label: "Dosage / mode", ph: "ex. 0,5 mL sous-cutané" },
       { k: "withdrawal", label: "Délai d'attente (jours)", type: "number", min: 0, def: 0, hint: "Aucune vente ni abattage autorisés pendant ce délai." },
       { k: "next", label: "Date du prochain rappel", type: "date" }, { k: "notes", label: "Notes", type: "textarea", full: true }],
     onSubmit: async (v) => {
-      const ok = await save("treatment", { rabbit: rid || "", ...v, withdrawal: Number(v.withdrawal) || 0 });
-      if (ok) { closeModal(); toast("Soin enregistré"); }
+      const ok = await save("treatment", { ...(ex || {}), rabbit: rid || "", ...v, withdrawal: Number(v.withdrawal) || 0 });
+      if (ok) { closeModal(); toast(ex ? "Soin modifié" : "Soin enregistré"); }
       return ok;
     } });
 }
@@ -3434,13 +3434,13 @@ function feedForm(grams) {
     }
   });
 }
-function txForm(type) {
-  form({ title: type === "in" ? "Enregistrer une recette" : "Enregistrer une dépense", fields: [
-      { k: "amount", label: "Montant (FCFA)", type: "number", min: 0, req: true }, { k: "cat", label: "Poste comptable", type: "select", opts: type === "in" ? TX_IN : TX_OUT },
-      { k: "label", label: "Libellé de l'opération", full: true, ph: type === "in" ? "ex. Vente de 8 lapins de chair" : "ex. Achat de mangeoires" }, { k: "date", label: "Date", type: "date", req: true, def: today() }],
+function txForm(type, ex) {
+  form({ title: ex ? "Modifier l'opération" : (type === "in" ? "Enregistrer une recette" : "Enregistrer une dépense"), values: ex || {}, fields: [
+      { k: "amount", label: "Montant (FCFA)", type: "number", min: 0, req: true, def: ex ? ex.amount : "" }, { k: "cat", label: "Poste comptable", type: "select", opts: type === "in" ? TX_IN : TX_OUT, def: ex ? ex.cat : "" },
+      { k: "label", label: "Libellé de l'opération", full: true, ph: type === "in" ? "ex. Vente de 8 lapins de chair" : "ex. Achat de mangeoires", def: ex ? ex.label : "" }, { k: "date", label: "Date", type: "date", req: true, def: ex ? ex.date : today() }],
     onSubmit: async (v) => {
-      const ok = await save("tx", { ...v, type });
-      if (ok) { closeModal(); toast(type === "in" ? "Recette enregistrée" : "Dépense enregistrée"); }
+      const ok = await save("tx", { ...(ex || {}), ...v, type });
+      if (ok) { closeModal(); toast(ex ? "Opération modifiée" : (type === "in" ? "Recette enregistrée" : "Dépense enregistrée")); }
       return ok;
     } });
 }
@@ -3576,7 +3576,7 @@ const A = {
       render();
     }
   },
-  newtx: (el) => txForm(el.dataset.v),
+  newtx: (el) => txForm(el.dataset.v), edittx: (el) => { const t = byId(S.tx, el.dataset.id); if (t) txForm(t.type, t); }, editweight: (el) => { const w = byId(S.weights, el.dataset.id); if (w) weightForm(w.rabbit, w); }, edittreat: (el) => { const t = byId(S.treatments, el.dataset.id); if (t) treatForm(t.rabbit, t); },
   newbatch: (el) => batchForm(el.dataset.id), editbatch: (el) => batchForm(null, byId(S.batches, el.dataset.id)), sell: (el) => sellForm(el.dataset.id),
   bdeath: (el) => { const b = byId(S.batches, el.dataset.id); form({ title: `Perte sur le lot ${b.code}`, fields: [{ k: "n", label: "Nombre de lapereaux décédés", type: "number", min: 1, req: true, def: 1 }], onSubmit: async (v) => { const ok = await save("batch", { ...b, current: Math.max(0, b.current - v.n), deaths: (Number(b.deaths) || 0) + v.n }); if (ok) toast("Perte enregistrée"); return ok; } }); },
   bweight: (el) => { const b = byId(S.batches, el.dataset.id); form({ title: `Poids moyen du lot ${b.code}`, fields: [{ k: "avgWeight", label: "Poids moyen mesuré (g)", type: "number", min: 0, req: true, def: b.avgWeight || "" }], onSubmit: async (v) => { const ok = await save("batch", { ...b, avgWeight: v.avgWeight }); if (ok) toast("Poids moyen enregistré"); return ok; } }); },

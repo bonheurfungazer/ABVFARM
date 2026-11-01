@@ -788,6 +788,12 @@ function ensureCloudSyncListener(uid) {
       const cloudDocs = snap.docs.map((d) => d.data());
       const all = getLocalData();
       let updated = false;
+      let _seen = []; try { _seen = JSON.parse(localStorage.getItem("abvfarm_cloud_ids") || "[]"); } catch (e) {}
+      const _cur = new Set(cloudDocs.filter((d) => d && d.kind && d.id).map((d) => d.kind + "-" + d.id));
+      let _pend = []; try { _pend = JSON.parse(localStorage.getItem("abvfarm_pending_sync") || "[]"); } catch (e) {}
+      const _pendKeys = new Set(_pend.map((x) => x.kind + "-" + x.id));
+      for (const _key of _seen) { if (!_cur.has(_key) && !_pendKeys.has(_key) && all[_key]) { delete all[_key]; updated = true; } }
+      try { localStorage.setItem("abvfarm_cloud_ids", JSON.stringify([..._cur])); } catch (e) {}
       cloudDocs.forEach((d) => {
         if (d && d.kind && d.id) {
           const _local = all[d.kind + "-" + d.id];
@@ -1361,7 +1367,7 @@ const sexSym = (r) => r?.sex === "Male" ? "♂" : r?.sex === "Female" ? "♀" : 
 const rname = (id) => rab(id)?.name || "Inconnu";
 function weightsOf(id) { return S.weights.filter((w) => w.rabbit === id).sort((a, b) => a.date.localeCompare(b.date)); }
 function lastWeight(id) { const w = weightsOf(id); return w.length ? w[w.length - 1].kg : null; }
-function gmq(id) { const w = weightsOf(id); if (w.length < 2) return null; const a = w[0], b = w[w.length - 1]; const d = diff(a.date, b.date); return d > 0 ? ((b.kg - a.kg) * 1000) / d : null; }
+function gmq(id) { const w = weightsOf(id); if (w.length < 2) return null; const a = w[w.length - 2], b = w[w.length - 1]; const d = diff(a.date, b.date); return d > 0 ? ((b.kg - a.kg) * 1000) / d : null; }
 function kgOf(it) {
   const q = Number(it.qty) || 0;
   switch (it.unit) { case "sac 25 kg": return q * 25; case "sac 50 kg": return q * 50; case "g": return q / 1000; case "kg": return q; default: return 0; }
@@ -1369,25 +1375,32 @@ function kgOf(it) {
 function feedStock() {
   const bought = S.inventory.filter((i) => i.cat === "Nourriture").reduce((s, i) => s + kgOf(i), 0);
   const used = S.feed.reduce((s, f) => s + (Number(f.grams) || 0), 0) / 1000;
-  return Math.max(0, bought - used);
+  return bought - used;
 }
+function remainingForItem(id) { const it = byId(S.inventory, id); if (!it) return null; return kgOf(it) - S.feed.filter((f) => f.item === id).reduce((s, f) => s + (Number(f.grams) || 0), 0) / 1000; }
+function batchReceipts(b) { return S.tx.filter((x) => x.type === "in" && (x.batchId === b.id || (x.label || "").includes(b.code))).reduce((s, x) => s + (Number(x.amount) || 0), 0); }
+function saleTxForRabbit(id) { return S.tx.find((x) => x.rabbitId === id); }
 function underWithdrawal(id) {
   const t = today();
   return S.treatments.filter((x) => x.rabbit === id && Number(x.withdrawal) > 0 && addDays(x.date, Number(x.withdrawal)) > t)
     .map((x) => addDays(x.date, Number(x.withdrawal))).sort().pop() || null;
 }
 function ration() {
-  const t = today(); const c = { mal: 0, fem: 0, gest: 0, lact: 0, y1: 0, y2: 0 };
+  const t = today(); const c = { mal: 0, fem: 0, gest: 0, lact: 0, y1: 0, y2: 0, ind: 0 };
+  const _batchMatings = new Set(S.batches.filter((b) => b.status !== "Vendu").map((b) => b.mating).filter(Boolean));
   S.rabbits.filter(isActive).forEach((r) => {
     const a = age(r);
-    if (a < 30) return; if (a < 60) { c.y1++; return; } if (a < 120) { c.y2++; return; }
+    if (a < 30) return;
+    if (a < 120 && r.matingId && _batchMatings.has(r.matingId)) return; // counted once via the batch, not twice
+    if (a < 60) { c.y1++; return; } if (a < 120) { c.y2++; return; }
     if (r.sex === "Male") { c.mal++; return; }
-    const lact = S.matings.some((m) => m.female === r.id && m.status === "Mise bas" && m.birthDate && diff(m.birthDate, t) <= 40);
+    if (r.sex !== "Female") { c.ind++; return; }
+    const lact = S.matings.some((m) => m.female === r.id && m.status === "Mise bas" && m.birthDate && diff(m.birthDate, t) <= WEANING);
     const gest = S.matings.some((m) => m.female === r.id && ["Accouplé", "Gestation confirmée"].includes(m.status) && diff(t, m.due) >= -3);
     if (lact) c.lact++; else if (gest) c.gest++; else c.fem++;
   });
-  const fat = S.batches.filter((b) => b.status === "Actif").reduce((s, b) => s + (Number(b.current) || 0), 0);
-  const g = c.mal * 120 + c.fem * 120 + c.gest * 180 + c.lact * 280 + c.y1 * 50 + c.y2 * 90 + fat * 110;
+  const fat = S.batches.filter((b) => b.status !== "Vendu").reduce((s, b) => s + (Number(b.current) || 0), 0);
+  const g = c.mal * 120 + c.fem * 120 + c.gest * 180 + c.lact * 280 + c.y1 * 50 + c.y2 * 90 + c.ind * 110 + fat * 110;
   return { grams: g, c, fat };
 }
 
@@ -1411,7 +1424,7 @@ function offspringF(male, female) { if (!male || !female) return 0; return 0.5 *
 function riskOf(f) {
   if (f <= 0.0001) return { lvl: "ok", label: "Aucune parenté connue", tip: "Accouplement sûr." };
   if (f < 6.25) return { lvl: "warn", label: "Risque faible", tip: "Parenté éloignée. Acceptable avec surveillance." };
-  if (f <= 12.5) return { lvl: "bad", label: "Risque élevé", tip: "Équivaut à des demi-frères/sœurs. À éviter." };
+  if (f <= 12.5) return { lvl: "bad", label: "Risque élevé", tip: "Équivaut à des demi-frères/sœurs. Accepté jusqu'à 12,5 %, à surveiller." };
   return { lvl: "bad", label: "Risque critique", tip: "Parenté très proche (frère/sœur, parent/enfant). Déconseillé." };
 }
 
@@ -1420,16 +1433,16 @@ function alerts() {
   const t = today(), out = [];
   for (const m of S.matings) {
     const d = diff(m.date, t), toBirth = diff(t, m.due), f = rname(m.female);
-    if (m.status === "Accouplé" && d >= 10 && d <= 14) out.push({ sev: "info", icon: "hand", title: `Palper ${f}`, sub: `J${d} après saillie — fenêtre de palpation J10 à J14`, act: [["Gestation confirmée", "mst", m.id, "Gestation confirmée"], ["Vide", "mst", m.id, "Échoué"]] });
+    if (m.status === "Accouplé" && d >= 10) out.push({ sev: d <= 14 ? "info" : "warn", icon: "hand", title: `Palper ${f}`, sub: d <= 14 ? `J${d} après saillie — fenêtre de palpation J10 à J14` : `Palpation en retard : J${d} après saillie`, act: [["Gestation confirmée", "mst", m.id, "Gestation confirmée"], ["Vide", "mst", m.id, "Échoué"]] });
     if (["Accouplé", "Gestation confirmée"].includes(m.status) && toBirth >= 1 && toBirth <= 3) out.push({ sev: "warn", icon: "nest", title: `Boîte à nid pour ${f}`, sub: `Mise bas prévue ${relDay(toBirth)} (${fmtShort(m.due)})` });
-    if (["Accouplé", "Gestation confirmée"].includes(m.status) && toBirth <= 0 && toBirth >= -6) out.push({ sev: "bad", icon: "baby", title: `Mise bas attendue : ${f}`, sub: toBirth === 0 ? "Prévue aujourd'hui" : `En retard de ${-toBirth} j`, act: [["Enregistrer la mise bas", "kindle", m.id]] });
+    if (["Accouplé", "Gestation confirmée"].includes(m.status) && toBirth <= 0) out.push({ sev: "bad", icon: "baby", title: `Mise bas attendue : ${f}`, sub: toBirth === 0 ? "Prévue aujourd'hui" : `En retard de ${-toBirth} j`, act: [["Enregistrer la mise bas", "kindle", m.id]] });
     if (m.status === "Mise bas" && m.birthDate) {
       const a = diff(m.birthDate, t);
-      if (a >= WEANING - 2 && a <= WEANING + 10 && !S.batches.some((b) => b.mating === m.id)) out.push({ sev: "info", icon: "layers", title: `Sevrer la portée de ${f}`, sub: `Lapereaux âgés de ${a} j`, act: [["Créer un lot", "newbatch", m.id]] });
+      if (a >= WEANING - 2 && !S.batches.some((b) => b.mating === m.id)) out.push({ sev: a <= WEANING + 10 ? "info" : "warn", icon: "layers", title: `Sevrer la portée de ${f}`, sub: a <= WEANING + 10 ? `Lapereaux âgés de ${a} j` : `Sevrage en retard : lapereaux âgés de ${a} j`, act: [["Créer un lot", "newbatch", m.id]] });
     }
   }
-  for (const x of S.treatments) if (x.next) { const n = diff(t, x.next); if (n <= 2 && n >= -14) out.push({ sev: n < 0 ? "bad" : "warn", icon: "syringe", title: `${x.type} : ${x.product || "rappel"}`, sub: `${x.rabbit ? rname(x.rabbit) : "Tout l'élevage"} — ${relDay(n)}` }); }
-  for (const b of S.batches) if (b.status === "Actif") { const n = diff(t, b.target); if (n <= 3) out.push({ sev: "ok", icon: "coins", title: `Lot ${b.code} prêt à la vente`, sub: n < 0 ? `Date cible dépassée de ${-n} j` : `Date cible ${relDay(n)}`, act: [["Vendre", "sell", b.id]] }); }
+  for (const x of S.treatments) if (x.next) { const n = diff(t, x.next); if (n <= 2) out.push({ sev: n < 0 ? "bad" : "warn", icon: "syringe", title: `${x.type} : ${x.product || "rappel"}`, sub: `${x.rabbit ? rname(x.rabbit) : "Tout l'élevage"} — ${relDay(n)}` }); }
+  for (const b of S.batches) if (["Actif", "Quarantaine"].includes(b.status)) { const n = diff(t, b.target); if (n <= 3) out.push({ sev: "ok", icon: "coins", title: `Lot ${b.code} prêt à la vente`, sub: n < 0 ? `Date cible dépassée de ${-n} j` : `Date cible ${relDay(n)}`, act: [["Vendre", "sell", b.id]] }); }
   for (const r of S.reminders) if (!r.done && r.due <= t) out.push({ sev: r.prio === "Haute" ? "bad" : "warn", icon: "bell", title: r.title, sub: `Rappel — ${relDay(diff(t, r.due))}`, act: [["Fait", "remdone", r.id]] });
   const stock = feedStock(), rg = ration().grams;
   if (S.inventory.length && stock < 10) out.push({ sev: stock <= 0 ? "bad" : "warn", icon: "grain", title: stock <= 0 ? "Stock d'aliment épuisé" : `Stock d'aliment faible : ${nf1.format(stock)} kg`, sub: rg ? `Environ ${nf1.format(stock / (rg / 1000))} jours de ration` : "Pensez à réapprovisionner", act: [["Ajouter un achat", "newitem"]] });
@@ -1691,6 +1704,7 @@ function gestCard(m) {
     <div class="actions">${m.status === "Accouplé" && d >= 9 ? `<button class="btn sm" data-act="mst" data-id="${m.id}" data-v="Gestation confirmée">Gestation confirmée</button>` : ""}
     ${d >= 26 ? `<button class="btn sm pri" data-act="kindle" data-id="${m.id}">Mise bas</button>` : ""}
     <button class="btn sm ghost" data-act="mst" data-id="${m.id}" data-v="Échoué">Échec</button>
+    <button class="btn sm ghost" data-act="editmating" data-id="${m.id}" aria-label="Modifier la saillie">${ICON.edit}</button>
     <button class="btn sm ghost danger" data-act="del" data-kind="mating" data-id="${m.id}" title="Supprimer la saillie" aria-label="Supprimer la saillie">${ICON.trash}</button></div></div></div>`;
 }
 
@@ -1701,7 +1715,7 @@ VIEWS.accueil = () => {
   const males = act.filter((r) => r.sex === "Male").length, fem = act.filter((r) => r.sex === "Female").length;
   const mature = act.filter((r) => age(r) >= MATURE_DAYS).length;
   const gest = S.matings.filter((m) => ["Accouplé", "Gestation confirmée"].includes(m.status)).sort((a, b) => a.due.localeCompare(b.due));
-  const fat = S.batches.filter((b) => b.status === "Actif").reduce((s, b) => s + (Number(b.current) || 0), 0);
+  const fat = S.batches.filter((b) => ["Actif", "Quarantaine"].includes(b.status)).reduce((s, b) => s + (Number(b.current) || 0), 0);
   const stock = feedStock(); const rt = ration(); const autonomy = rt.grams ? stock / (rt.grams / 1000) : null;
   const m0 = today().slice(0, 7); const monthTx = S.tx.filter((x) => x.date.startsWith(m0));
   const bal = monthTx.reduce((s, x) => s + (x.type === "in" ? 1 : -1) * (Number(x.amount) || 0), 0);
@@ -1820,7 +1834,7 @@ VIEWS.lapins = () => {
     male: baseList.filter((r) => r.sex === "Male").length,
     female: baseList.filter((r) => r.sex === "Female").length,
     gest: baseList.filter((r) => S.matings.some((m) => m.female === r.id && ["Accouplé", "Gestation confirmée"].includes(m.status))).length,
-    lact: baseList.filter((r) => S.matings.some((m) => m.female === r.id && m.status === "Mise bas" && m.birthDate && diff(m.birthDate, t) <= 45)).length,
+    lact: baseList.filter((r) => S.matings.some((m) => m.female === r.id && m.status === "Mise bas" && m.birthDate && diff(m.birthDate, t) <= WEANING)).length,
     mature: baseList.filter((r) => age(r) >= MATURE_DAYS).length,
     young: baseList.filter((r) => { const a = age(r); return a >= 0 && a < MATURE_DAYS; }).length,
     treat: baseList.filter((r) => underWithdrawal(r.id) != null).length
@@ -1844,7 +1858,7 @@ VIEWS.lapins = () => {
     list = list.filter((r) => {
       const a = age(r);
       const isGest = S.matings.some((m) => m.female === r.id && ["Accouplé", "Gestation confirmée"].includes(m.status));
-      const isLact = S.matings.some((m) => m.female === r.id && m.status === "Mise bas" && m.birthDate && diff(m.birthDate, t) <= 45);
+      const isLact = S.matings.some((m) => m.female === r.id && m.status === "Mise bas" && m.birthDate && diff(m.birthDate, t) <= WEANING);
       const isTreat = underWithdrawal(r.id) != null;
       switch (ui.stage) {
         case "male": return r.sex === "Male";
@@ -2158,7 +2172,7 @@ VIEWS.lapins = () => {
 function rabbitCard(r) {
   const a = age(r), w = lastWeight(r.id), wd = underWithdrawal(r.id);
   const gest = S.matings.find((m) => m.female === r.id && ["Accouplé", "Gestation confirmée"].includes(m.status));
-  const lact = S.matings.find((m) => m.female === r.id && m.status === "Mise bas" && m.birthDate && diff(m.birthDate, today()) <= 45);
+  const lact = S.matings.find((m) => m.female === r.id && m.status === "Mise bas" && m.birthDate && diff(m.birthDate, today()) <= WEANING);
   return `<a class="rcard ${isActive(r) ? sexCls(r) : "off"}" href="#lapin-${r.id}">
     <div class="top"><div style="min-width:0"><div class="nm">${esc(r.name)}</div><div class="hint">${esc(r.breed || "Race non précisée")}</div></div><span class="sx">${sexSym(r)}</span></div>
     <div class="facts"><span>Âge <b>${ageLabel(a)}</b></span><span>Poids <b>${w != null ? nf2.format(w) + " kg" : "—"}</b></span></div>
@@ -2176,7 +2190,7 @@ function rabbitCard(r) {
 function rabbitTableRow(r) {
   const a = age(r), w = lastWeight(r.id), wd = underWithdrawal(r.id);
   const gest = S.matings.find((m) => m.female === r.id && ["Accouplé", "Gestation confirmée"].includes(m.status));
-  const lact = S.matings.find((m) => m.female === r.id && m.status === "Mise bas" && m.birthDate && diff(m.birthDate, today()) <= 45);
+  const lact = S.matings.find((m) => m.female === r.id && m.status === "Mise bas" && m.birthDate && diff(m.birthDate, today()) <= WEANING);
   return `<tr>
     <td>
       <a href="#lapin-${r.id}" style="font-weight:700;color:inherit;text-decoration:none;display:flex;align-items:center;gap:6px">
@@ -2292,11 +2306,11 @@ VIEWS.saillies = () => {
   <div class="tiles"><div class="tile"><span class="l">Gestations en cours</span><span class="v">${cur.length}</span></div><div class="tile"><span class="l">Portées nées</span><span class="v">${done.length}</span></div><div class="tile"><span class="l">Lapereaux nés vivants</span><span class="v">${born}</span><span class="s">${done.length ? nf1.format(born / done.length) + " par portée" : "—"}</span></div><div class="tile"><span class="l">Taux de réussite</span><span class="v">${rate == null ? "—" : rate + " %"}</span></div></div>
   <section class="card"><div class="row-h"><h2>Gestations actives</h2></div>${cur.length ? `<div class="grid g2">${cur.map(gestCard).join("")}</div>` : emptyBox("heart", "Aucune gestation en cours", "Enregistrez une nouvelle saillie pour démarrer le calendrier de gestation.", `<button class="btn pri" data-act="newmating">${ICON.plus}Nouvelle saillie</button>`)}</section>
   <section class="card"><div class="row-h"><h2>Historique des saillies</h2></div>${past.length ? `<div class="tablewrap"><table><thead><tr><th>Femelle</th><th>Mâle</th><th>Date saillie</th><th>Statut</th><th class="r">Vivants</th><th class="r">Morts-nés</th><th class="r">Consanguinité F</th><th></th></tr></thead><tbody>
-    ${past.slice(((Number(ui.spage) || 1) - 1) * 20, (Number(ui.spage) || 1) * 20).map((m) => `<tr><td><a href="#lapin-${m.female}">${esc(rname(m.female))}</a></td><td><a href="#lapin-${m.male}">${esc(rname(m.male))}</a></td><td>${fmtDate(m.date)}</td><td>${mstChip(m.status)}</td><td class="r">${m.status === "Mise bas" ? Number(m.alive) || 0 : "—"}</td><td class="r">${m.status === "Mise bas" ? Number(m.dead) || 0 : "—"}</td><td class="r">${nf1.format(offspringF(m.male, m.female))} %</td><td class="r">${m.status === "Mise bas" ? `<button class="btn sm" data-act="kits" data-id="${m.id}" title="Créer une fiche individuelle par lapereau vivant">Fiches lapereaux</button>` : ""}<button class="btn sm ghost" data-act="del" data-kind="mating" data-id="${m.id}" aria-label="Supprimer">${ICON.trash}</button></td></tr>`).join("")}</tbody></table></div>${(() => { const _pages = Math.max(1, Math.ceil(past.length / 20)); const _pg = Math.max(1, Math.min(_pages, Number(ui.spage) || 1)); ui.spage = _pg; return _pages > 1 ? `<div style="display:flex;gap:6px;align-items:center;justify-content:center;margin-top:10px"><button class="btn sm ghost" data-act="ui" data-k="spage" data-v="${_pg - 1}" ${_pg <= 1 ? "disabled" : ""}>← Précédent</button><span>Page ${_pg} / ${_pages}</span><button class="btn sm ghost" data-act="ui" data-k="spage" data-v="${_pg + 1}" ${_pg >= _pages ? "disabled" : ""}>Suivant →</button></div>` : ""; })()}` : `<p class="hint">Les portées nées ou terminées s'afficheront ici.</p>`}</section>`;
+    ${past.slice(((Number(ui.spage) || 1) - 1) * 20, (Number(ui.spage) || 1) * 20).map((m) => `<tr><td><a href="#lapin-${m.female}">${esc(rname(m.female))}</a></td><td><a href="#lapin-${m.male}">${esc(rname(m.male))}</a></td><td>${fmtDate(m.date)}</td><td>${mstChip(m.status)}</td><td class="r">${m.status === "Mise bas" ? Number(m.alive) || 0 : "—"}</td><td class="r">${m.status === "Mise bas" ? Number(m.dead) || 0 : "—"}</td><td class="r">${nf1.format(offspringF(m.male, m.female))} %</td><td class="r">${m.status === "Mise bas" ? `<button class="btn sm" data-act="kits" data-id="${m.id}" title="Créer une fiche individuelle par lapereau vivant">Fiches lapereaux</button>` : ""}<button class="btn sm ghost" data-act="editmating" data-id="${m.id}" aria-label="Modifier la saillie">${ICON.edit}</button><button class="btn sm ghost" data-act="del" data-kind="mating" data-id="${m.id}" aria-label="Supprimer">${ICON.trash}</button></td></tr>`).join("")}</tbody></table></div>${(() => { const _pages = Math.max(1, Math.ceil(past.length / 20)); const _pg = Math.max(1, Math.min(_pages, Number(ui.spage) || 1)); ui.spage = _pg; return _pages > 1 ? `<div style="display:flex;gap:6px;align-items:center;justify-content:center;margin-top:10px"><button class="btn sm ghost" data-act="ui" data-k="spage" data-v="${_pg - 1}" ${_pg <= 1 ? "disabled" : ""}>← Précédent</button><span>Page ${_pg} / ${_pages}</span><button class="btn sm ghost" data-act="ui" data-k="spage" data-v="${_pg + 1}" ${_pg >= _pages ? "disabled" : ""}>Suivant →</button></div>` : ""; })()}` : `<p class="hint">Les portées nées ou terminées s'afficheront ici.</p>`}</section>`;
 };
 
 VIEWS.engraissement = () => {
-  const act = S.batches.filter((b) => b.status !== "Vendu"), old = S.batches.filter((b) => b.status === "Vendu");
+  const act = S.batches.filter((b) => ["Actif", "Quarantaine"].includes(b.status)), old = S.batches.filter((b) => !["Actif", "Quarantaine"].includes(b.status));
   const heads = act.reduce((s, b) => s + (Number(b.current) || 0), 0);
   const ini = S.batches.reduce((s, b) => s + (Number(b.initial) || 0), 0), dead = S.batches.reduce((s, b) => s + (Number(b.deaths) || 0), 0);
   return `<div class="head"><div><h1>Engraissement des lots</h1><p>Du sevrage (J${WEANING}) jusqu'à la commercialisation</p></div><button class="btn pri" data-act="newbatch">${ICON.plus}Nouveau lot</button></div>
@@ -2308,7 +2322,7 @@ function batchCard(b) {
   const days = diff(b.weaning, today()), total = Math.max(1, diff(b.weaning, b.target)), left = diff(today(), b.target);
   const pc = Math.max(0, Math.min(100, (days / total) * 100)); const mort = b.initial ? (Number(b.deaths) || 0) / b.initial : 0;
   return `<section class="card"><div class="row-h"><div><h2>${esc(b.code)}</h2><span class="hint">${b.mating ? `Portée de ${esc(rname(byId(S.matings, b.mating)?.female))} · ` : ""}${b.cage ? `<span class="tag">${esc(b.cage)}</span>` : ""}</span></div>${b.status === "Quarantaine" ? `<span class="chip bad">Quarantaine</span>` : left <= 0 ? `<span class="chip ok">Prêt à vendre</span>` : `<span class="chip info">J${days} post-sevrage</span>`}</div>
-    <dl class="kv" style="margin:0 0 12px"><div><dt>Effectif</dt><dd class="num">${b.current} / ${b.initial}</dd></div><div><dt>Mortalité</dt><dd class="${mort > 0.1 ? "neg" : ""}">${nf1.format(mort * 100)} %</dd></div><div><dt>Poids moyen</dt><dd>${b.avgWeight ? nf0.format(b.avgWeight) + " g" : "—"}</dd></div><div><dt>Recettes lot</dt><dd>${fcfa(S.tx.filter((x) => x.type === "in" && (x.label || "").includes(b.code)).reduce((s, x) => s + (Number(x.amount) || 0), 0))}</dd></div><div><dt>Date de vente visée</dt><dd>${fmtDate(b.target)}</dd></div></dl>
+    <dl class="kv" style="margin:0 0 12px"><div><dt>Effectif</dt><dd class="num">${b.current} / ${b.initial}</dd></div><div><dt>Mortalité</dt><dd class="${mort > 0.1 ? "neg" : ""}">${nf1.format(mort * 100)} %</dd></div><div><dt>Poids moyen</dt><dd>${b.avgWeight ? nf0.format(b.avgWeight) + " g" : "—"}</dd></div><div><dt>Recettes lot</dt><dd>${fcfa(batchReceipts(b))}</dd></div><div><dt>Date de vente visée</dt><dd>${fmtDate(b.target)}</dd></div></dl>
     <div class="bar"><i style="width:${pc}%"></i></div><p class="hint" style="margin:6px 0 12px">${left > 0 ? `${left} jours avant la date de vente prévue` : "Prêt pour la vente"}</p>
     <div class="actions"><button class="btn sm" data-act="bweight" data-id="${b.id}">${ICON.scale}Poids moyen</button><button class="btn sm" data-act="bdeath" data-id="${b.id}">Perte</button><button class="btn sm pri" data-act="sell" data-id="${b.id}">${ICON.coins}Vendre</button><button class="btn sm ghost" data-act="editbatch" data-id="${b.id}" aria-label="Modifier">${ICON.edit}</button><button class="btn sm ghost danger" data-act="del" data-kind="batch" data-id="${b.id}" title="Supprimer le lot" aria-label="Supprimer le lot">${ICON.trash}</button></div></section>`;
 }
@@ -2316,6 +2330,7 @@ function batchCard(b) {
 VIEWS.stocks = () => {
   const stock = feedStock(), rt = ration(), days = rt.grams ? stock / (rt.grams / 1000) : null;
   const items = S.inventory.slice().sort((a, b) => b.date.localeCompare(a.date));
+  const _nonConv = items.some((i) => i.cat === "Nourriture" && !["sac 25 kg", "sac 50 kg", "g", "kg"].includes(i.unit));
   const feeds = S.feed.slice().sort((a, b) => b.date.localeCompare(a.date));
   afterHooks.push(() => { const _f = $("#feedFrom"); if (_f) _f.addEventListener("change", () => { ui.feedFrom = _f.value; render(); }); const _t = $("#feedTo"); if (_t) _t.addEventListener("change", () => { ui.feedTo = _t.value; render(); }); });
   const _feeds = feeds.filter((f) => (!ui.feedFrom || (f.date || "") >= ui.feedFrom) && (!ui.feedTo || (f.date || "") <= ui.feedTo));
@@ -2327,7 +2342,7 @@ VIEWS.stocks = () => {
   <div class="tile"><span class="l">Distribué (7 derniers jours)</span><span class="v">${nf1.format(last7)} kg</span><span class="s">${nf1.format(last7 / 7)} kg / jour</span></div>
   <div class="tile"><span class="l">Dépenses approvisionnement (ce mois)</span><span class="v" style="font-size:1.35rem">${fcfa(monthSpend)}</span></div></div>
   <div class="grid g2">
-    <section class="card"><div class="row-h"><h2>Achats & Réassorts</h2></div>${items.length ? `<div class="list">${items.map((i) => `<div class="li"><span class="ico ${i.cat === "Nourriture" ? "ok" : i.cat === "Médicament" ? "info" : ""}">${ICON[i.cat === "Nourriture" ? "grain" : i.cat === "Médicament" ? "syringe" : "box"]}</span><div class="grow"><div class="t">${esc(i.name)}</div><div class="d">${esc(i.cat)} · ${nf2.format(Number(i.qty) || 0)} ${esc(i.unit)} · ${fmtDate(i.date)}${i.supplier ? ` · ${esc(i.supplier)}` : ""}${i.cat === "Nourriture" ? ` · restant ≈ ${nf1.format(Math.max(0, kgOf(i) - S.feed.filter((f) => f.item === i.id).reduce((s, f) => s + (Number(f.grams) || 0), 0) / 1000))} kg` : ""}${i.cat === "Nourriture" && Number(i.minQty) > 0 && (kgOf(i) - S.feed.filter((f) => f.item === i.id).reduce((s, f) => s + (Number(f.grams) || 0), 0) / 1000) <= Number(i.minQty) ? ` · ⚠️ sous le seuil (${nf1.format(Number(i.minQty))} kg)` : ""}${i.expiry && diff(today(), i.expiry) >= -30 ? ` · ⚠️ péremption ${fmtDate(i.expiry)}` : ""}</div></div><b class="num">${fcfa(i.price)}</b><button class="btn sm ghost" data-act="edititem" data-id="${i.id}" aria-label="Modifier">${ICON.edit}</button><button class="btn sm ghost" data-act="del" data-kind="item" data-id="${i.id}" aria-label="Supprimer">${ICON.trash}</button></div>`).join("")}</div>` : emptyBox("box", "Aucun approvisionnement enregistré", "Enregistrez vos sacs d'aliments, intrants vétérinaires ou matériel.", `<button class="btn pri" data-act="newitem">${ICON.plus}Enregistrer un achat</button>`)}</section>
+    <section class="card"><div class="row-h"><h2>Achats & Réassorts</h2></div>${_nonConv ? `<p class="hint" style="margin:6px 0">⚠️ Certains achats de nourriture (L, unité, boîte) ne sont pas convertibles en kg et ne sont pas comptés dans le stock total.</p>` : ""}${items.length ? `<div class="list">${items.map((i) => `<div class="li"><span class="ico ${i.cat === "Nourriture" ? "ok" : i.cat === "Médicament" ? "info" : ""}">${ICON[i.cat === "Nourriture" ? "grain" : i.cat === "Médicament" ? "syringe" : "box"]}</span><div class="grow"><div class="t">${esc(i.name)}</div><div class="d">${esc(i.cat)} · ${nf2.format(Number(i.qty) || 0)} ${esc(i.unit)} · ${fmtDate(i.date)}${i.supplier ? ` · ${esc(i.supplier)}` : ""}${i.cat === "Nourriture" ? (["sac 25 kg", "sac 50 kg", "g", "kg"].includes(i.unit) ? ` · restant ≈ ${nf1.format(remainingForItem(i.id))} kg` : ` · restant non mesurable en kg (unité : ${esc(i.unit)})`) : ""}${i.cat === "Nourriture" && Number(i.minQty) > 0 && (kgOf(i) - S.feed.filter((f) => f.item === i.id).reduce((s, f) => s + (Number(f.grams) || 0), 0) / 1000) <= Number(i.minQty) ? ` · ⚠️ sous le seuil (${nf1.format(Number(i.minQty))} kg)` : ""}${i.expiry && diff(today(), i.expiry) >= -30 ? ` · ⚠️ péremption ${fmtDate(i.expiry)}` : ""}</div></div><b class="num">${fcfa(i.price)}</b><button class="btn sm ghost" data-act="edititem" data-id="${i.id}" aria-label="Modifier">${ICON.edit}</button><button class="btn sm ghost" data-act="del" data-kind="item" data-id="${i.id}" aria-label="Supprimer">${ICON.trash}</button></div>`).join("")}</div>` : emptyBox("box", "Aucun approvisionnement enregistré", "Enregistrez vos sacs d'aliments, intrants vétérinaires ou matériel.", `<button class="btn pri" data-act="newitem">${ICON.plus}Enregistrer un achat</button>`)}</section>
     <section class="card"><div class="row-h"><h2>Journal des distributions d'aliment</h2><div style="display:flex;gap:6px;align-items:center"><label class="hint">Du <input id="feedFrom" type="date" value="${esc(ui.feedFrom || "")}"></label><label class="hint">au <input id="feedTo" type="date" value="${esc(ui.feedTo || "")}"></label></div></div>${_feeds.length ? `<div class="list">${_feeds.slice(0, 30).map((f) => `<div class="li"><span class="ico">${ICON.grain}</span><div class="grow"><div class="t">${nf1.format(Number(f.grams) / 1000)} kg</div><div class="d">${fmtDate(f.date)}${f.notes ? " · " + esc(f.notes) : ""}</div></div><button class="btn sm ghost" data-act="editfeed" data-id="${f.id}" aria-label="Modifier">${ICON.edit}</button><button class="btn sm ghost" data-act="del" data-kind="feed" data-id="${f.id}" aria-label="Supprimer">${ICON.trash}</button></div>`).join("")}</div>` : emptyBox("grain", "Aucune distribution enregistrée", "Chaque distribution enregistrée se déduit automatiquement du stock total.")}</section>
   </div>`;
 };
@@ -2420,7 +2435,7 @@ function exportHerdPDF() {
     const fem = act.filter((r) => r.sex === "Female").length;
     const mature = act.filter((r) => age(r) >= MATURE_DAYS).length;
     const gest = S.matings.filter((m) => ["Accouplé", "Gestation confirmée"].includes(m.status));
-    const fat = S.batches.filter((b) => b.status === "Actif").reduce((s, b) => s + (Number(b.current) || 0), 0);
+    const fat = S.batches.filter((b) => ["Actif", "Quarantaine"].includes(b.status)).reduce((s, b) => s + (Number(b.current) || 0), 0);
     const stock = feedStock();
     const rt = ration();
     const m0 = today().slice(0, 7);
@@ -3365,11 +3380,12 @@ function rabbitForm(r) {
     },
     onSubmit: async (v) => {
       delete v.autoname_hint;
-      if (v.cage && S.rabbits.some((x) => x.id !== r.id && isActive(x) && (x.cage || "").trim().toLowerCase() === v.cage.trim().toLowerCase())) toast("⚠️ Attention : cette cage est déjà occupée par un autre lapin actif. Vérifiez avant de valider.");
+      if (v.cage) { const _cage = (S.cages || []).find((c) => (c.name || "").trim().toLowerCase() === v.cage.trim().toLowerCase()); const _occ = S.rabbits.filter((x) => x.id !== r.id && isActive(x) && (x.cage || "").trim().toLowerCase() === v.cage.trim().toLowerCase()).length; if (_cage && Number(_cage.capacity) > 0 && _occ >= Number(_cage.capacity)) { toast(`⛔ Cage ${v.cage} pleine : capacité ${_cage.capacity}, ${_occ} occupant(s) déjà.`); return false; } if (_occ) toast("⚠️ Attention : cette cage est déjà occupée par un autre lapin actif. Vérifiez avant de valider."); }
       const w = v.weight; delete v.weight;
       const obj = { ...r, ...v, status: r.status || "Actif" };
       const ok = await save("rabbit", obj); if (!ok) return false;
-      if (!editing && obj.birth) { await save("reminder", { title: `Premier vermifuge — ${obj.name}`, due: addDays(obj.birth, 30), prio: "Moyenne", desc: "Protocole santé par défaut (modifiable / supprimable).", done: false }); await save("reminder", { title: `Vaccination — ${obj.name}`, due: addDays(obj.birth, 45), prio: "Moyenne", desc: "Protocole santé par défaut (modifiable / supprimable).", done: false }); }
+      if (!editing && obj.birth) { await save("reminder", { title: `Premier vermifuge — ${obj.name}`, due: addDays(obj.birth, 30), prio: "Moyenne", desc: "Protocole santé par défaut (modifiable / supprimable).", done: false, rabbitId: obj.id, kind: "vermifuge" }); await save("reminder", { title: `Vaccination — ${obj.name}`, due: addDays(obj.birth, 45), prio: "Moyenne", desc: "Protocole santé par défaut (modifiable / supprimable).", done: false, rabbitId: obj.id, kind: "vaccination" }); }
+      if (editing && r.birth && obj.birth && obj.birth !== r.birth) { for (const _rem of S.reminders.filter((x) => x.rabbitId === obj.id && !x.done && (x.kind === "vermifuge" || x.kind === "vaccination"))) await save("reminder", { ..._rem, due: addDays(obj.birth, _rem.kind === "vermifuge" ? 30 : 45), title: `${_rem.kind === "vermifuge" ? "Premier vermifuge" : "Vaccination"} — ${obj.name}` }); }
       if (w !== "" && w > 0) await save("weight", { rabbit: obj.id, date: today(), kg: w, notes: editing ? "" : "Poids initial" });
       closeModal();
       toast(editing ? "Fiche mise à jour" : `${obj.name} enregistré`);
@@ -3378,15 +3394,15 @@ function rabbitForm(r) {
     }
   });
 }
-function matingForm(preId) {
+function matingForm(preId, ex) {
   const pre = rab(preId); const males = (x) => x.sex === "Male" && isActive(x), females = (x) => x.sex === "Female" && isActive(x);
   if (!S.rabbits.some(males) || !S.rabbits.some(females)) { toast("Il faut au moins un mâle et une femelle actifs enregistrés."); return; }
-  form({ title: "Enregistrer une saillie", submit: "Valider la saillie",
-    values: { male: pre?.sex === "Male" ? pre.id : "", female: pre?.sex === "Female" ? pre.id : "" },
+  form({ title: ex ? "Modifier la saillie" : "Enregistrer une saillie", submit: ex ? "Enregistrer" : "Valider la saillie",
+    values: ex || { male: pre?.sex === "Male" ? pre.id : "", female: pre?.sex === "Female" ? pre.id : "" },
     fields: [
       { k: "female", label: "Femelle (Mère)", type: "select", req: true, opts: rabOpts(females, "Sélectionner la femelle…") },
       { k: "male", label: "Mâle (Père)", type: "select", req: true, opts: rabOpts(males, "Sélectionner le mâle…") },
-      { k: "date", label: "Date de l'accouplement", type: "date", req: true, def: today() },
+      { k: "date", label: "Date de l'accouplement", type: "date", req: true, def: ex ? ex.date : today() }, { k: "status", label: "Statut", type: "select", opts: ["Accouplé", "Gestation confirmée", "Mise bas", "Échoué"], def: ex ? ex.status : "Accouplé" }, { k: "birthDate", label: "Date de mise bas (si Mise bas)", type: "date", def: ex ? (ex.birthDate || "") : "" }, { k: "alive", label: "Nés vivants (si Mise bas)", type: "number", min: 0, def: ex ? (ex.alive ?? "") : "" }, { k: "dead", label: "Morts-nés (si Mise bas)", type: "number", min: 0, def: ex ? (ex.dead ?? "") : "" },
       { k: "duehint", type: "html" },
       { k: "risk", type: "html" },
       { k: "notes", label: "Notes", type: "textarea", full: true },
@@ -3401,10 +3417,10 @@ function matingForm(preId) {
     },
     onSubmit: async (v) => {
       const _f = offspringF(v.male, v.female); if (_f > 12.5) { toast(`⛔ Saillie bloquée : consanguinité trop élevée (F = ${nf2.format(_f)} % > 12,5 %). Choisissez un autre reproducteur.`); return false; }
-      const pregnant = S.matings.some((m) => m.female === v.female && ["Accouplé", "Gestation confirmée"].includes(m.status));
-      if (pregnant) { toast("⛔ Saillie impossible : cette femelle est déjà en gestation (saillie en cours non clôturée)."); return false; }
-      const ok = await save("mating", { male: v.male, female: v.female, date: v.date, due: addDays(v.date, GESTATION), status: "Accouplé", notes: v.notes });
-      if (ok) { closeModal(); toast("Saillie enregistrée"); }
+      const pregnant = S.matings.some((m) => m.id !== ex?.id && m.female === v.female && ["Accouplé", "Gestation confirmée"].includes(m.status));
+      if (["Accouplé", "Gestation confirmée"].includes(v.status) && pregnant) { toast("⛔ Saillie impossible : cette femelle est déjà en gestation (saillie en cours non clôturée)."); return false; }
+      const ok = await save("mating", { ...(ex || {}), male: v.male, female: v.female, date: v.date, due: addDays(v.date, GESTATION), status: v.status, birthDate: v.status === "Mise bas" ? (v.birthDate || ex?.birthDate || "") : (ex?.birthDate || ""), alive: v.status === "Mise bas" ? (Number(v.alive) || 0) : (ex?.alive ?? 0), dead: v.status === "Mise bas" ? (Number(v.dead) || 0) : (ex?.dead ?? 0), notes: v.notes });
+      if (ok) { closeModal(); toast(ex ? "Saillie modifiée" : "Saillie enregistrée"); }
       return ok;
     } });
 }
@@ -3414,7 +3430,7 @@ function kindleForm(id) {
     fields: [{ k: "birthDate", label: "Date de mise bas", type: "date", req: true }, { k: "alive", label: "Nombre de nés vivants", type: "number", min: 0, req: true, def: 8 }, { k: "dead", label: "Nombre de morts-nés", type: "number", min: 0, def: 0 }, { k: "notes", label: "Observations", type: "textarea", full: true, def: m.notes }],
     onSubmit: async (v) => {
       const ok = await save("mating", { ...m, ...v, status: "Mise bas" });
-      if (ok) { await save("reminder", { title: `Vaccination des lapereaux (${rname(m.female)})`, due: addDays(v.birthDate, 45), prio: "Moyenne", desc: "Protocole santé par défaut pour la portée.", done: false }); closeModal(); toast(`Mise bas enregistrée : ${v.alive} lapereaux`); }
+      if (ok) { await save("reminder", { title: `Vaccination des lapereaux (${rname(m.female)})`, due: addDays(v.birthDate, 45), prio: "Moyenne", desc: "Protocole santé par défaut pour la portée.", done: false, matingId: m.id, kind: "vaccination-portee" }); closeModal(); toast(`Mise bas enregistrée : ${v.alive} lapereaux`); }
       return ok;
     } });
 }
@@ -3433,8 +3449,9 @@ function treatForm(rid, ex) {
       { k: "withdrawal", label: "Délai d'attente (jours)", type: "number", min: 0, def: 0, hint: "Aucune vente ni abattage autorisés pendant ce délai." },
       { k: "next", label: "Date du prochain rappel", type: "date" }, { k: "notes", label: "Notes", type: "textarea", full: true }],
     onSubmit: async (v) => {
-      const ok = await save("treatment", { ...(ex || {}), rabbit: rid || "", ...v, withdrawal: Number(v.withdrawal) || 0 });
-      if (ok && v.next && !ex) await save("reminder", { title: `${v.type} — ${v.product || ""} (${rid ? rname(rid) : "tout l'élevage"})`, due: v.next, prio: "Moyenne", desc: "Rappel automatique lié au soin.", done: false });
+      const _t = { ...(ex || {}), rabbit: rid || "", ...v, withdrawal: Number(v.withdrawal) || 0 };
+      const ok = await save("treatment", _t);
+      if (ok) { const _lr = S.reminders.find((x) => x.treatmentId === _t.id && !x.done); if (v.next && _lr) await save("reminder", { ..._lr, due: v.next, title: `${v.type} — ${v.product || ""} (${rid ? rname(rid) : "tout l'élevage"})` }); else if (!v.next && _lr) await removeDoc("reminder", _lr.id); else if (v.next && !_lr) await save("reminder", { title: `${v.type} — ${v.product || ""} (${rid ? rname(rid) : "tout l'élevage"})`, due: v.next, prio: "Moyenne", desc: "Rappel automatique lié au soin.", done: false, treatmentId: _t.id, rabbitId: rid || "" }); }
       if (ok) { closeModal(); toast(ex ? "Soin modifié" : "Soin enregistré"); }
       return ok;
     } });
@@ -3447,9 +3464,11 @@ function itemForm(ex) {
       { k: "mktx", label: "Imputer directement aux dépenses financières", type: "check", def: true }, { k: "supplier", label: "Fournisseur", ph: "ex. Coopérative, marché" }, { k: "minQty", label: "Seuil d'alerte stock (kg, nourriture uniquement)", type: "number", step: "0.1", min: 0, def: ex ? (ex.minQty || "") : "" }, { k: "expiry", label: "Date de péremption (optionnel)", type: "date", def: ex ? (ex.expiry || "") : "" }, { k: "notes", label: "Détails fournisseur", type: "textarea", full: true, def: ex ? (ex.notes || "") : "" }],
     onSubmit: async (v) => {
       const mk = v.mktx; delete v.mktx;
-      const ok = await save("item", { ...(ex || {}), ...v, price: Number(v.price) || 0 });
+      const _it = { ...(ex || {}), ...v, price: Number(v.price) || 0 };
+      const ok = await save("item", _it);
       if (!ok) return false;
-      if (!ex && mk && Number(v.price) > 0) await save("tx", { type: "out", cat: v.cat === "Nourriture" ? "Aliment" : v.cat === "Médicament" ? "Santé" : v.cat === "Matériel" ? "Matériel" : "Autre dépense", amount: Number(v.price), date: v.date, label: v.name });
+      if (!mk && ex) { const _ltx2 = S.tx.find((x) => x.itemId === _it.id); if (_ltx2) await removeDoc("tx", _ltx2.id); }
+      if (mk && Number(v.price) > 0) { const _ltx = S.tx.find((x) => x.itemId === _it.id); if (ex && _ltx) await save("tx", { ..._ltx, amount: Number(v.price), date: v.date, label: v.name, cat: v.cat === "Nourriture" ? "Aliment" : v.cat === "Médicament" ? "Santé" : v.cat === "Matériel" ? "Matériel" : "Autre dépense" }); else if (!ex) await save("tx", { type: "out", cat: v.cat === "Nourriture" ? "Aliment" : v.cat === "Médicament" ? "Santé" : v.cat === "Matériel" ? "Matériel" : "Autre dépense", amount: Number(v.price), date: v.date, label: v.name, itemId: _it.id }); }
       closeModal();
       toast(ex ? "Achat modifié" : "Achat enregistré");
       return true;
@@ -3457,7 +3476,7 @@ function itemForm(ex) {
 }
 function cageForm(ex) {
   form({ title: ex ? "Modifier la cage" : "Définir une cage", values: ex || {}, fields: [{ k: "name", label: "Nom / numéro de la cage", req: true, ph: "ex. A1, B2", def: ex ? ex.name : "" }, { k: "capacity", label: "Capacité (nombre de lapins)", type: "number", min: 1, def: ex ? ex.capacity : 1 }, { k: "location", label: "Emplacement", ph: "ex. Bâtiment 1, rangée A", def: ex ? ex.location : "" }, { k: "notes", label: "Notes", type: "textarea", full: true, def: ex ? ex.notes : "" }],
-    onSubmit: async (v) => { const ok = await save("cage", { ...(ex || {}), ...v, capacity: Number(v.capacity) || 1 }); if (ok) { closeModal(); toast(ex ? "Cage modifiée" : "Cage définie"); } return ok; } });
+    onSubmit: async (v) => { const _old = ex?.name || ""; const ok = await save("cage", { ...(ex || {}), ...v, capacity: Number(v.capacity) || 1 }); if (ok && ex && _old && v.name && v.name !== _old) { for (const _r of S.rabbits.filter((x) => (x.cage || "") === _old)) await save("rabbit", { ..._r, cage: v.name }); } if (ok) { closeModal(); toast(ex ? "Cage modifiée" : "Cage définie"); } return ok; } });
 }
 function feedForm(grams, ex) {
   const _foodItems = S.inventory.filter((i) => i.cat === "Nourriture");
@@ -3501,7 +3520,7 @@ function batchForm(matingId, b) {
   const litters = [["", "— Aucune —"], ...S.matings.filter((x) => x.status === "Mise bas").map((x) => [x.id, `${rname(x.female)} · ${fmtShort(x.birthDate || x.due)}`])];
   const defInitial = m ? (Number(m.alive) || 6) : (b.initial || 6);
   form({ title: b.id ? `Modifier le lot ${b.code}` : "Nouveau lot en engraissement", values: { ...b, mating: b.mating ?? matingId ?? "", initial: defInitial }, fields: [
-      { k: "code", label: "Code du lot", req: true, def: b.code || `LOT-${today().slice(0, 7)}-${String(S.batches.filter(x => (x.code || '').startsWith('LOT-' + today().slice(0, 7))).length + 1).padStart(3, '0')}` },
+      { k: "code", label: "Code du lot", req: true, def: b.code || (() => { const _pf = 'LOT-' + today().slice(0, 7) + '-'; const _mx = S.batches.map((x) => { const _m = (x.code || '').match(new RegExp('^' + _pf.replace(/-/g, '\\-') + '(\\d+)$')); return _m ? Number(_m[1]) : 0; }).reduce((a, x) => Math.max(a, x), 0); return _pf + String(_mx + 1).padStart(3, '0'); })() },
       { k: "mating", label: "Portée d'origine", type: "select", opts: litters },
       { k: "weaning", label: "Date de sevrage", type: "date", req: true, def: wean },
       { k: "initial", label: "Nombre de sujets au sevrage", type: "number", min: 1, req: true, def: defInitial },
@@ -3509,6 +3528,9 @@ function batchForm(matingId, b) {
       { k: "target", label: "Date visée de commercialisation", type: "date", def: b.target || addDays(wean, FATTEN_DAYS) },
       { k: "status", label: "Statut", type: "select", opts: ["Actif", "Quarantaine", "Vendu"], def: b.status || "Actif" }],
     onSubmit: async (v) => {
+      if (S.batches.some((x) => x.id !== b.id && (x.code || "") === v.code)) { toast(`⛔ Code de lot déjà utilisé : ${v.code}. Choisissez un autre code.`); return false; }
+      const _cur = b.id ? (Number(b.current) || 0) : (Number(v.initial) || 0);
+      if (v.status === "Vendu" && _cur > 0) { toast("⛔ Pour vendre un lot, utilisez le bouton « Vendre » : il enregistre la vente et la recette."); return false; }
       const obj = { ...b, ...v, target: v.target || addDays(v.weaning, FATTEN_DAYS), current: b.id ? b.current : v.initial, deaths: b.deaths || 0 };
       const ok = await save("batch", obj);
       if (ok) { toast("Lot enregistré avec succès"); go("engraissement"); }
@@ -3522,7 +3544,7 @@ function sellForm(id) {
       const left = Math.max(0, (Number(b.current) || 0) - v.n);
       const ok = await save("batch", { ...b, current: left, status: left === 0 ? "Vendu" : b.status });
       if (!ok) return false;
-      if (v.price > 0) await save("tx", { type: "in", cat: "Vente chair", amount: v.price, date: v.date, label: `Vente ${v.n} lapins (${b.code})` });
+      if (v.price > 0) await save("tx", { type: "in", cat: "Vente chair", amount: v.price, date: v.date, label: `Vente ${v.n} lapins (${b.code})`, batchId: b.id });
       closeModal();
       toast(left ? `${v.n} vendus, ${left} restants dans le lot` : "Lot intégralement commercialisé");
       return true;
@@ -3600,20 +3622,22 @@ const A = {
   alertsCenterModal: () => alertsCenterModal(),
   themeModal: () => themeModal(),
   unauthorizedDomainModal: () => unauthorizedDomainModal(),
-  params: () => { form({ title: "Paramètres d'élevage", values: { gestation: GESTATION, mature: MATURE_DAYS, weaning: WEANING, fatten: FATTEN_DAYS }, fields: [{ k: "gestation", label: "Gestation (jours)", type: "number", min: 1, req: true }, { k: "mature", label: "Maturité (jours)", type: "number", min: 1, req: true }, { k: "weaning", label: "Sevrage (jours)", type: "number", min: 1, req: true }, { k: "fatten", label: "Engraissement (jours)", type: "number", min: 1, req: true }], onSubmit: async (v) => { localStorage.setItem("abvfarm_params", JSON.stringify(v)); GESTATION = Number(v.gestation); MATURE_DAYS = Number(v.mature); WEANING = Number(v.weaning); FATTEN_DAYS = Number(v.fatten); closeModal(); toast("Paramètres enregistrés"); render(); return true; } }); },
+  params: () => { form({ title: "Paramètres d'élevage", values: { gestation: GESTATION, mature: MATURE_DAYS, weaning: WEANING, fatten: FATTEN_DAYS }, fields: [{ k: "gestation", label: "Gestation (jours)", type: "number", min: 1, req: true }, { k: "mature", label: "Maturité (jours)", type: "number", min: 1, req: true }, { k: "weaning", label: "Sevrage (jours)", type: "number", min: 1, req: true }, { k: "fatten", label: "Engraissement (jours)", type: "number", min: 1, req: true }], onSubmit: async (v) => { localStorage.setItem("abvfarm_params", JSON.stringify(v)); GESTATION = Number(v.gestation); MATURE_DAYS = Number(v.mature); WEANING = Number(v.weaning); FATTEN_DAYS = Number(v.fatten); for (const _m of S.matings.filter((x) => ["Accouplé", "Gestation confirmée"].includes(x.status))) await save("mating", { ..._m, due: addDays(_m.date, GESTATION) }); for (const _b of S.batches.filter((x) => ["Actif", "Quarantaine"].includes(x.status))) await save("batch", { ..._b, target: addDays(_b.weaning, FATTEN_DAYS) }); closeModal(); toast("Paramètres enregistrés et appliqués aux gestations et lots en cours"); render(); return true; } }); },
   resetFilters: () => { ui.q = ""; ui.sex = "all"; ui.stage = "all"; ui.breed = "all"; ui.st = "actifs"; ui.ageBracket = "all"; ui.minAgeM = ""; ui.maxAgeM = ""; ui.minWeight = ""; ui.maxWeight = ""; render(); },
   resetCustomMetrics: () => { ui.minAgeM = ""; ui.maxAgeM = ""; ui.minWeight = ""; ui.maxWeight = ""; render(); },
   newrabbit: () => rabbitForm(), editrabbit: (el) => rabbitForm(rab(el.dataset.id)),
-  status: (el) => { const r = rab(el.dataset.id); form({ title: `Statut de ${r.name}`, values: r, fields: [{ k: "status", label: "Statut", type: "select", opts: STATUSES, full: true, hint: "Un animal vendu, abattu ou décédé passe dans la rubrique « Sortis »." }, { k: "exitDate", label: "Date de sortie (vente, décès, abattage, don)", type: "date", def: today() }, { k: "exitPrice", label: "Prix / montant perçu (FCFA, si vente)", type: "number", min: 0 }, { k: "exitBuyer", label: "Acheteur / destinataire", ph: "ex. Client marché, voisin" }, { k: "exitCause", label: "Cause / motif", full: true, ph: "ex. Vente chair, maladie, don" }], onSubmit: async (v) => { const isExit = ["Vendu", "Mort", "Abattu", "Donné"].includes(v.status); if ((v.status === "Vendu" || v.status === "Abattu") && r.status !== v.status) { const wd = underWithdrawal(r.id); if (wd) { toast(`⛔ Vente / abattage interdit : délai d'attente jusqu'au ${fmtDate(wd)} (traitement en cours).`); return false; } } const obj = { ...r, status: v.status, exitDate: isExit ? (v.exitDate || today()) : "", exitPrice: isExit ? (Number(v.exitPrice) || 0) : 0, exitBuyer: isExit ? (v.exitBuyer || "") : "", exitCause: isExit ? (v.exitCause || "") : "" }; const ok = await save("rabbit", obj); if (ok) { if (v.status === "Vendu" && r.status !== "Vendu" && Number(v.exitPrice) > 0) await save("tx", { type: "in", cat: "Vente chair", amount: Number(v.exitPrice), date: v.exitDate || today(), label: `Vente ${r.name}${v.exitBuyer ? " → " + v.exitBuyer : ""}` }); toast("Statut mis à jour"); } return ok; } }); },
+  status: (el) => { const r = rab(el.dataset.id); form({ title: `Statut de ${r.name}`, values: r, fields: [{ k: "status", label: "Statut", type: "select", opts: STATUSES, full: true, hint: "Un animal vendu, abattu ou décédé passe dans la rubrique « Sortis »." }, { k: "exitDate", label: "Date de sortie (vente, décès, abattage, don)", type: "date", def: today() }, { k: "exitPrice", label: "Prix / montant perçu (FCFA, si vente)", type: "number", min: 0 }, { k: "exitBuyer", label: "Acheteur / destinataire", ph: "ex. Client marché, voisin" }, { k: "exitCause", label: "Cause / motif", full: true, ph: "ex. Vente chair, maladie, don" }], onSubmit: async (v) => { const isExit = ["Vendu", "Mort", "Abattu", "Donné"].includes(v.status); if ((v.status === "Vendu" || v.status === "Abattu") && r.status !== v.status) { const wd = underWithdrawal(r.id); if (wd) { toast(`⛔ Vente / abattage interdit : délai d'attente jusqu'au ${fmtDate(wd)} (traitement en cours).`); return false; } } const obj = { ...r, status: v.status, exitDate: isExit ? (v.exitDate || today()) : "", exitPrice: isExit ? (Number(v.exitPrice) || 0) : 0, exitBuyer: isExit ? (v.exitBuyer || "") : "", exitCause: isExit ? (v.exitCause || "") : "" }; const ok = await save("rabbit", obj); if (ok) { const _ltx = saleTxForRabbit(r.id); if (v.status === "Vendu" && Number(v.exitPrice) > 0) { if (_ltx) await save("tx", { ..._ltx, amount: Number(v.exitPrice), date: v.exitDate || today(), label: `Vente ${r.name}${v.exitBuyer ? " → " + v.exitBuyer : ""}` }); else await save("tx", { type: "in", cat: "Vente chair", amount: Number(v.exitPrice), date: v.exitDate || today(), label: `Vente ${r.name}${v.exitBuyer ? " → " + v.exitBuyer : ""}`, rabbitId: r.id }); } else if (r.status === "Vendu" && v.status !== "Vendu" && _ltx) await removeDoc("tx", _ltx.id); toast("Statut mis à jour"); } return ok; } }); },
   delrabbit: (el) => { const r = rab(el.dataset.id); if (!r) return; confirmBox(`Supprimer définitivement la fiche de ${r.name} ainsi que ses pesées et soins ? Pour un animal vendu ou décédé, modifiez plutôt son statut.`, "Supprimer", async () => {
     toast(`Suppression de ${r.name}…`);
     for (const w of S.weights.filter((x) => x.rabbit === r.id)) await removeDoc("weight", w.id);
     for (const x of S.treatments.filter((x) => x.rabbit === r.id)) await removeDoc("treatment", x.id);
     for (const m of S.matings.filter((x) => x.male === r.id || x.female === r.id)) await removeDoc("mating", m.id);
+    for (const _rem of S.reminders.filter((x) => x.rabbitId === r.id)) await removeDoc("reminder", _rem.id);
+    const _stx = saleTxForRabbit(r.id); if (_stx) await removeDoc("tx", _stx.id);
     for (const k of S.rabbits.filter((x) => x.father === r.id || x.mother === r.id)) await save("rabbit", { ...k, father: k.father === r.id ? "" : k.father, mother: k.mother === r.id ? "" : k.mother });
     if (await removeDoc("rabbit", r.id)) { toast("Fiche supprimée avec succès"); go("lapins"); } }); },
-  newmating: (el) => matingForm(el.dataset.id), kindle: (el) => kindleForm(el.dataset.id),
-  kits: async (el) => { const m = byId(S.matings, el.dataset.id); if (!m || m.status !== "Mise bas") return; const _already = S.rabbits.filter((x) => x.matingId === m.id); const _n = (Number(m.alive) || 0) - _already.length; if (_n <= 0) { toast("Les fiches des lapereaux de cette portée existent déjà."); return; } confirmBox(`Créer ${_n} fiche(s) individuelle(s) pour les lapereaux vivants de cette portée (sexe indéterminé au départ, père et mère renseignés) ?`, "Créer les fiches", async () => { for (let i = 0; i < _n; i++) { await save("rabbit", { name: generateAutoRabbitName("Indéterminé"), sex: "Indéterminé", birth: m.birthDate || m.due, father: m.male, mother: m.female, status: "Actif", matingId: m.id, notes: `Portée du ${fmtDate(m.birthDate || m.due)}` }); } await save("reminder", { title: `Sevrage des lapereaux (${rname(m.female)})`, due: addDays(m.birthDate || m.due, WEANING), prio: "Moyenne", desc: "Sevrer les lapereaux de cette portée et créer un lot d'engraissement.", done: false }); toast(`${_n} fiche(s) de lapereaux créée(s)`); render(); }); },
+  newmating: (el) => matingForm(el.dataset.id), editmating: (el) => matingForm(null, byId(S.matings, el.dataset.id)), kindle: (el) => kindleForm(el.dataset.id),
+  kits: async (el) => { const m = byId(S.matings, el.dataset.id); if (!m || m.status !== "Mise bas") return; const _already = S.rabbits.filter((x) => x.matingId === m.id); const _n = (Number(m.alive) || 0) - _already.length; if (_n <= 0) { toast("Les fiches des lapereaux de cette portée existent déjà."); return; } confirmBox(`Créer ${_n} fiche(s) individuelle(s) pour les lapereaux vivants de cette portée (sexe indéterminé au départ, père et mère renseignés) ?`, "Créer les fiches", async () => { for (let i = 0; i < _n; i++) { await save("rabbit", { name: generateAutoRabbitName("Indéterminé"), sex: "Indéterminé", birth: m.birthDate || m.due, father: m.male, mother: m.female, status: "Actif", matingId: m.id, notes: `Portée du ${fmtDate(m.birthDate || m.due)}` }); } if (!S.reminders.some((x) => x.matingId === m.id && x.kind === "sevrage" && !x.done)) await save("reminder", { title: `Sevrage des lapereaux (${rname(m.female)})`, due: addDays(m.birthDate || m.due, WEANING), prio: "Moyenne", desc: "Sevrer les lapereaux de cette portée et créer un lot d'engraissement.", done: false, matingId: m.id, kind: "sevrage" }); toast(`${_n} fiche(s) de lapereaux créée(s)`); render(); }); },
   mst: async (el) => { const m = byId(S.matings, el.dataset.id); if (m && (await save("mating", { ...m, status: el.dataset.v }))) toast(`${rname(m.female)} : ${el.dataset.v}`); },
   newweight: (el) => weightForm(el.dataset.id), newtreat: (el) => treatForm(el.dataset.id),
   newitem: () => itemForm(), edititem: (el) => { const i = byId(S.inventory, el.dataset.id); if (i) itemForm(i); },
@@ -3628,7 +3652,9 @@ const A = {
       return;
     }
     const kg = +(rt.grams / 1000).toFixed(1);
-    const ok = await save("feed", { grams: rt.grams, date: today(), notes: `Distribution quotidienne automatique (${kg} kg)` });
+    const _item = S.inventory.filter((i) => i.cat === "Nourriture").map((i) => ({ i, rem: remainingForItem(i.id) })).filter((x) => (x.rem ?? 0) > 0).sort((a, b) => (b.rem || 0) - (a.rem || 0))[0];
+    if (!_item) toast("⚠️ Aucun article de nourriture avec du stock : la distribution ne sera pas déduite d'un article précis.");
+    const ok = await save("feed", { grams: rt.grams, date: today(), notes: `Distribution quotidienne automatique (${kg} kg)`, item: _item?.i.id || "" });
     if (ok) {
       const left = feedStock();
       toast(`✅ ${nf1.format(kg)} kg distribués — Stock restant : ${nf1.format(left)} kg`);
@@ -3637,12 +3663,12 @@ const A = {
   },
   newtx: (el) => txForm(el.dataset.v), edittx: (el) => { const t = byId(S.tx, el.dataset.id); if (t) txForm(t.type, t); }, editweight: (el) => { const w = byId(S.weights, el.dataset.id); if (w) weightForm(w.rabbit, w); }, edittreat: (el) => { const t = byId(S.treatments, el.dataset.id); if (t) treatForm(t.rabbit, t); },
   newbatch: (el) => batchForm(el.dataset.id), editbatch: (el) => batchForm(null, byId(S.batches, el.dataset.id)), sell: (el) => sellForm(el.dataset.id),
-  bdeath: (el) => { const b = byId(S.batches, el.dataset.id); form({ title: `Perte sur le lot ${b.code}`, fields: [{ k: "n", label: "Nombre de lapereaux décédés", type: "number", min: 1, req: true, def: 1 }], onSubmit: async (v) => { const ok = await save("batch", { ...b, current: Math.max(0, b.current - v.n), deaths: (Number(b.deaths) || 0) + v.n }); if (ok) toast("Perte enregistrée"); return ok; } }); },
+  bdeath: (el) => { const b = byId(S.batches, el.dataset.id); form({ title: `Perte sur le lot ${b.code}`, fields: [{ k: "n", label: "Nombre de lapereaux décédés", type: "number", min: 1, req: true, def: 1 }], onSubmit: async (v) => { const _left = Math.max(0, b.current - v.n); const ok = await save("batch", { ...b, current: _left, deaths: (Number(b.deaths) || 0) + v.n, status: _left === 0 ? "Terminé" : b.status }); if (ok) toast(_left === 0 ? "Perte enregistrée — lot terminé (effectif à zéro)" : "Perte enregistrée"); return ok; } }); },
   bweight: (el) => { const b = byId(S.batches, el.dataset.id); form({ title: `Poids moyen du lot ${b.code}`, fields: [{ k: "avgWeight", label: "Poids moyen mesuré (g)", type: "number", min: 0, req: true, def: b.avgWeight || "" }], onSubmit: async (v) => { const ok = await save("batch", { ...b, avgWeight: v.avgWeight }); if (ok) toast("Poids moyen enregistré"); return ok; } }); },
   newrem: () => remForm(),
   remtoggle: async (el) => { const r = byId(S.reminders, el.dataset.id); if (r) await save("reminder", { ...r, done: !r.done }); },
   remdone: async (el) => { const r = byId(S.reminders, el.dataset.id); if (r && (await save("reminder", { ...r, done: true }))) toast("Tâche clôturée"); },
-  del: (el) => {
+  del: async (el) => {
     const k = el.dataset.kind, id = el.dataset.id;
     let desc = "cet enregistrement";
     if (k === "batch") {
@@ -3669,6 +3695,11 @@ const A = {
       desc = "ce rappel";
     }
     confirmBox(`Supprimer définitivement ${desc} ? Cette action est irréversible.`, "Supprimer", async () => {
+          if (k === "mating") { for (const _b of S.batches.filter((x) => x.mating === id)) await removeDoc("batch", _b.id); for (const _r of S.rabbits.filter((x) => x.matingId === id)) await save("rabbit", { ..._r, matingId: "" }); for (const _rem of S.reminders.filter((x) => x.matingId === id)) await removeDoc("reminder", _rem.id); }
+    if (k === "item") { for (const _f of S.feed.filter((x) => x.item === id)) await removeDoc("feed", _f.id); for (const _tx of S.tx.filter((x) => x.itemId === id)) await removeDoc("tx", _tx.id); }
+    if (k === "batch") { for (const _tx of S.tx.filter((x) => x.batchId === id)) await removeDoc("tx", _tx.id); }
+    if (k === "cage") { const _c = byId(S.cages || [], id); if (_c) for (const _r of S.rabbits.filter((x) => (x.cage || "") === _c.name)) await save("rabbit", { ..._r, cage: "" }); }
+    if (k === "treatment") { for (const _rem of S.reminders.filter((x) => x.treatmentId === id)) await removeDoc("reminder", _rem.id); }
       if (await removeDoc(k, id)) toast("Suppression effectuée avec succès");
     });
   },
@@ -3704,7 +3735,10 @@ const A = {
   import: () => $("#importFile").click(),
 };
 
+let lastImportGuessedDates = 0;
 function parseBackupToDocs(j) {
+  lastImportGuessedDates = 0;
+  const _dflt = (v) => { const _d = tsToDate(v); if (!_d) lastImportGuessedDates++; return _d || today(); };
   let docs = [];
   const tsToDate = (ts) => {
     if (!ts) return "";
@@ -3733,7 +3767,7 @@ function parseBackupToDocs(j) {
         return {
           ...d,
           status: sanitizeStatus(d.status, d.notes, d.name),
-          birth: tsToDate(d.birth || d.dateOfBirth) || today(),
+          birth: _dflt(d.birth || d.dateOfBirth),
           father: d.father ? String(d.father) : (d.fatherId ? String(d.fatherId) : ""),
           mother: d.mother ? String(d.mother) : (d.motherId ? String(d.motherId) : ""),
           photo: d.photo || d.imageUri || ""
@@ -3748,7 +3782,7 @@ function parseBackupToDocs(j) {
         id: String(r.id),
         name: r.name || "Inconnu",
         sex: r.sex === "Female" ? "Female" : (r.sex === "Male" ? "Male" : "Indéterminé"),
-        birth: tsToDate(r.dateOfBirth || r.birth) || today(),
+        birth: _dflt(r.dateOfBirth || r.birth),
         breed: r.breed || "",
         cage: r.cageNumber || r.cage || "",
         status: sanitizeStatus(r.status, r.notes, r.name),
@@ -3765,8 +3799,8 @@ function parseBackupToDocs(j) {
         id: String(m.id),
         male: String(m.maleId || m.male || ""),
         female: String(m.femaleId || m.female || ""),
-        date: tsToDate(m.matingDate || m.date) || today(),
-        due: tsToDate(m.expectedBirthDate || m.due) || today(),
+        date: _dflt(m.matingDate || m.date),
+        due: _dflt(m.expectedBirthDate || m.due),
         status: m.status || "Accouplé",
         notes: m.notes || ""
       });
@@ -3778,7 +3812,7 @@ function parseBackupToDocs(j) {
         id: String(w.id),
         rabbit: String(w.rabbitId || w.rabbit || ""),
         kg: Number(w.weight || w.kg) || 0,
-        date: tsToDate(w.recordDate || w.date) || today(),
+        date: _dflt(w.recordDate || w.date),
         notes: w.notes || ""
       });
     });
@@ -3790,7 +3824,7 @@ function parseBackupToDocs(j) {
         rabbit: t.rabbitId || t.rabbit ? String(t.rabbitId || t.rabbit) : "",
         type: t.type || "Autre soin",
         product: t.designation || t.product || "",
-        date: tsToDate(t.date) || today(),
+        date: _dflt(t.date),
         dosage: t.dosage || "",
         notes: t.notes || "",
         next: tsToDate(t.nextDueDate || t.next),
@@ -3807,7 +3841,7 @@ function parseBackupToDocs(j) {
         qty: Number(item.quantity || item.qty) || 0,
         unit: item.unit || "unité",
         price: Number(item.totalPrice || item.price) || 0,
-        date: tsToDate(item.purchaseDate || item.date) || today(),
+        date: _dflt(item.purchaseDate || item.date),
         notes: item.notes || ""
       });
     });
@@ -3817,7 +3851,7 @@ function parseBackupToDocs(j) {
         kind: "feed",
         id: String(f.id),
         grams: Number(f.quantityGrams || f.grams) || 0,
-        date: tsToDate(f.feedDate || f.date) || today(),
+        date: _dflt(f.feedDate || f.date),
         notes: f.notes || ""
       });
     });
@@ -3828,7 +3862,7 @@ function parseBackupToDocs(j) {
         id: String(rem.id),
         title: rem.title || "",
         desc: rem.description || rem.desc || "",
-        due: tsToDate(rem.dueDate || rem.due) || today(),
+        due: _dflt(rem.dueDate || rem.due),
         prio: rem.priority || rem.prio || "Moyenne",
         done: !!(rem.isCompleted || rem.done)
       });
@@ -3840,13 +3874,13 @@ function parseBackupToDocs(j) {
         id: String(b.id),
         code: b.batchCode || b.code || `LOT-${b.id}`,
         mating: b.matingRecordId || b.mating ? String(b.matingRecordId || b.mating) : "",
-        weaning: tsToDate(b.weaningDate || b.weaning) || today(),
+        weaning: _dflt(b.weaningDate || b.weaning),
         initial: Number(b.initialCount || b.initial) || 0,
         current: Number(b.currentCount || b.current) || 0,
         deaths: Number(b.mortalityCount || b.deaths) || 0,
         cage: b.cageLocation || b.cage || "",
         avgWeight: Number(b.averageWeightGrams || b.avgWeight) || 0,
-        target: tsToDate(b.targetSaleDate || b.target) || today(),
+        target: _dflt(b.targetSaleDate || b.target),
         status: b.status || "Actif"
       });
     });
@@ -3859,7 +3893,7 @@ function parseBackupToDocs(j) {
         cat: tx.category || tx.cat || "Autre",
         amount: Number(tx.amountFcfa || tx.amount) || 0,
         label: tx.description || tx.label || "",
-        date: tsToDate(tx.date) || today()
+        date: _dflt(tx.date)
       });
     });
   }
@@ -3895,7 +3929,7 @@ $("#importFile").addEventListener("change", async (e) => {
     const _summary = Object.entries(_counts).map(([k, n]) => `${n} ${k}`).join(", ");
     const _ex = getLocalData(); const _over = docs.filter((d) => _ex[d.kind + "-" + d.id]); const _overCounts = {}; _over.forEach((d) => { _overCounts[d.kind] = (_overCounts[d.kind] || 0) + 1; });
     const _overSummary = Object.entries(_overCounts).map(([k, n]) => `${n} ${k}`).join(", ");
-    confirmBox(`Importer ${docs.length} fiche(s) ? (${_summary}) — ${_over.length ? `${_over.length} écraseront des fiches existantes (${_overSummary})` : "aucune fiche existante écrasée"} ; ${docs.length - _over.length} nouvelle(s). Une sauvegarde actuelle sera téléchargée avant l'import.`, "Importer", async () => { toast("Restauration en cours…"); const n = await bulk(docs, "Import"); toast(`✅ ${n} fiche(s) importée(s) avec succès`); render(); });
+    confirmBox(`Importer ${docs.length} fiche(s) ? (${_summary}) — ${_over.length ? `${_over.length} écraseront des fiches existantes (${_overSummary})` : "aucune fiche existante écrasée"} ; ${docs.length - _over.length} nouvelle(s).${lastImportGuessedDates ? ` ⚠️ ${lastImportGuessedDates} date(s) illisible(s) dans le fichier ont été remplacées par aujourd'hui — vérifiez ces fiches après l'import.` : ""} Une sauvegarde actuelle sera téléchargée avant l'import.`, "Importer", async () => { toast("Restauration en cours…"); const n = await bulk(docs, "Import"); toast(`✅ ${n} fiche(s) importée(s) avec succès`); render(); });
   } catch (err) {
     console.error("Import error:", err);
     toast("Fichier invalide : choisissez une sauvegarde ABV Farm (.json)");

@@ -67,12 +67,15 @@ exports.handler = async (event, context) => {
       const payload = event.body ? JSON.parse(event.body) : {};
 
       if (path.includes('alerts') || payload.action === 'send_alert') {
+        // Honnêteté: aucune notification push n'est réellement envoyée ici
+        // (pas de service push configuré). Ne pas prétendre un envoi réussi.
         return {
-          statusCode: 200,
+          statusCode: 501,
           headers,
           body: JSON.stringify({
-            success: true,
-            message: 'Alerte traitée et enregistrée par le backend',
+            success: false,
+            error: 'NOT_IMPLEMENTED',
+            message: "Envoi de notification non configuré : les alertes restent visibles dans l'application uniquement.",
             alertTitle: payload.title || 'Alerte cheptel',
             count: payload.count || 1,
             timestamp: new Date().toISOString()

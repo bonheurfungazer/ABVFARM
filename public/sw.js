@@ -1,4 +1,4 @@
-const CACHE_NAME = "abv-farm-pwa-v10";
+const CACHE_NAME = "abv-farm-pwa-v11";
 const ASSETS_TO_CACHE = [
   "./",
   "./index.html",
@@ -38,6 +38,13 @@ self.addEventListener("fetch", (event) => {
 
   // Skip caching for Firebase APIs or cloud Firestore network requests
   if (url.origin.includes("firebase") || url.origin.includes("googleapis") || url.origin.includes("google")) {
+    return;
+  }
+  // Cache CDN scripts (ex. jsPDF) as opaque responses so PDF export works offline after first load
+  if (url.host.includes("cdn.jsdelivr.net") || url.host.includes("cdnjs.cloudflare.com")) {
+    event.respondWith(
+      caches.match(event.request).then((cached) => cached || fetch(event.request).then((res) => { const c = res.clone(); caches.open(CACHE_NAME).then((cache) => cache.put(event.request, c)); return res; }).catch(() => cached))
+    );
     return;
   }
 

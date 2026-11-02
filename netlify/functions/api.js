@@ -167,6 +167,9 @@ function auditData(payload) {
     if (b.mating && !matById.has(str(b.mating))) push('error', 'BATCH_ORPHAN_MATING', 'batch', b.id, label, `Portee ${b.mating} introuvable.`, 'Corriger la portee du lot ou supprimer le lot.');
     if (num(b.current) < 0) push('error', 'BATCH_COUNT_NEGATIVE', 'batch', b.id, label, 'Effectif actuel negatif.', 'Corriger l\'effectif.');
     if (num(b.initial) > 0 && num(b.current) > num(b.initial)) push('error', 'BATCH_CURRENT_GT_INITIAL', 'batch', b.id, label, `Effectif actuel (${num(b.current)}) superieur a l\'effectif initial (${num(b.initial)}).`, 'Corriger l\'effectif initial ou actuel.');
+    if (num(b.deaths) < 0) push('error', 'BATCH_COUNT_NEGATIVE', 'batch', b.id, label, 'Nombre de pertes negatif.', 'Corriger les pertes.');
+    if (num(b.initial) > 0 && num(b.current) + num(b.deaths) > num(b.initial)) push('error', 'BATCH_COUNT_INCOHERENT', 'batch', b.id, label, `Effectif actuel (${num(b.current)}) + pertes (${num(b.deaths)}) superieur a l\'initial (${num(b.initial)}) : des ventes ou pertes ont ete sur-declarees.`, 'Corriger l\'effectif, les pertes ou l\'initial.');
+    if (b.status === 'Vendu' && !data.tx.some((x) => str(x.batchId) === str(b.id) || (x.type === 'in' && (x.label || '').includes(b.code)))) push('warning', 'BATCH_SALE_NO_TX', 'batch', b.id, label, 'Lot vendu sans recette financiere liee.', 'Renseigner la vente avec son prix, ou recreer la recette liee au lot.');
   }
 
   // ---- Pesees / Soins ----

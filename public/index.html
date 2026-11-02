@@ -1423,7 +1423,10 @@ function saleTxForRabbit(id) { return S.tx.find((x) => x.rabbitId === id); }
 function underWithdrawal(id) {
   if (isExited(rab(id))) return null;
   const t = today();
-  return S.treatments.filter((x) => x.rabbit === id && Number(x.withdrawal) > 0 && addDays(x.date, Number(x.withdrawal)) > t)
+  /* Correctif délai d'attente : un soin collectif (rabbit vide) doit aussi bloquer
+     la vente, sinon un animal traité avec tout le cheptel pouvait être vendu
+     pendant le délai. */
+  return S.treatments.filter((x) => (x.rabbit === id || x.rabbit === "") && Number(x.withdrawal) > 0 && addDays(x.date, Number(x.withdrawal)) > t)
     .map((x) => addDays(x.date, Number(x.withdrawal))).sort().pop() || null;
 }
 function ration() {
@@ -1484,7 +1487,7 @@ function alerts() {
     }
   }
   for (const x of S.treatments) if (x.next && !(x.rabbit && isExited(rab(x.rabbit)))) { const n = diff(t, x.next); if (n <= 2) out.push({ sev: n < 0 ? "bad" : "warn", icon: "syringe", title: `${x.type} : ${x.product || "rappel"}`, sub: `${x.rabbit ? rname(x.rabbit) : "Tout l'élevage"} — ${relDay(n)}` }); }
-  for (const b of S.batches) if (["Actif", "Quarantaine"].includes(b.status)) { const n = diff(t, b.target); if (n <= 3) out.push({ sev: "ok", icon: "coins", title: `Lot ${b.code} prêt à la vente`, sub: n < 0 ? `Date cible dépassée de ${-n} j` : `Date cible ${relDay(n)}`, act: [["Vendre", "sell", b.id]] }); }
+  for (const b of S.batches) if (b.status === "Actif") { const n = diff(t, b.target); if (n <= 3) out.push({ sev: "ok", icon: "coins", title: `Lot ${b.code} prêt à la vente`, sub: n < 0 ? `Date cible dépassée de ${-n} j` : `Date cible ${relDay(n)}`, act: [["Vendre", "sell", b.id]] }); }
   for (const r of S.reminders) if (!r.done && r.due <= t && !(r.rabbitId && isExited(rab(r.rabbitId)))) out.push({ sev: r.prio === "Haute" ? "bad" : "warn", icon: "bell", title: r.title, sub: `Rappel — ${relDay(diff(t, r.due))}`, act: [["Fait", "remdone", r.id]] });
   const stock = feedStock(), rg = ration().grams;
   if (S.inventory.length && stock < 10) out.push({ sev: stock <= 0 ? "bad" : "warn", icon: "grain", title: stock <= 0 ? "Stock d'aliment épuisé" : `Stock d'aliment faible : ${nf1.format(stock)} kg`, sub: rg ? `Environ ${nf1.format(stock / (rg / 1000))} jours de ration` : "Pensez à réapprovisionner", act: [["Ajouter un achat", "newitem"]] });
@@ -2358,7 +2361,7 @@ VIEWS.engraissement = () => {
   return `<div class="head"><div><h1>Engraissement des lots</h1><p>Du sevrage (J${WEANING}) jusqu'à la commercialisation</p></div><button class="btn pri" data-act="newbatch">${ICON.plus}Nouveau lot</button></div>
   <div class="tiles"><div class="tile"><span class="l">Lots en cours</span><span class="v">${act.length}</span></div><div class="tile"><span class="l">Lapins en croissance</span><span class="v">${heads}</span></div><div class="tile ${ini && dead / ini > 0.1 ? "warn" : ""}"><span class="l">Taux de mortalité</span><span class="v">${ini ? nf1.format((dead / ini) * 100) + " %" : "—"}</span><span class="s">${dead} perte(s) sur ${ini}</span></div></div>
   ${act.length ? `<div class="grid g2">${act.map(batchCard).join("")}</div>` : `<div class="card">${emptyBox("layers", "Aucun lot en engraissement", "Créez un lot au sevrage pour suivre les effectifs, pesées et dates de vente.", `<button class="btn pri" data-act="newbatch">${ICON.plus}Nouveau lot</button>`)}</div>`}
-  ${old.length ? `<section class="card"><div class="row-h"><h2>Lots commercialisés</h2></div><div class="list">${old.map((b) => `<div class="li"><span class="ico">${ICON.layers}</span><div class="grow"><div class="t">${esc(b.code)}</div><div class="d">Sevré le ${fmtDate(b.weaning)} · ${b.initial} au départ · ${b.deaths || 0} pertes</div></div><button class="btn sm ghost" data-act="del" data-kind="batch" data-id="${b.id}" aria-label="Supprimer">${ICON.trash}</button></div>`).join("")}</div></section>` : ""}`;
+  ${old.length ? `<section class="card"><div class="row-h"><h2>Lots commercialisés</h2></div><div class="list">${old.map((b) => { const _sold = Math.max(0, (Number(b.initial) || 0) - (Number(b.deaths) || 0) - (Number(b.current) || 0)); return `<div class="li"><span class="ico">${ICON.layers}</span><div class="grow"><div class="t">${esc(b.code)}</div><div class="d">Sevré le ${fmtDate(b.weaning)} · ${b.initial} au départ · ${_sold} vendu(s) · ${b.deaths || 0} pertes · Recettes ${fcfa(batchReceipts(b))}${b.lastSaleDate ? ` · Dernière vente le ${fmtDate(b.lastSaleDate)}` : ""}</div></div><button class="btn sm ghost" data-act="del" data-kind="batch" data-id="${b.id}" aria-label="Supprimer">${ICON.trash}</button></div>`; }).join("")}</div></section>` : ""}`;
 };
 function batchCard(b) {
   const days = diff(b.weaning, today()), total = Math.max(1, diff(b.weaning, b.target)), left = diff(today(), b.target);
@@ -3305,6 +3308,33 @@ function form({ title, fields, values = {}, submit = "Enregistrer", onSubmit, on
       return;
     }
 
+    /* Correctif systémique : le formulaire a novalidate, donc les min="…" des champs
+       nombre n'étaient jamais appliqués par le navigateur. Un poids, une quantité, un
+       montant ou un nombre d'animaux négatif passait sans blocage (ex. vente de -3
+       lapins qui augmentait le lot, distribution négative qui augmentait le stock).
+       Le minimum est maintenant contrôlé ici, pour tous les formulaires. */
+    let firstBelowMin = null;
+    for (const f of fields) {
+      if (f.type === "number" && f.min != null) {
+        const val = v[f.k];
+        if (typeof val === "number" && !isNaN(val) && val < Number(f.min)) {
+          const wrap = $(`#wrap_f_${f.k}`);
+          const el = fm.elements[f.k];
+          if (wrap && el) {
+            el.style.borderColor = "var(--bad)";
+            const errEl = wrap.querySelector(".field-err");
+            if (errEl) { errEl.textContent = `Valeur minimale : ${f.min}.`; errEl.style.display = "block"; }
+            if (!firstBelowMin) firstBelowMin = el;
+          }
+        }
+      }
+    }
+    if (firstBelowMin) {
+      toast("⛔ Une valeur est inférieure au minimum autorisé, corrigez-la.");
+      firstBelowMin.focus();
+      return;
+    }
+
     const btn = $("#btnFormSubmit") || fm.querySelector('[type="submit"]');
     const origText = btn ? btn.innerHTML : submit;
     if (btn) {
@@ -3475,7 +3505,14 @@ function matingForm(preId, ex) {
       // Correctif mise bas incomplète : une mise bas sans date ni nombre de nés vivants
       // (7 cas dans l'export du 2 novembre) ne peut plus être enregistrée.
       if (v.status === "Mise bas" && (!v.birthDate || v.alive === "" || v.alive == null)) { toast("⛔ Mise bas incomplète : renseignez la date de mise bas et le nombre de nés vivants."); return false; }
-      const ok = await save("mating", { ...(ex || {}), male: v.male, female: v.female, date: v.date, due: addDays(v.date, GESTATION), status: v.status, birthDate: v.status === "Mise bas" ? (v.birthDate || ex?.birthDate || "") : (ex?.birthDate || ""), alive: v.status === "Mise bas" ? (Number(v.alive) || 0) : (ex?.alive ?? 0), dead: v.status === "Mise bas" ? (Number(v.dead) || 0) : (ex?.dead ?? 0), notes: v.notes });
+      if (v.status === "Mise bas" && (!Number.isInteger(Number(v.alive)) || Number(v.alive) < 0 || (v.dead !== "" && v.dead != null && (!Number.isInteger(Number(v.dead)) || Number(v.dead) < 0)))) { toast("⛔ Nombres de lapereaux invalides : entiers ≥ 0."); return false; }
+      const _matingObj = { ...(ex || {}), male: v.male, female: v.female, date: v.date, due: addDays(v.date, GESTATION), status: v.status, birthDate: v.status === "Mise bas" ? (v.birthDate || ex?.birthDate || "") : (ex?.birthDate || ""), alive: v.status === "Mise bas" ? (Number(v.alive) || 0) : (ex?.alive ?? 0), dead: v.status === "Mise bas" ? (Number(v.dead) || 0) : (ex?.dead ?? 0), notes: v.notes };
+      const ok = await save("mating", _matingObj);
+      /* Correctif : une mise bas saisie via « Modifier la saillie » ne créait pas
+         le rappel de vaccination de la portée, contrairement à « Enregistrer la
+         mise bas ». Le rappel est créé s'il n'existe pas déjà pour cette saillie
+         (save() attribue l'id à _matingObj, même pour une nouvelle saillie). */
+      if (ok && v.status === "Mise bas" && _matingObj.id && v.birthDate && !S.reminders.some((x) => x.matingId === _matingObj.id && x.kind === "vaccination-portee")) await save("reminder", { title: `Vaccination des lapereaux (${rname(v.female)})`, due: addDays(v.birthDate, 45), prio: "Moyenne", desc: "Protocole santé par défaut pour la portée.", done: false, matingId: _matingObj.id, kind: "vaccination-portee" });
       if (ok) { closeModal(); toast(ex ? "Saillie modifiée" : "Saillie enregistrée"); }
       return ok;
     } });
@@ -3485,6 +3522,7 @@ function kindleForm(id) {
   form({ title: `Mise bas de ${rname(m.female)}`, submit: "Enregistrer la portée", values: { birthDate: today() },
     fields: [{ k: "birthDate", label: "Date de mise bas", type: "date", req: true }, { k: "alive", label: "Nombre de nés vivants", type: "number", min: 0, req: true, def: 8 }, { k: "dead", label: "Nombre de morts-nés", type: "number", min: 0, def: 0 }, { k: "notes", label: "Observations", type: "textarea", full: true, def: m.notes }],
     onSubmit: async (v) => {
+      if (!Number.isInteger(Number(v.alive)) || Number(v.alive) < 0 || (v.dead !== "" && v.dead != null && (!Number.isInteger(Number(v.dead)) || Number(v.dead) < 0))) { toast("⛔ Nombres de lapereaux invalides : entiers ≥ 0."); return false; }
       const ok = await save("mating", { ...m, ...v, status: "Mise bas" });
       if (ok) { await save("reminder", { title: `Vaccination des lapereaux (${rname(m.female)})`, due: addDays(v.birthDate, 45), prio: "Moyenne", desc: "Protocole santé par défaut pour la portée.", done: false, matingId: m.id, kind: "vaccination-portee" }); closeModal(); toast(`Mise bas enregistrée : ${v.alive} lapereaux`); }
       return ok;
@@ -3534,7 +3572,7 @@ function itemForm(ex) {
 }
 function cageForm(ex) {
   form({ title: ex ? "Modifier la cage" : "Définir une cage", values: ex || {}, fields: [{ k: "name", label: "Nom / numéro de la cage", req: true, ph: "ex. A1, B2", def: ex ? ex.name : "" }, { k: "capacity", label: "Capacité (nombre de lapins)", type: "number", min: 1, def: ex ? ex.capacity : 1 }, { k: "location", label: "Emplacement", ph: "ex. Bâtiment 1, rangée A", def: ex ? ex.location : "" }, { k: "notes", label: "Notes", type: "textarea", full: true, def: ex ? ex.notes : "" }],
-    onSubmit: async (v) => { const _old = ex?.name || ""; const ok = await save("cage", { ...(ex || {}), ...v, capacity: Number(v.capacity) || 1 }); if (ok && ex && _old && v.name && v.name !== _old) { for (const _r of S.rabbits.filter((x) => (x.cage || "") === _old)) await save("rabbit", { ..._r, cage: v.name }); } if (ok) { closeModal(); toast(ex ? "Cage modifiée" : "Cage définie"); } return ok; } });
+    onSubmit: async (v) => { const _old = ex?.name || ""; const ok = await save("cage", { ...(ex || {}), ...v, capacity: Number(v.capacity) || 1 }); if (ok && ex && _old && v.name && v.name !== _old) { for (const _r of S.rabbits.filter((x) => (x.cage || "") === _old)) await save("rabbit", { ..._r, cage: v.name }); for (const _b of S.batches.filter((x) => (x.cage || "") === _old)) await save("batch", { ..._b, cage: v.name }); } if (ok) { closeModal(); toast(ex ? "Cage modifiée" : "Cage définie"); } return ok; } });
 }
 function feedForm(grams, ex) {
   if (ex) { toast("⛔ Distribution figée : une distribution enregistrée ne peut plus être modifiée, pour que le stock ne soit pas décrémenté plusieurs fois."); return; }
@@ -3572,6 +3610,13 @@ function txForm(type, ex) {
       { k: "label", label: "Libellé de l'opération", full: true, ph: type === "in" ? "ex. Vente de 8 lapins de chair" : "ex. Achat de mangeoires", def: ex ? ex.label : "" }, { k: "date", label: "Date", type: "date", req: true, def: ex ? ex.date : today() }],
     onSubmit: async (v) => {
       const ok = await save("tx", { ...(ex || {}), ...v, type });
+      if (ok && ex) {
+        /* Correctif propagation inverse : modifier une recette liée en finances
+           laissait la fiche d'origine inchangée (prix de vente du lapin, coût de
+           l'achat), donc fiche et finances divergeaient. */
+        if (ex.rabbitId) { const _r = rab(ex.rabbitId); if (_r && _r.status === "Vendu") await save("rabbit", { ..._r, exitPrice: Number(v.amount) || 0 }); }
+        if (ex.itemId) { const _it = byId(S.inventory, ex.itemId); if (_it) await save("item", { ..._it, price: Number(v.amount) || 0 }); }
+      }
       if (ok) { closeModal(); toast(ex ? "Opération modifiée" : (type === "in" ? "Recette enregistrée" : "Dépense enregistrée")); }
       return ok;
     } });
@@ -3593,20 +3638,49 @@ function batchForm(matingId, b) {
       if (S.batches.some((x) => x.id !== b.id && (x.code || "") === v.code)) { toast(`⛔ Code de lot déjà utilisé : ${v.code}. Choisissez un autre code.`); return false; }
       const _cur = b.id ? (Number(b.current) || 0) : (Number(v.initial) || 0);
       if (v.status === "Vendu" && _cur > 0) { toast("⛔ Pour vendre un lot, utilisez le bouton « Vendre » : il enregistre la vente et la recette."); return false; }
-      const obj = { ...b, ...v, target: v.target || addDays(v.weaning, FATTEN_DAYS), current: b.id ? b.current : v.initial, deaths: b.deaths || 0 };
+      /* Correctif lot : modifier le nombre initial sans toucher à l'effectif actuel
+         rendait initial / effectif / pertes incohérents (ex. initial 12 alors que
+         8 animaux étaient déjà vendus ou morts). L'effectif suit maintenant la
+         variation de l'initial, et l'initial ne peut pas descendre sous le nombre
+         d'animaux déjà comptabilisés (vendus + pertes). */
+      let _newCurrent = b.id ? b.current : v.initial;
+      if (b.id) {
+        if (!Number.isInteger(Number(v.initial)) || Number(v.initial) < 1) { toast("⛔ Nombre de sujets au sevrage invalide : entier ≥ 1."); return false; }
+        /* Lot ancien sans effectif actuel enregistré : on suppose effectif = initial - pertes, pour ne pas le remettre à zéro par erreur. */
+        const _curVal = (b.current == null || b.current === "") ? (Number(b.initial) || 0) - (Number(b.deaths) || 0) : (Number(b.current) || 0);
+        const _accounted = (Number(b.initial) || 0) - _curVal;
+        if (Number(v.initial) < _accounted) { toast(`⛔ Initial impossible : ${_accounted} animal(aux) déjà vendu(s) ou perdu(s) dans ce lot. Utilisez « Vendre » ou « Perte » pour ajuster.`); return false; }
+        _newCurrent = Number(v.initial) - _accounted;
+      }
+      const obj = { ...b, ...v, target: v.target || addDays(v.weaning, FATTEN_DAYS), current: _newCurrent, deaths: b.deaths || 0 };
       const ok = await save("batch", obj);
-      if (ok) { toast("Lot enregistré avec succès"); go("engraissement"); }
+      if (ok) {
+        /* Renommage d'un lot : les recettes liées gardent leur libellé cohérent,
+           sinon les recettes retrouvées par code dans l'ancien libellé disparaissaient. */
+        if (b.id && b.code && v.code && v.code !== b.code) {
+          for (const _tx of S.tx.filter((x) => x.batchId === b.id && (x.label || "").includes(b.code))) await save("tx", { ..._tx, label: _tx.label.split(b.code).join(v.code) });
+        }
+        toast("Lot enregistré avec succès"); go("engraissement");
+      }
       return ok;
     } });
 }
 function sellForm(id) {
   const b = byId(S.batches, id); if (!b) return;
-  form({ title: `Vente d'animaux — ${b.code}`, submit: "Enregistrer la vente", fields: [{ k: "n", label: "Nombre d'animaux vendus", type: "number", min: 1, req: true, def: b.current }, { k: "price", label: "Montant total perçu (FCFA)", type: "number", min: 0, req: true }, { k: "date", label: "Date de transaction", type: "date", req: true, def: today() }],
+  /* Correctif vente de lot, même logique que la vente d'un lapin : un lot en
+     quarantaine ne se vend pas, on ne peut pas vendre plus que l'effectif
+     (avant, le surplus était effacé et la vente sur-déclarée), et une vente
+     sans prix > 0 ne créait aucune recette. */
+  if (b.status === "Quarantaine") { toast("⛔ Lot en quarantaine : vente interdite tant que la quarantaine n'est pas levée."); return; }
+  form({ title: `Vente d'animaux — ${b.code}`, submit: "Enregistrer la vente", fields: [{ k: "n", label: "Nombre d'animaux vendus", type: "number", min: 1, req: true, def: b.current }, { k: "price", label: "Montant total perçu (FCFA) — obligatoire", type: "number", min: 1, req: true, hint: "Obligatoire pour une vente : le prix crée la recette en finances." }, { k: "buyer", label: "Acheteur", ph: "ex. Client marché, voisin" }, { k: "date", label: "Date de transaction", type: "date", req: true, def: today() }],
     onSubmit: async (v) => {
-      const left = Math.max(0, (Number(b.current) || 0) - v.n);
-      const ok = await save("batch", { ...b, current: left, status: left === 0 ? "Vendu" : b.status });
+      if (!Number.isInteger(Number(v.n)) || Number(v.n) < 1) { toast("⛔ Nombre d'animaux vendus invalide : entier ≥ 1."); return false; }
+      if (Number(v.n) > (Number(b.current) || 0)) { toast(`⛔ Impossible de vendre ${v.n} animaux : il n'en reste que ${Number(b.current) || 0} dans ce lot.`); return false; }
+      if (!(Number(v.price) > 0)) { toast("⛔ Prix de vente obligatoire : indiquez le montant total perçu pour cette vente."); return false; }
+      const left = (Number(b.current) || 0) - Number(v.n);
+      const ok = await save("batch", { ...b, current: left, status: left === 0 ? "Vendu" : b.status, lastSaleDate: v.date });
       if (!ok) return false;
-      if (v.price > 0) await save("tx", { type: "in", cat: "Vente chair", amount: v.price, date: v.date, label: `Vente ${v.n} lapins (${b.code})`, batchId: b.id });
+      await save("tx", { type: "in", cat: "Vente chair", amount: Number(v.price), date: v.date, label: `Vente ${v.n} lapins (${b.code})${v.buyer ? " → " + v.buyer : ""}`, batchId: b.id });
       closeModal();
       toast(left ? `${v.n} vendus, ${left} restants dans le lot` : "Lot intégralement commercialisé");
       return true;
@@ -3721,7 +3795,10 @@ const A = {
     toast(`Suppression de ${r.name}…`);
     for (const w of S.weights.filter((x) => x.rabbit === r.id)) await removeDoc("weight", w.id);
     for (const x of S.treatments.filter((x) => x.rabbit === r.id)) await removeDoc("treatment", x.id);
-    for (const m of S.matings.filter((x) => x.male === r.id || x.female === r.id)) await removeDoc("mating", m.id);
+    /* Correctif cascade : avant, supprimer un reproducteur effaçait ses saillies
+       sans la cascade de suppression d'une saillie (lots liés, fiches lapereaux,
+       rappels liés), laissant des lots et rappels orphelins. */
+    for (const m of S.matings.filter((x) => x.male === r.id || x.female === r.id)) { for (const _b of S.batches.filter((x) => x.mating === m.id)) await removeDoc("batch", _b.id); for (const _k of S.rabbits.filter((x) => x.matingId === m.id)) await save("rabbit", { ..._k, matingId: "" }); for (const _rem of S.reminders.filter((x) => x.matingId === m.id)) await removeDoc("reminder", _rem.id); await removeDoc("mating", m.id); }
     for (const _rem of S.reminders.filter((x) => x.rabbitId === r.id)) await removeDoc("reminder", _rem.id);
     const _stx = saleTxForRabbit(r.id); if (_stx) await removeDoc("tx", _stx.id);
     for (const k of S.rabbits.filter((x) => x.father === r.id || x.mother === r.id)) await save("rabbit", { ...k, father: k.father === r.id ? "" : k.father, mother: k.mother === r.id ? "" : k.mother });
@@ -3744,9 +3821,12 @@ const A = {
       return;
     }
     const kg = +(rt.grams / 1000).toFixed(1);
-    const _item = S.inventory.filter((i) => i.cat === "Nourriture").map((i) => ({ i, rem: remainingForItem(i.id) })).filter((x) => (x.rem ?? 0) > 0).sort((a, b) => (b.rem || 0) - (a.rem || 0))[0];
+    /* Correctif : la distribution rapide prenait l'article avec le plus de stock,
+       alors que l'affichage par article suit le FIFO (plus ancien d'abord).
+       Elle prend maintenant le premier article avec du stock, comme le formulaire. */
+    const _item = firstFoodItemWithStock();
     if (!_item) toast("⚠️ Aucun article de nourriture avec du stock : la distribution ne sera pas déduite d'un article précis.");
-    const ok = await save("feed", { grams: rt.grams, date: today(), notes: `Distribution quotidienne automatique (${kg} kg)`, item: _item?.i.id || "" });
+    const ok = await save("feed", { grams: rt.grams, date: today(), notes: `Distribution quotidienne automatique (${kg} kg)`, item: _item?.id || "" });
     if (ok) {
       const left = feedStock();
       toast(`✅ ${nf1.format(kg)} kg distribués — Stock restant : ${nf1.format(left)} kg`);
@@ -3755,7 +3835,7 @@ const A = {
   },
   newtx: (el) => txForm(el.dataset.v), edittx: (el) => { const t = byId(S.tx, el.dataset.id); if (t) txForm(t.type, t); }, editweight: (el) => { const w = byId(S.weights, el.dataset.id); if (w) weightForm(w.rabbit, w); }, edittreat: (el) => { const t = byId(S.treatments, el.dataset.id); if (t) treatForm(t.rabbit, t); },
   newbatch: (el) => batchForm(el.dataset.id), editbatch: (el) => batchForm(null, byId(S.batches, el.dataset.id)), sell: (el) => sellForm(el.dataset.id),
-  bdeath: (el) => { const b = byId(S.batches, el.dataset.id); form({ title: `Perte sur le lot ${b.code}`, fields: [{ k: "n", label: "Nombre de lapereaux décédés", type: "number", min: 1, req: true, def: 1 }], onSubmit: async (v) => { const _left = Math.max(0, b.current - v.n); const ok = await save("batch", { ...b, current: _left, deaths: (Number(b.deaths) || 0) + v.n, status: _left === 0 ? "Terminé" : b.status }); if (ok) toast(_left === 0 ? "Perte enregistrée — lot terminé (effectif à zéro)" : "Perte enregistrée"); return ok; } }); },
+  bdeath: (el) => { const b = byId(S.batches, el.dataset.id); form({ title: `Perte sur le lot ${b.code}`, fields: [{ k: "n", label: "Nombre de lapereaux décédés", type: "number", min: 1, req: true, def: 1 }], onSubmit: async (v) => { /* Correctif perte : avant, déclarer plus de pertes que l'effectif gonflait les pertes et effaçait le surplus (mortalité > 100 % possible). */ if (!Number.isInteger(Number(v.n)) || Number(v.n) < 1) { toast("⛔ Nombre de pertes invalide : entier ≥ 1."); return false; } if (Number(v.n) > (Number(b.current) || 0)) { toast(`⛔ Impossible : il n'en reste que ${Number(b.current) || 0} dans ce lot.`); return false; } const _left = (Number(b.current) || 0) - Number(v.n); const ok = await save("batch", { ...b, current: _left, deaths: (Number(b.deaths) || 0) + Number(v.n), status: _left === 0 ? "Terminé" : b.status }); if (ok) toast(_left === 0 ? "Perte enregistrée — lot terminé (effectif à zéro)" : "Perte enregistrée"); return ok; } }); },
   bweight: (el) => { const b = byId(S.batches, el.dataset.id); form({ title: `Poids moyen du lot ${b.code}`, fields: [{ k: "avgWeight", label: "Poids moyen mesuré (g)", type: "number", min: 0, req: true, def: b.avgWeight || "" }], onSubmit: async (v) => { const ok = await save("batch", { ...b, avgWeight: v.avgWeight }); if (ok) toast("Poids moyen enregistré"); return ok; } }); },
   newrem: () => remForm(),
   remtoggle: async (el) => { const r = byId(S.reminders, el.dataset.id); if (r) await save("reminder", { ...r, done: !r.done }); },
@@ -3791,7 +3871,7 @@ const A = {
           if (k === "mating") { for (const _b of S.batches.filter((x) => x.mating === id)) await removeDoc("batch", _b.id); for (const _r of S.rabbits.filter((x) => x.matingId === id)) await save("rabbit", { ..._r, matingId: "" }); for (const _rem of S.reminders.filter((x) => x.matingId === id)) await removeDoc("reminder", _rem.id); }
     if (k === "item") { for (const _f of S.feed.filter((x) => x.item === id)) await removeDoc("feed", _f.id); for (const _tx of S.tx.filter((x) => x.itemId === id)) await removeDoc("tx", _tx.id); }
     if (k === "batch") { for (const _tx of S.tx.filter((x) => x.batchId === id)) await removeDoc("tx", _tx.id); }
-    if (k === "cage") { const _c = byId(S.cages || [], id); if (_c) for (const _r of S.rabbits.filter((x) => (x.cage || "") === _c.name)) await save("rabbit", { ..._r, cage: "" }); }
+    if (k === "cage") { const _c = byId(S.cages || [], id); if (_c) { for (const _r of S.rabbits.filter((x) => (x.cage || "") === _c.name)) await save("rabbit", { ..._r, cage: "" }); for (const _b of S.batches.filter((x) => (x.cage || "") === _c.name)) await save("batch", { ..._b, cage: "" }); } }
     if (k === "treatment") { for (const _rem of S.reminders.filter((x) => x.treatmentId === id)) await removeDoc("reminder", _rem.id); }
       if (await removeDoc(k, id)) toast("Suppression effectuée avec succès");
     });

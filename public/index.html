@@ -648,6 +648,26 @@ async function retryPendingSync() {
   for (const _it of _q) { try { if (_it.action === "delete") await _col.doc(_it.kind + "-" + _it.id).delete(); else await _col.doc(_it.kind + "-" + _it.id).set(_it.doc); } catch (e) { _left.push(_it); } }
   try { localStorage.setItem("abvfarm_pending_sync", JSON.stringify(_left)); if (_left.length < _q.length) toast(`Synchronisation rattrapée : ${_q.length - _left.length} fiche(s) envoyée(s).`); } catch (e) {}
 }
+/* Correctif formulaires figés : la sauvegarde locale répond tout de suite, la synchro cloud
+   part en arrière-plan avec un délai limite. Avant, save() attendait Firestore sans timeout,
+   donc un réseau lent/bloqué laissait le bouton sur "Enregistrement…" pour toujours, alors
+   que les données étaient déjà enregistrées en local. */
+function queuePendingSync(entry) { try { const _q = JSON.parse(localStorage.getItem("abvfarm_pending_sync") || "[]"); _q.push(entry); localStorage.setItem("abvfarm_pending_sync", JSON.stringify(_q)); } catch (e) {} }
+function pushToCloud(kind, id, doc, action) {
+  if (!userSession.isLoggedIn || !isOnline || !window.firebaseDb || !userSession.uid) return;
+  const col = window.firebaseDb.collection("users").doc(userSession.uid).collection("cheptel");
+  const op = action === "delete" ? col.doc(kind + "-" + id).delete() : col.doc(kind + "-" + id).set(doc);
+  const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error("cloud timeout")), 8000));
+  Promise.race([Promise.resolve(op), timeout]).then(() => {
+    userSession.lastSync = new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+    saveUserSession();
+    retryPendingSync();
+  }).catch((err) => {
+    console.warn("Cloud push notice:", err);
+    queuePendingSync(action === "delete" ? { action: "delete", kind, id } : { action: "set", kind, id, doc });
+    toast("⚠️ Non synchronisé : sera renvoyé à la prochaine connexion.");
+  });
+}
 async function save(kind, obj) {
   if (!obj.id) obj.id = uid();
   const all = getLocalData();
@@ -655,19 +675,8 @@ async function save(kind, obj) {
   all[kind + "-" + obj.id] = doc;
   setLocalData(all);
   ingest(Object.values(all));
-
-  // Push to Cloud Firestore if signed in
-  if (userSession.isLoggedIn && isOnline && window.firebaseDb && userSession.uid) {
-    try {
-      await window.firebaseDb.collection("users").doc(userSession.uid).collection("cheptel").doc(kind + "-" + obj.id).set(doc);
-      userSession.lastSync = new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
-      saveUserSession();
-      retryPendingSync();
-    } catch (err) {
-      console.warn("Cloud push notice:", err);
-      try { const _q = JSON.parse(localStorage.getItem("abvfarm_pending_sync") || "[]"); _q.push({ action: "set", kind, id: obj.id, doc }); localStorage.setItem("abvfarm_pending_sync", JSON.stringify(_q)); toast("⚠️ Non synchronisé : sera renvoyé à la prochaine connexion."); } catch (e) {}
-    }
-  }
+  // Synchro cloud en arrière-plan, sans bloquer le formulaire.
+  pushToCloud(kind, obj.id, doc, "set");
   logActivity("Enregistré", `${kind} ${obj.name || obj.label || obj.title || obj.id}`);
   return true;
 }
@@ -679,17 +688,8 @@ async function removeDoc(kind, id) {
   delete all[kind + "-" + id];
   setLocalData(all);
   ingest(Object.values(all));
-
-  if (userSession.isLoggedIn && isOnline && window.firebaseDb && userSession.uid) {
-    try {
-      await window.firebaseDb.collection("users").doc(userSession.uid).collection("cheptel").doc(kind + "-" + id).delete();
-      userSession.lastSync = new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
-      saveUserSession();
-    } catch (err) {
-      console.warn("Cloud delete notice:", err);
-      try { const _q = JSON.parse(localStorage.getItem("abvfarm_pending_sync") || "[]"); _q.push({ action: "delete", kind, id }); localStorage.setItem("abvfarm_pending_sync", JSON.stringify(_q)); } catch (e) {}
-    }
-  }
+  // Suppression cloud en arrière-plan, sans bloquer l'interface.
+  pushToCloud(kind, id, null, "delete");
   return true;
 }
 
@@ -1361,7 +1361,8 @@ function runGoogleAuthDiagnostics() {
 const byId = (list, id) => list.find((x) => x.id === id);
 const rab = (id) => byId(S.rabbits, id);
 const isActive = (r) => r && (r.status || "Actif") === "Actif";
-const age = (r) => r?.birth ? diff(r.birth, today()) : -1;
+const isExited = (r) => r && (r.status || "Actif") !== "Actif";
+const age = (r) => r?.birth ? diff(r.birth, (isExited(r) && r.exitDate ? r.exitDate : today())) : -1;
 const sexCls = (r) => r?.sex === "Male" ? "m" : r?.sex === "Female" ? "f" : "u";
 const sexSym = (r) => r?.sex === "Male" ? "♂" : r?.sex === "Female" ? "♀" : "?";
 const rname = (id) => rab(id)?.name || "Inconnu";
@@ -1377,10 +1378,50 @@ function feedStock() {
   const used = S.feed.reduce((s, f) => s + (Number(f.grams) || 0), 0) / 1000;
   return bought - used;
 }
-function remainingForItem(id) { const it = byId(S.inventory, id); if (!it) return null; return kgOf(it) - S.feed.filter((f) => f.item === id).reduce((s, f) => s + (Number(f.grams) || 0), 0) / 1000; }
+function feedStockBreakdown() {
+  const items = S.inventory.filter((i) => i.cat === "Nourriture");
+  const bought = items.reduce((s, i) => s + kgOf(i), 0);
+  const used = S.feed.reduce((s, f) => s + (Number(f.grams) || 0), 0) / 1000;
+  const nonConvertible = items.filter((i) => kgOf(i) === 0 && (Number(i.qty) || 0) > 0).length;
+  return { bought, used, stock: bought - used, nonConvertible };
+}
+/* Correctif stock : avant, le restant par article ne soustrayait que les distributions liées
+   à cet article, alors que la plupart des distributions n'ont aucun article lié. La somme des
+   restants par article ne correspondait donc jamais au stock global. Maintenant, les
+   distributions liées vont à leur article, et les distributions sans article sont réparties
+   en FIFO (plus ancien achat d'abord), de sorte que la somme des restants = le stock global. */
+function feedAllocation() {
+  const items = S.inventory.filter((i) => i.cat === "Nourriture").slice().sort((a, b) => (a.date || "").localeCompare(b.date || "") || String(a.id).localeCompare(String(b.id)));
+  const alloc = new Map(items.map((i) => [i.id, 0]));
+  const feeds = S.feed.slice().sort((a, b) => (a.date || "").localeCompare(b.date || "") || String(a.id).localeCompare(String(b.id)));
+  for (const f of feeds) {
+    let left = (Number(f.grams) || 0) / 1000;
+    if (f.item && alloc.has(f.item)) {
+      const take = Math.min(left, Math.max(0, kgOf(byId(S.inventory, f.item)) - alloc.get(f.item)));
+      alloc.set(f.item, alloc.get(f.item) + take); left -= take;
+    }
+    for (const it of items) {
+      if (left <= 0) break;
+      if (f.item && it.id === f.item) continue;
+      const room = Math.max(0, kgOf(it) - alloc.get(it.id));
+      const take = Math.min(left, room);
+      alloc.set(it.id, alloc.get(it.id) + take); left -= take;
+    }
+    // Si tout le stock est épuisé, le surplus reste non alloué : le stock global devient négatif, c'est visible.
+  }
+  return alloc;
+}
+function remainingForItem(id) { const it = byId(S.inventory, id); if (!it) return null; const alloc = feedAllocation(); return kgOf(it) - (alloc.get(id) || 0); }
+function firstFoodItemWithStock() {
+  const alloc = feedAllocation();
+  const items = S.inventory.filter((i) => i.cat === "Nourriture").slice().sort((a, b) => (a.date || "").localeCompare(b.date || "") || String(a.id).localeCompare(String(b.id)));
+  return items.find((i) => kgOf(i) - (alloc.get(i.id) || 0) > 0) || null;
+}
+function feedOnDate(d) { return S.feed.find((f) => f.date === d); }
 function batchReceipts(b) { return S.tx.filter((x) => x.type === "in" && (x.batchId === b.id || (x.label || "").includes(b.code))).reduce((s, x) => s + (Number(x.amount) || 0), 0); }
 function saleTxForRabbit(id) { return S.tx.find((x) => x.rabbitId === id); }
 function underWithdrawal(id) {
+  if (isExited(rab(id))) return null;
   const t = today();
   return S.treatments.filter((x) => x.rabbit === id && Number(x.withdrawal) > 0 && addDays(x.date, Number(x.withdrawal)) > t)
     .map((x) => addDays(x.date, Number(x.withdrawal))).sort().pop() || null;
@@ -1432,6 +1473,7 @@ function riskOf(f) {
 function alerts() {
   const t = today(), out = [];
   for (const m of S.matings) {
+    if (["Accouplé", "Gestation confirmée"].includes(m.status) && (isExited(rab(m.female)) || isExited(rab(m.male)))) continue;
     const d = diff(m.date, t), toBirth = diff(t, m.due), f = rname(m.female);
     if (m.status === "Accouplé" && d >= 10) out.push({ sev: d <= 14 ? "info" : "warn", icon: "hand", title: `Palper ${f}`, sub: d <= 14 ? `J${d} après saillie — fenêtre de palpation J10 à J14` : `Palpation en retard : J${d} après saillie`, act: [["Gestation confirmée", "mst", m.id, "Gestation confirmée"], ["Vide", "mst", m.id, "Échoué"]] });
     if (["Accouplé", "Gestation confirmée"].includes(m.status) && toBirth >= 1 && toBirth <= 3) out.push({ sev: "warn", icon: "nest", title: `Boîte à nid pour ${f}`, sub: `Mise bas prévue ${relDay(toBirth)} (${fmtShort(m.due)})` });
@@ -1441,9 +1483,9 @@ function alerts() {
       if (a >= WEANING - 2 && !S.batches.some((b) => b.mating === m.id)) out.push({ sev: a <= WEANING + 10 ? "info" : "warn", icon: "layers", title: `Sevrer la portée de ${f}`, sub: a <= WEANING + 10 ? `Lapereaux âgés de ${a} j` : `Sevrage en retard : lapereaux âgés de ${a} j`, act: [["Créer un lot", "newbatch", m.id]] });
     }
   }
-  for (const x of S.treatments) if (x.next) { const n = diff(t, x.next); if (n <= 2) out.push({ sev: n < 0 ? "bad" : "warn", icon: "syringe", title: `${x.type} : ${x.product || "rappel"}`, sub: `${x.rabbit ? rname(x.rabbit) : "Tout l'élevage"} — ${relDay(n)}` }); }
+  for (const x of S.treatments) if (x.next && !(x.rabbit && isExited(rab(x.rabbit)))) { const n = diff(t, x.next); if (n <= 2) out.push({ sev: n < 0 ? "bad" : "warn", icon: "syringe", title: `${x.type} : ${x.product || "rappel"}`, sub: `${x.rabbit ? rname(x.rabbit) : "Tout l'élevage"} — ${relDay(n)}` }); }
   for (const b of S.batches) if (["Actif", "Quarantaine"].includes(b.status)) { const n = diff(t, b.target); if (n <= 3) out.push({ sev: "ok", icon: "coins", title: `Lot ${b.code} prêt à la vente`, sub: n < 0 ? `Date cible dépassée de ${-n} j` : `Date cible ${relDay(n)}`, act: [["Vendre", "sell", b.id]] }); }
-  for (const r of S.reminders) if (!r.done && r.due <= t) out.push({ sev: r.prio === "Haute" ? "bad" : "warn", icon: "bell", title: r.title, sub: `Rappel — ${relDay(diff(t, r.due))}`, act: [["Fait", "remdone", r.id]] });
+  for (const r of S.reminders) if (!r.done && r.due <= t && !(r.rabbitId && isExited(rab(r.rabbitId)))) out.push({ sev: r.prio === "Haute" ? "bad" : "warn", icon: "bell", title: r.title, sub: `Rappel — ${relDay(diff(t, r.due))}`, act: [["Fait", "remdone", r.id]] });
   const stock = feedStock(), rg = ration().grams;
   if (S.inventory.length && stock < 10) out.push({ sev: stock <= 0 ? "bad" : "warn", icon: "grain", title: stock <= 0 ? "Stock d'aliment épuisé" : `Stock d'aliment faible : ${nf1.format(stock)} kg`, sub: rg ? `Environ ${nf1.format(stock / (rg / 1000))} jours de ration` : "Pensez à réapprovisionner", act: [["Ajouter un achat", "newitem"]] });
   const order = { bad: 0, warn: 1, info: 2, ok: 3 };
@@ -2226,14 +2268,14 @@ VIEWS.lapin = ({ id }) => {
   const done = mts.filter((m) => m.status === "Mise bas"), failed = mts.filter((m) => m.status === "Échoué");
   const born = done.reduce((s, m) => s + (Number(m.alive) || 0), 0);
   const rate = done.length + failed.length ? Math.round((done.length / (done.length + failed.length)) * 100) : null;
-  const matur = a >= MATURE_DAYS ? ["ok", "Apte à la reproduction", `Âge ≥ 5 mois (${ageLabel(a)}).`] : a >= 90 ? ["warn", "Sub-adulte", `Maturité dans ${MATURE_DAYS - a} jours.`] : ["info", "Jeune en croissance", `Reproduction possible à partir de 5 mois.`];
+  const matur = isExited(r) ? ["", "Sorti", r.exitDate ? `Âge figé à ${ageLabel(a)} (sortie le ${fmtDate(r.exitDate)}).` : `Âge figé à ${ageLabel(a)}.`] : a >= MATURE_DAYS ? ["ok", "Apte à la reproduction", `Âge ≥ 5 mois (${ageLabel(a)}).`] : a >= 90 ? ["warn", "Sub-adulte", `Maturité dans ${MATURE_DAYS - a} jours.`] : ["info", "Jeune en croissance", `Reproduction possible à partir de 5 mois.`];
   const F = r.father && r.mother ? makeKinship().F(id) * 100 : 0;
   return `<div class="head"><a class="btn ghost" href="#lapins">${ICON.back}Mes lapins</a>
     <div class="actions"><button class="btn" data-act="editrabbit" data-id="${id}">${ICON.edit}Modifier</button><button class="btn" data-act="status" data-id="${id}">Statut</button><button class="btn ghost danger" data-act="delrabbit" data-id="${id}" aria-label="Supprimer">${ICON.trash}</button></div></div>
   <section class="rcard ${isActive(r) ? sexCls(r) : "off"}" style="padding:22px;cursor:default">
     <div class="top"><div style="min-width:0"><span class="eyebrow">${r.sex === "Male" ? "Mâle" : r.sex === "Female" ? "Femelle" : "Sexe indéterminé"} · ${esc(r.breed || "Race non précisée")}</span><div class="nm" style="font-size:2rem">${esc(r.name)}</div></div><span class="sx" style="font-size:2.2rem">${sexSym(r)}</span></div>
     <div class="actions">${statusChip(r.status)}${r.cage ? `<span class="tag">CAGE ${esc(r.cage)}</span>` : ""}<span class="chip ${matur[0]}">${matur[1]}</span>${wd ? `<span class="chip bad">Délai d'attente jusqu'au ${fmtShort(wd)}</span>` : ""}${F > 0 ? `<span class="chip warn">Consanguinité F = ${nf1.format(F)} %</span>` : ""}</div>
-    <div class="actions"><button class="btn sm" data-act="newweight" data-id="${id}">${ICON.scale}Pesée</button><button class="btn sm" data-act="newtreat" data-id="${id}">${ICON.syringe}Soin</button>${isActive(r) && r.sex !== "Indéterminé" ? `<button class="btn sm" data-act="newmating" data-id="${id}">${ICON.heart}Saillie</button>` : ""}</div>
+    <div class="actions">${isActive(r) ? `<button class="btn sm" data-act="newweight" data-id="${id}">${ICON.scale}Pesée</button><button class="btn sm" data-act="newtreat" data-id="${id}">${ICON.syringe}Soin</button>` : ""}${isActive(r) && r.sex !== "Indéterminé" ? `<button class="btn sm" data-act="newmating" data-id="${id}">${ICON.heart}Saillie</button>` : ""}</div>
   </section>
   ${wd ? `<div class="banner warn"><span>${ICON.alert.replace("<svg", '<svg width="18" height="18"')} Ne pas vendre ni abattre avant le ${fmtDate(wd)} (délai d'attente après traitement).</span></div>` : ""}
   <div class="grid g2">
@@ -2338,12 +2380,12 @@ VIEWS.stocks = () => {
   const last7 = feeds.filter((f) => diff(f.date, today()) < 7).reduce((s, f) => s + Number(f.grams || 0), 0) / 1000;
   const lvl = stock <= 0 ? "bad" : days != null && days < 7 ? "bad" : days != null && days < 14 ? "warn" : "";
   return `<div class="head"><div><h1>Stocks & Alimentation</h1><p>Approvisionnements et distributions journalières</p></div><div class="actions"><button class="btn pri" data-act="feedQuick" title="Distribuer la ration conseillée du cheptel et la déduire automatiquement du stock">${ICON.grain}Distribuer la ration (${nf1.format(rt.grams / 1000)} kg)</button><button class="btn" data-act="feed" data-v="${rt.grams}">${ICON.edit}Ajuster</button><button class="btn" data-act="newitem">${ICON.plus}Nouvel achat</button></div></div>
-  <div class="tiles"><div class="tile ${lvl}"><span class="l">Stock d'aliment disponible</span><span class="v">${nf1.format(stock)} kg</span><span class="s">${days != null ? `≈ ${nf0.format(days)} jours d'autonomie` : "Enregistrez vos lapins pour estimer"}</span></div>
+  <div class="tiles"><div class="tile ${lvl}"><span class="l">Stock d'aliment disponible</span><span class="v">${nf1.format(stock)} kg</span><span class="s">${(() => { const _bd = feedStockBreakdown(); return `Acheté ${nf1.format(_bd.bought)} kg · Distribué ${nf1.format(_bd.used)} kg${_bd.nonConvertible ? ` · ${_bd.nonConvertible} article(s) non convertible(s) en kg, non compté(s)` : ""}${days != null ? ` · ≈ ${nf0.format(days)} jours d'autonomie` : ""}`; })()}</span></div>
   <div class="tile"><span class="l">Distribué (7 derniers jours)</span><span class="v">${nf1.format(last7)} kg</span><span class="s">${nf1.format(last7 / 7)} kg / jour</span></div>
   <div class="tile"><span class="l">Dépenses approvisionnement (ce mois)</span><span class="v" style="font-size:1.35rem">${fcfa(monthSpend)}</span></div></div>
   <div class="grid g2">
-    <section class="card"><div class="row-h"><h2>Achats & Réassorts</h2></div>${_nonConv ? `<p class="hint" style="margin:6px 0">⚠️ Certains achats de nourriture (L, unité, boîte) ne sont pas convertibles en kg et ne sont pas comptés dans le stock total.</p>` : ""}${items.length ? `<div class="list">${items.map((i) => `<div class="li"><span class="ico ${i.cat === "Nourriture" ? "ok" : i.cat === "Médicament" ? "info" : ""}">${ICON[i.cat === "Nourriture" ? "grain" : i.cat === "Médicament" ? "syringe" : "box"]}</span><div class="grow"><div class="t">${esc(i.name)}</div><div class="d">${esc(i.cat)} · ${nf2.format(Number(i.qty) || 0)} ${esc(i.unit)} · ${fmtDate(i.date)}${i.supplier ? ` · ${esc(i.supplier)}` : ""}${i.cat === "Nourriture" ? (["sac 25 kg", "sac 50 kg", "g", "kg"].includes(i.unit) ? ` · restant ≈ ${nf1.format(remainingForItem(i.id))} kg` : ` · restant non mesurable en kg (unité : ${esc(i.unit)})`) : ""}${i.cat === "Nourriture" && Number(i.minQty) > 0 && (kgOf(i) - S.feed.filter((f) => f.item === i.id).reduce((s, f) => s + (Number(f.grams) || 0), 0) / 1000) <= Number(i.minQty) ? ` · ⚠️ sous le seuil (${nf1.format(Number(i.minQty))} kg)` : ""}${i.expiry && diff(today(), i.expiry) >= -30 ? ` · ⚠️ péremption ${fmtDate(i.expiry)}` : ""}</div></div><b class="num">${fcfa(i.price)}</b><button class="btn sm ghost" data-act="edititem" data-id="${i.id}" aria-label="Modifier">${ICON.edit}</button><button class="btn sm ghost" data-act="del" data-kind="item" data-id="${i.id}" aria-label="Supprimer">${ICON.trash}</button></div>`).join("")}</div>` : emptyBox("box", "Aucun approvisionnement enregistré", "Enregistrez vos sacs d'aliments, intrants vétérinaires ou matériel.", `<button class="btn pri" data-act="newitem">${ICON.plus}Enregistrer un achat</button>`)}</section>
-    <section class="card"><div class="row-h"><h2>Journal des distributions d'aliment</h2><div style="display:flex;gap:6px;align-items:center"><label class="hint">Du <input id="feedFrom" type="date" value="${esc(ui.feedFrom || "")}"></label><label class="hint">au <input id="feedTo" type="date" value="${esc(ui.feedTo || "")}"></label></div></div>${_feeds.length ? `<div class="list">${_feeds.slice(0, 30).map((f) => `<div class="li"><span class="ico">${ICON.grain}</span><div class="grow"><div class="t">${nf1.format(Number(f.grams) / 1000)} kg</div><div class="d">${fmtDate(f.date)}${f.notes ? " · " + esc(f.notes) : ""}</div></div><button class="btn sm ghost" data-act="editfeed" data-id="${f.id}" aria-label="Modifier">${ICON.edit}</button><button class="btn sm ghost" data-act="del" data-kind="feed" data-id="${f.id}" aria-label="Supprimer">${ICON.trash}</button></div>`).join("")}</div>` : emptyBox("grain", "Aucune distribution enregistrée", "Chaque distribution enregistrée se déduit automatiquement du stock total.")}</section>
+    <section class="card"><div class="row-h"><h2>Achats & Réassorts</h2></div>${_nonConv ? `<p class="hint" style="margin:6px 0">⚠️ Certains achats de nourriture (L, unité, boîte) ne sont pas convertibles en kg et ne sont pas comptés dans le stock total.</p>` : ""}${items.length ? `<div class="list">${items.map((i) => `<div class="li"><span class="ico ${i.cat === "Nourriture" ? "ok" : i.cat === "Médicament" ? "info" : ""}">${ICON[i.cat === "Nourriture" ? "grain" : i.cat === "Médicament" ? "syringe" : "box"]}</span><div class="grow"><div class="t">${esc(i.name)}</div><div class="d">${esc(i.cat)} · ${nf2.format(Number(i.qty) || 0)} ${esc(i.unit)} · ${fmtDate(i.date)}${i.supplier ? ` · ${esc(i.supplier)}` : ""}${i.cat === "Nourriture" ? (["sac 25 kg", "sac 50 kg", "g", "kg"].includes(i.unit) ? ` · restant ≈ ${nf1.format(remainingForItem(i.id))} kg` : ` · restant non mesurable en kg (unité : ${esc(i.unit)})`) : ""}${i.cat === "Nourriture" && Number(i.minQty) > 0 && remainingForItem(i.id) <= Number(i.minQty) ? ` · ⚠️ sous le seuil (${nf1.format(Number(i.minQty))} kg)` : ""}${i.expiry && diff(today(), i.expiry) >= -30 ? ` · ⚠️ péremption ${fmtDate(i.expiry)}` : ""}</div></div><b class="num">${fcfa(i.price)}</b><button class="btn sm ghost" data-act="edititem" data-id="${i.id}" aria-label="Modifier">${ICON.edit}</button><button class="btn sm ghost" data-act="del" data-kind="item" data-id="${i.id}" aria-label="Supprimer">${ICON.trash}</button></div>`).join("")}</div>` : emptyBox("box", "Aucun approvisionnement enregistré", "Enregistrez vos sacs d'aliments, intrants vétérinaires ou matériel.", `<button class="btn pri" data-act="newitem">${ICON.plus}Enregistrer un achat</button>`)}</section>
+    <section class="card"><div class="row-h"><h2>Journal des distributions d'aliment</h2><div style="display:flex;gap:6px;align-items:center"><label class="hint">Du <input id="feedFrom" type="date" value="${esc(ui.feedFrom || "")}"></label><label class="hint">au <input id="feedTo" type="date" value="${esc(ui.feedTo || "")}"></label></div></div>${_feeds.length ? `<div class="list">${_feeds.slice(0, 30).map((f) => `<div class="li"><span class="ico">${ICON.grain}</span><div class="grow"><div class="t">${nf1.format(Number(f.grams) / 1000)} kg</div><div class="d">${fmtDate(f.date)}${f.notes ? " · " + esc(f.notes) : ""}</div></div><span class="chip">Figée</span></div>`).join("")}</div>` : emptyBox("grain", "Aucune distribution enregistrée", "Chaque distribution enregistrée se déduit automatiquement du stock total.")}</section>
   </div>`;
 };
 
@@ -2381,8 +2423,8 @@ function monthChart() {
 }
 
 VIEWS.rappels = () => {
-  const open = S.reminders.filter((r) => !r.done).sort((a, b) => a.due.localeCompare(b.due)), closed = S.reminders.filter((r) => r.done).sort((a, b) => b.due.localeCompare(a.due));
-  const care = S.treatments.filter((x) => x.next && diff(today(), x.next) >= -14).sort((a, b) => a.next.localeCompare(b.next));
+  const open = S.reminders.filter((r) => !r.done && !(r.rabbitId && isExited(rab(r.rabbitId)))).sort((a, b) => a.due.localeCompare(b.due)), closed = S.reminders.filter((r) => r.done).sort((a, b) => b.due.localeCompare(a.due));
+  const care = S.treatments.filter((x) => x.next && diff(today(), x.next) >= -14 && !(x.rabbit && isExited(rab(x.rabbit)))).sort((a, b) => a.next.localeCompare(b.next));
   const herd = S.treatments.filter((x) => !x.rabbit).sort((a, b) => b.date.localeCompare(a.date));
   return `<div class="head"><div><h1>Tâches & Soins Vétérinaires</h1><p>Planning sanitaire et rappels préventifs</p></div><div class="actions"><button class="btn" data-act="newtreat">${ICON.syringe}Soin collectif</button><button class="btn pri" data-act="newrem">${ICON.plus}Nouveau rappel</button></div></div>
   <div class="grid g2">
@@ -2408,6 +2450,7 @@ VIEWS.donnees = () => {
     <p>Vos données sont protégées et enregistrées instantanément sur cet appareil pour vous garantir un fonctionnement continu avec ou sans connexion Internet. Connectez votre compte par Email ou Google pour une sauvegarde automatique et permanente dans le Cloud Firebase.</p>
     <p>${(() => { let _q = []; try { _q = JSON.parse(localStorage.getItem("abvfarm_pending_sync") || "[]"); } catch (e) {} return _q.length ? `⚠️ ${_q.length} fiche(s) en attente de synchronisation.` : "Aucune fiche en attente de synchronisation."; })()} <button class="btn sm" data-act="retrySync">Renvoyer maintenant</button></p>
   </section>
+  <section class="card full"><h2>Audit API — Toutes les données</h2><p class="hint" style="margin:6px 0 12px">L'API Netlify reçoit toutes les données de l'élevage (lapins, saillies, lots, pesées, soins, stocks, distributions, finances, rappels, cages) et renvoie la liste complète des incohérences de logique, sans rien stocker : l'analyse est renvoyée dans la réponse, puis oubliée. En local (fichier ouvert sans déploiement Netlify), l'API n'est pas joignable : déployez le site pour l'utiliser.</p><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn pri" data-act="auditApi">Auditer mes données actuelles (toutes)</button><button class="btn" data-act="auditApiFile">Auditer un fichier exporté</button></div><div id="auditApiResult" style="margin-top:12px"></div></section>
   <div class="grid g2">
     <section class="card"><h2>Application Téléphone (PWA)</h2><p class="hint" style="margin:6px 0 12px">Installez ABV Farm directement sur l'écran d'accueil de votre smartphone ou tablette pour l'ouvrir comme une application native sans ouvrir le navigateur.</p><button class="btn pri" onclick="installPWA()">${ICON.phone}Installer sur mon téléphone</button></section>
     <section class="card"><h2>Rapport officiel PDF</h2><p class="hint" style="margin:6px 0 12px">Document PDF complet prêt à l'impression : synthèse d'élevage, liste détaillée des lapins, gestations et indicateurs clés.</p><button class="btn pri" data-act="exportpdf">${ICON.fileText}Télécharger l'inventaire PDF</button></section>
@@ -3192,7 +3235,7 @@ function field(f, v) {
   return `<div class="field ${f.full ? "full" : ""}" id="wrap_${id}"><label for="${id}">${esc(f.label)}${f.req ? ' <span style="color:var(--bad);font-weight:700">*</span>' : ''}</label>${input}${f.hint ? `<span class="hint">${esc(f.hint)}</span>` : ""}<span class="field-err" style="display:none;color:var(--bad);font-size:0.75rem;font-weight:600;margin-top:2px"></span></div>`;
 }
 function form({ title, fields, values = {}, submit = "Enregistrer", onSubmit, onInput }) {
-  sheet(title, `<form class="form" id="mform" novalidate>${fields.map((f) => field(f, values[f.k])).join("")}<div class="full actions" style="justify-content:flex-end;margin-top:12px"><button type="button" class="btn ghost" data-act="close">Annuler</button><button type="submit" class="btn pri" id="btnFormSubmit">${esc(submit)}</button></div></form>`);
+  sheet(title, `<form class="form" id="mform" novalidate>${fields.map((f) => field(f, values[f.k])).join("")}<div class="full"><span class="field-err" id="formPersistentErr" style="display:none;color:var(--bad);font-size:0.85rem;font-weight:600"></span></div><div class="full actions" style="justify-content:flex-end;margin-top:12px"><button type="button" class="btn ghost" data-act="close">Annuler</button><button type="submit" class="btn pri" id="btnFormSubmit">${esc(submit)}</button></div></form>`);
   const fm = $("#mform");
   const read = () => {
     const o = {};
@@ -3273,6 +3316,11 @@ function form({ title, fields, values = {}, submit = "Enregistrer", onSubmit, on
       const ok = await onSubmit(v);
       if (ok !== false) {
         closeModal();
+      } else {
+        // Correctif : un refus de logique gardait le formulaire ouvert sans explication
+        // durable (le toast disparaît après 3 s). L'erreur reste affichée dans le formulaire.
+        const _pe = document.getElementById("formPersistentErr");
+        if (_pe) { _pe.textContent = "⛔ Enregistrement refusé : voir le message ci-dessus, corrigez puis réessayez."; _pe.style.display = "block"; }
       }
     } catch (err) {
       console.error("Form submit error:", err);
@@ -3380,6 +3428,10 @@ function rabbitForm(r) {
     },
     onSubmit: async (v) => {
       delete v.autoname_hint;
+      // Correctif code en double (ex. ABV-26-049 porté par Agathe et Ramsès) : un code
+      // présent dans le nom ne peut plus être réutilisé par un autre lapin.
+      const _code = String(v.name || "").match(/ABV-\d+-\d+/);
+      if (_code) { const _dup = S.rabbits.find((x) => x.id !== r.id && String(x.name || "").includes(_code[0])); if (_dup) { toast(`⛔ Code ${_code[0]} déjà utilisé par ${_dup.name}. Choisissez un autre code.`); return false; } }
       if (v.cage) { const _cage = (S.cages || []).find((c) => (c.name || "").trim().toLowerCase() === v.cage.trim().toLowerCase()); const _occ = S.rabbits.filter((x) => x.id !== r.id && isActive(x) && (x.cage || "").trim().toLowerCase() === v.cage.trim().toLowerCase()).length; if (_cage && Number(_cage.capacity) > 0 && _occ >= Number(_cage.capacity)) { toast(`⛔ Cage ${v.cage} pleine : capacité ${_cage.capacity}, ${_occ} occupant(s) déjà.`); return false; } if (_occ) toast("⚠️ Attention : cette cage est déjà occupée par un autre lapin actif. Vérifiez avant de valider."); }
       const w = v.weight; delete v.weight;
       const obj = { ...r, ...v, status: r.status || "Actif" };
@@ -3395,7 +3447,8 @@ function rabbitForm(r) {
   });
 }
 function matingForm(preId, ex) {
-  const pre = rab(preId); const males = (x) => x.sex === "Male" && isActive(x), females = (x) => x.sex === "Female" && isActive(x);
+  const pre = rab(preId);
+  if (preId && !ex && isExited(pre)) { toast("⛔ Animal sorti : plus de nouvelle saillie, ses données sont figées."); return; } const males = (x) => x.sex === "Male" && isActive(x), females = (x) => x.sex === "Female" && isActive(x);
   if (!S.rabbits.some(males) || !S.rabbits.some(females)) { toast("Il faut au moins un mâle et une femelle actifs enregistrés."); return; }
   form({ title: ex ? "Modifier la saillie" : "Enregistrer une saillie", submit: ex ? "Enregistrer" : "Valider la saillie",
     values: ex || { male: pre?.sex === "Male" ? pre.id : "", female: pre?.sex === "Female" ? pre.id : "" },
@@ -3419,6 +3472,9 @@ function matingForm(preId, ex) {
       const _f = offspringF(v.male, v.female); if (_f > 12.5) { toast(`⛔ Saillie bloquée : consanguinité trop élevée (F = ${nf2.format(_f)} % > 12,5 %). Choisissez un autre reproducteur.`); return false; }
       const pregnant = S.matings.some((m) => m.id !== ex?.id && m.female === v.female && ["Accouplé", "Gestation confirmée"].includes(m.status));
       if (["Accouplé", "Gestation confirmée"].includes(v.status) && pregnant) { toast("⛔ Saillie impossible : cette femelle est déjà en gestation (saillie en cours non clôturée)."); return false; }
+      // Correctif mise bas incomplète : une mise bas sans date ni nombre de nés vivants
+      // (7 cas dans l'export du 2 novembre) ne peut plus être enregistrée.
+      if (v.status === "Mise bas" && (!v.birthDate || v.alive === "" || v.alive == null)) { toast("⛔ Mise bas incomplète : renseignez la date de mise bas et le nombre de nés vivants."); return false; }
       const ok = await save("mating", { ...(ex || {}), male: v.male, female: v.female, date: v.date, due: addDays(v.date, GESTATION), status: v.status, birthDate: v.status === "Mise bas" ? (v.birthDate || ex?.birthDate || "") : (ex?.birthDate || ""), alive: v.status === "Mise bas" ? (Number(v.alive) || 0) : (ex?.alive ?? 0), dead: v.status === "Mise bas" ? (Number(v.dead) || 0) : (ex?.dead ?? 0), notes: v.notes });
       if (ok) { closeModal(); toast(ex ? "Saillie modifiée" : "Saillie enregistrée"); }
       return ok;
@@ -3435,6 +3491,7 @@ function kindleForm(id) {
     } });
 }
 function weightForm(rid, ex) {
+  if (!ex && rid && isExited(rab(rid))) { toast("⛔ Animal sorti : plus de nouvelle pesée, ses données sont figées."); return; }
   form({ title: ex ? "Modifier la pesée" : `Pesée de ${rname(rid)}`, values: ex || {}, fields: [{ k: "kg", label: "Poids mesuré (kg)", type: "number", step: "0.01", min: 0, req: true, def: ex ? ex.kg : (lastWeight(rid) ?? "") }, { k: "date", label: "Date de pesée", type: "date", req: true, def: ex ? ex.date : today() }, { k: "notes", label: "Note", full: true, def: ex ? ex.notes : "" }],
     onSubmit: async (v) => {
       const ok = await save("weight", { ...(ex || {}), rabbit: rid, ...v });
@@ -3443,6 +3500,7 @@ function weightForm(rid, ex) {
     } });
 }
 function treatForm(rid, ex) {
+  if (!ex && rid && isExited(rab(rid))) { toast("⛔ Animal sorti : plus de nouveau soin, ses données sont figées."); return; }
   form({ title: ex ? "Modifier le soin" : (rid ? `Soin pour ${rname(rid)}` : "Soin collectif du cheptel"), values: ex || {}, fields: [
       { k: "type", label: "Type d'intervention", type: "select", opts: TREAT_TYPES }, { k: "product", label: "Nom du produit / médicament", req: true, ph: "ex. Ivermectine 1%, Vaccin VHD" },
       { k: "date", label: "Date d'administration", type: "date", req: true, def: today() }, { k: "dosage", label: "Dosage / mode", ph: "ex. 0,5 mL sous-cutané" },
@@ -3479,6 +3537,7 @@ function cageForm(ex) {
     onSubmit: async (v) => { const _old = ex?.name || ""; const ok = await save("cage", { ...(ex || {}), ...v, capacity: Number(v.capacity) || 1 }); if (ok && ex && _old && v.name && v.name !== _old) { for (const _r of S.rabbits.filter((x) => (x.cage || "") === _old)) await save("rabbit", { ..._r, cage: v.name }); } if (ok) { closeModal(); toast(ex ? "Cage modifiée" : "Cage définie"); } return ok; } });
 }
 function feedForm(grams, ex) {
+  if (ex) { toast("⛔ Distribution figée : une distribution enregistrée ne peut plus être modifiée, pour que le stock ne soit pas décrémenté plusieurs fois."); return; }
   const _foodItems = S.inventory.filter((i) => i.cat === "Nourriture");
   const rt = ration();
   const recKg = grams ? +(grams / 1000).toFixed(1) : +(rt.grams / 1000).toFixed(1);
@@ -3494,7 +3553,10 @@ function feedForm(grams, ex) {
     ],
     onSubmit: async (v) => {
       const kg = Number(v.kg) || 0;
-      const ok = await save("feed", { ...(ex || {}), grams: Math.round(kg * 1000), date: v.date, notes: v.notes, item: v.item || "" });
+      const _existing = feedOnDate(v.date);
+      if (_existing) { toast(`⛔ Distribution du ${fmtDate(v.date)} déjà enregistrée (${nf1.format(Number(_existing.grams) / 1000)} kg) : une seule distribution par jour, figée.`); return false; }
+      const _autoItem = v.item || (firstFoodItemWithStock() ? firstFoodItemWithStock().id : "");
+      const ok = await save("feed", { grams: Math.round(kg * 1000), date: v.date, notes: v.notes, item: _autoItem });
       if (ok) {
         closeModal();
         const left = feedStock();
@@ -3610,6 +3672,34 @@ async function bulk(docs, label) {
   return n;
 }
 
+/* ---------- Audit API : toutes les donnees vers Netlify, rapport en retour, rien n'est stocke ---------- */
+function auditDocsFromState() {
+  const docs = [];
+  for (const [kind, key] of Object.entries(KIND)) (S[key] || []).forEach((x) => { const { kind: _k, ...rest } = x; docs.push({ kind, ...rest }); });
+  return docs;
+}
+function showAuditReport(report) {
+  const el = document.getElementById("auditApiResult");
+  const html = report && report.success
+    ? `<div class="card" style="margin:0"><h3>Audit API — ${report.totals.errors} erreur(s), ${report.totals.warnings} avertissement(s)</h3><p class="hint">Fiches analysees : ${Object.entries(report.counts || {}).map(([k, v]) => `${k} ${v}`).join(" · ")} · L'API n'a rien stocke.</p>${report.issues && report.issues.length ? `<div class="list">${report.issues.map((i) => `<div class="li"><div class="grow"><div class="t">${i.severity === "error" ? "⛔" : "⚠️"} [${esc(i.code)}] ${esc(i.label || "")}</div><div class="d">${esc(i.detail || "")} — ${esc(i.suggestion || "")}</div></div></div>`).join("")}</div>` : `<p class="hint">✅ Aucune incoherence detectee par l'API.</p>`}</div>`
+    : `<p class="hint">❌ Audit impossible : ${esc((report && (report.error || report.message)) || "reponse invalide")}.</p>`;
+  if (el) el.innerHTML = html;
+  else toast(report && report.success ? `Audit API : ${report.totals.errors} erreur(s), ${report.totals.warnings} avertissement(s)` : "Audit API impossible");
+}
+async function runAuditApi(payload) {
+  const el = document.getElementById("auditApiResult");
+  if (el) el.innerHTML = `<p class="hint">Audit en cours via l'API…</p>`;
+  try {
+    const res = await fetch("/api/audit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    const report = await res.json();
+    showAuditReport(report);
+    toast(report.success ? `Audit API termine : ${report.totals.errors} erreur(s), ${report.totals.warnings} avertissement(s)` : "Audit API impossible");
+  } catch (e) {
+    if (el) el.innerHTML = `<p class="hint">❌ API inaccessible (site non deploie sur Netlify, ou hors ligne). L'audit API necessite le site deploie : ouvrez l'application via son URL Netlify, pas en fichier local.</p>`;
+    toast("API inaccessible : site non deploie sur Netlify ?");
+  }
+}
+
 const A = {
   close: closeModal,
   overlay: (el, e) => { if (e.target === el) closeModal(); },
@@ -3626,7 +3716,7 @@ const A = {
   resetFilters: () => { ui.q = ""; ui.sex = "all"; ui.stage = "all"; ui.breed = "all"; ui.st = "actifs"; ui.ageBracket = "all"; ui.minAgeM = ""; ui.maxAgeM = ""; ui.minWeight = ""; ui.maxWeight = ""; render(); },
   resetCustomMetrics: () => { ui.minAgeM = ""; ui.maxAgeM = ""; ui.minWeight = ""; ui.maxWeight = ""; render(); },
   newrabbit: () => rabbitForm(), editrabbit: (el) => rabbitForm(rab(el.dataset.id)),
-  status: (el) => { const r = rab(el.dataset.id); form({ title: `Statut de ${r.name}`, values: r, fields: [{ k: "status", label: "Statut", type: "select", opts: STATUSES, full: true, hint: "Un animal vendu, abattu ou décédé passe dans la rubrique « Sortis »." }, { k: "exitDate", label: "Date de sortie (vente, décès, abattage, don)", type: "date", def: today() }, { k: "exitPrice", label: "Prix / montant perçu (FCFA, si vente)", type: "number", min: 0 }, { k: "exitBuyer", label: "Acheteur / destinataire", ph: "ex. Client marché, voisin" }, { k: "exitCause", label: "Cause / motif", full: true, ph: "ex. Vente chair, maladie, don" }], onSubmit: async (v) => { const isExit = ["Vendu", "Mort", "Abattu", "Donné"].includes(v.status); if ((v.status === "Vendu" || v.status === "Abattu") && r.status !== v.status) { const wd = underWithdrawal(r.id); if (wd) { toast(`⛔ Vente / abattage interdit : délai d'attente jusqu'au ${fmtDate(wd)} (traitement en cours).`); return false; } } const obj = { ...r, status: v.status, exitDate: isExit ? (v.exitDate || today()) : "", exitPrice: isExit ? (Number(v.exitPrice) || 0) : 0, exitBuyer: isExit ? (v.exitBuyer || "") : "", exitCause: isExit ? (v.exitCause || "") : "" }; const ok = await save("rabbit", obj); if (ok) { const _ltx = saleTxForRabbit(r.id); if (v.status === "Vendu" && Number(v.exitPrice) > 0) { if (_ltx) await save("tx", { ..._ltx, amount: Number(v.exitPrice), date: v.exitDate || today(), label: `Vente ${r.name}${v.exitBuyer ? " → " + v.exitBuyer : ""}` }); else await save("tx", { type: "in", cat: "Vente chair", amount: Number(v.exitPrice), date: v.exitDate || today(), label: `Vente ${r.name}${v.exitBuyer ? " → " + v.exitBuyer : ""}`, rabbitId: r.id }); } else if (r.status === "Vendu" && v.status !== "Vendu" && _ltx) await removeDoc("tx", _ltx.id); toast("Statut mis à jour"); } return ok; } }); },
+  status: (el) => { const r = rab(el.dataset.id); form({ title: `Statut de ${r.name}`, values: r, fields: [{ k: "status", label: "Statut", type: "select", opts: STATUSES, full: true, hint: "Un animal vendu, abattu ou décédé passe dans la rubrique « Sortis »." }, { k: "exitDate", label: "Date de sortie (vente, décès, abattage, don)", type: "date", def: today() }, { k: "exitPrice", label: "Prix / montant perçu (FCFA, si vente)", type: "number", min: 0 }, { k: "exitBuyer", label: "Acheteur / destinataire", ph: "ex. Client marché, voisin" }, { k: "exitCause", label: "Cause / motif", full: true, ph: "ex. Vente chair, maladie, don" }], onSubmit: async (v) => { const isExit = ["Vendu", "Mort", "Abattu", "Donné"].includes(v.status); if ((v.status === "Vendu" || v.status === "Abattu") && r.status !== v.status) { const wd = underWithdrawal(r.id); if (wd) { toast(`⛔ Vente / abattage interdit : délai d'attente jusqu'au ${fmtDate(wd)} (traitement en cours).`); return false; } } const obj = { ...r, status: v.status, exitDate: isExit ? (v.exitDate || today()) : "", exitPrice: isExit ? (Number(v.exitPrice) || 0) : 0, exitBuyer: isExit ? (v.exitBuyer || "") : "", exitCause: isExit ? (v.exitCause || "") : "" }; const ok = await save("rabbit", obj); if (ok) { if (isExit) { for (const _rem of S.reminders.filter((x) => x.rabbitId === r.id && !x.done)) await save("reminder", { ..._rem, done: true }); for (const _m of S.matings.filter((x) => (x.male === r.id || x.female === r.id) && ["Accouplé", "Gestation confirmée"].includes(x.status))) await save("mating", { ..._m, status: "Échoué", notes: ((_m.notes || "") + ` [Clôturée automatiquement : animal sorti le ${fmtDate(v.exitDate || today())}]`).trim() }); } const _ltx = saleTxForRabbit(r.id); if (v.status === "Vendu" && Number(v.exitPrice) > 0) { if (_ltx) await save("tx", { ..._ltx, amount: Number(v.exitPrice), date: v.exitDate || today(), label: `Vente ${r.name}${v.exitBuyer ? " → " + v.exitBuyer : ""}` }); else await save("tx", { type: "in", cat: "Vente chair", amount: Number(v.exitPrice), date: v.exitDate || today(), label: `Vente ${r.name}${v.exitBuyer ? " → " + v.exitBuyer : ""}`, rabbitId: r.id }); } else if (r.status === "Vendu" && v.status !== "Vendu" && _ltx) await removeDoc("tx", _ltx.id); toast("Statut mis à jour"); } return ok; } }); },
   delrabbit: (el) => { const r = rab(el.dataset.id); if (!r) return; confirmBox(`Supprimer définitivement la fiche de ${r.name} ainsi que ses pesées et soins ? Pour un animal vendu ou décédé, modifiez plutôt son statut.`, "Supprimer", async () => {
     toast(`Suppression de ${r.name}…`);
     for (const w of S.weights.filter((x) => x.rabbit === r.id)) await removeDoc("weight", w.id);
@@ -3644,8 +3734,10 @@ const A = {
   newcage: () => cageForm(), editcage: (el) => { const c = byId(S.cages || [], el.dataset.id); if (c) cageForm(c); },
   retrySync: async () => { await retryPendingSync(); toast("Synchronisation relancée"); render(); },
   restoreTrash: async (el) => { let _t = []; try { _t = JSON.parse(localStorage.getItem("abvfarm_trash") || "[]"); } catch (e) {} const _x = _t.find((x) => x.kind === el.dataset.kind && x.id === el.dataset.id); if (!_x) { toast("Élément introuvable dans la corbeille."); return; } const { kind: _k, ..._doc } = _x.doc; if (await save(_x.kind, _doc)) { try { localStorage.setItem("abvfarm_trash", JSON.stringify(_t.filter((x) => !(x.kind === el.dataset.kind && x.id === el.dataset.id)))); } catch (e) {} toast("Élément restauré"); render(); } },
-  emptyTrash: (el) => confirmBox("Vider définitivement la corbeille ? Cette action est irréversible.", "Vider", () => { try { localStorage.removeItem("abvfarm_trash"); } catch (e) {} toast("Corbeille vidée"); render(); }), editfeed: (el) => { const f = byId(S.feed, el.dataset.id); if (f) feedForm(0, f); }, editrem: (el) => { const r = byId(S.reminders, el.dataset.id); if (r) remForm(r); }, feed: (el) => feedForm(Number(el.dataset.v) || 0),
+  emptyTrash: (el) => confirmBox("Vider définitivement la corbeille ? Cette action est irréversible.", "Vider", () => { try { localStorage.removeItem("abvfarm_trash"); } catch (e) {} toast("Corbeille vidée"); render(); }), editfeed: (el) => { toast("⛔ Distribution figée : une distribution enregistrée ne peut plus être modifiée."); }, editrem: (el) => { const r = byId(S.reminders, el.dataset.id); if (r) remForm(r); }, feed: (el) => feedForm(Number(el.dataset.v) || 0),
   feedQuick: async () => {
+    const _done = feedOnDate(today());
+    if (_done) { toast(`Distribution du jour déjà enregistrée : ${nf1.format(Number(_done.grams) / 1000)} kg — figée, le stock n'a pas été décrémenté une deuxième fois.`); return; }
     const rt = ration();
     if (!rt.grams || rt.grams <= 0) {
       toast("Enregistrez d'abord des lapins actifs pour calculer la ration.");
@@ -3670,6 +3762,7 @@ const A = {
   remdone: async (el) => { const r = byId(S.reminders, el.dataset.id); if (r && (await save("reminder", { ...r, done: true }))) toast("Tâche clôturée"); },
   del: async (el) => {
     const k = el.dataset.kind, id = el.dataset.id;
+    if (k === "feed") { toast("⛔ Distribution figée : une distribution enregistrée ne peut plus être supprimée, pour que le stock reste cohérent."); return; }
     let desc = "cet enregistrement";
     if (k === "batch") {
       const b = byId(S.batches, id);
@@ -3733,6 +3826,8 @@ const A = {
     toast("Fichier de sauvegarde exporté");
   },
   import: () => $("#importFile").click(),
+  auditApi: async () => { await runAuditApi({ docs: auditDocsFromState(), params: { gestation: GESTATION, weaning: WEANING }, today: today() }); },
+  auditApiFile: () => { const inp = document.createElement("input"); inp.type = "file"; inp.accept = ".json,application/json"; inp.onchange = async () => { const f = inp.files[0]; if (!f) return; try { const j = JSON.parse(await f.text()); const docs = Array.isArray(j.docs) ? j.docs : (j.data ? [] : []); if (!docs.length && !j.data && !j.S) { toast("Fichier exporte non reconnu : il faut un export ABV Farm (docs)."); return; } await runAuditApi({ docs, data: j.data, S: j.S, params: { gestation: GESTATION, weaning: WEANING }, today: today() }); } catch (e) { toast("Fichier JSON illisible."); } }; inp.click(); },
 };
 
 let lastImportGuessedDates = 0;

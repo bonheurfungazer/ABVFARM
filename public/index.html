@@ -1366,6 +1366,12 @@ const byId = (list, id) => list.find((x) => x.id === id);
 const rab = (id) => byId(S.rabbits, id);
 const isActive = (r) => r && (r.status || "Actif") === "Actif";
 const isExited = (r) => r && (r.status || "Actif") !== "Actif";
+/* Correctif externe : « Externe » n'est pas une sortie. Un reproducteur externe
+   (ex. Elise le Sniper) reste utilisable en reproduction, sans compter dans le
+   cheptel (ration, cages, effectifs). Seuls Vendu / Mort / Abattu / Donné sont
+   vraiment partis et figent les données. C'est aussi la règle déjà utilisée par
+   l'API d'audit, l'application ne l'appliquait pas. */
+const isDeparted = (r) => r && ["Vendu", "Mort", "Abattu", "Donné"].includes(r.status);
 const age = (r) => r?.birth ? diff(r.birth, (isExited(r) && r.exitDate ? r.exitDate : today())) : -1;
 const sexCls = (r) => r?.sex === "Male" ? "m" : r?.sex === "Female" ? "f" : "u";
 const sexSym = (r) => r?.sex === "Male" ? "♂" : r?.sex === "Female" ? "♀" : "?";
@@ -1373,9 +1379,16 @@ const rname = (id) => rab(id)?.name || "Inconnu";
 function weightsOf(id) { return S.weights.filter((w) => w.rabbit === id).sort((a, b) => a.date.localeCompare(b.date)); }
 function lastWeight(id) { const w = weightsOf(id); return w.length ? w[w.length - 1].kg : null; }
 function gmq(id) { const w = weightsOf(id); if (w.length < 2) return null; const a = w[w.length - 2], b = w[w.length - 1]; const d = diff(a.date, b.date); return d > 0 ? ((b.kg - a.kg) * 1000) / d : null; }
+/* Correctif stock : une unité non convertible (L, unité, boîte) ne comptait
+   jamais dans le stock en kg, donc l'achat semblait ne pas apparaître. On peut
+   maintenant renseigner son équivalent en kg par unité (ex. 1 boîte = 5 kg),
+   et cet équivalent compte dans le stock. Sans équivalent, l'achat reste
+   visible dans la liste mais ne compte pas, avec un avertissement explicite. */
+const CONVERTIBLE_UNITS = ["sac 25 kg", "sac 50 kg", "g", "kg"];
+const isConvertible = (it) => CONVERTIBLE_UNITS.includes(it.unit) || Number(it.kgPerUnit) > 0;
 function kgOf(it) {
   const q = Number(it.qty) || 0;
-  switch (it.unit) { case "sac 25 kg": return q * 25; case "sac 50 kg": return q * 50; case "g": return q / 1000; case "kg": return q; default: return 0; }
+  switch (it.unit) { case "sac 25 kg": return q * 25; case "sac 50 kg": return q * 50; case "g": return q / 1000; case "kg": return q; default: return Number(it.kgPerUnit) > 0 ? q * Number(it.kgPerUnit) : 0; }
 }
 function feedStock() {
   const bought = S.inventory.filter((i) => i.cat === "Nourriture").reduce((s, i) => s + kgOf(i), 0);
@@ -1386,7 +1399,7 @@ function feedStockBreakdown() {
   const items = S.inventory.filter((i) => i.cat === "Nourriture");
   const bought = items.reduce((s, i) => s + kgOf(i), 0);
   const used = S.feed.reduce((s, f) => s + (Number(f.grams) || 0), 0) / 1000;
-  const nonConvertible = items.filter((i) => kgOf(i) === 0 && (Number(i.qty) || 0) > 0).length;
+  const nonConvertible = items.filter((i) => !isConvertible(i) && (Number(i.qty) || 0) > 0).length;
   return { bought, used, stock: bought - used, nonConvertible };
 }
 /* Correctif stock : avant, le restant par article ne soustrayait que les distributions liées
@@ -1480,7 +1493,7 @@ function riskOf(f) {
 function alerts() {
   const t = today(), out = [];
   for (const m of S.matings) {
-    if (["Accouplé", "Gestation confirmée"].includes(m.status) && (isExited(rab(m.female)) || isExited(rab(m.male)))) continue;
+    if (["Accouplé", "Gestation confirmée"].includes(m.status) && (isDeparted(rab(m.female)) || isDeparted(rab(m.male)))) continue;
     const d = diff(m.date, t), toBirth = diff(t, m.due), f = rname(m.female);
     if (m.status === "Accouplé" && d >= 10) out.push({ sev: d <= 14 ? "info" : "warn", icon: "hand", title: `Palper ${f}`, sub: d <= 14 ? `J${d} après saillie — fenêtre de palpation J10 à J14` : `Palpation en retard : J${d} après saillie`, act: [["Gestation confirmée", "mst", m.id, "Gestation confirmée"], ["Vide", "mst", m.id, "Échoué"]] });
     if (["Accouplé", "Gestation confirmée"].includes(m.status) && toBirth >= 1 && toBirth <= 3) out.push({ sev: "warn", icon: "nest", title: `Boîte à nid pour ${f}`, sub: `Mise bas prévue ${relDay(toBirth)} (${fmtShort(m.due)})` });
@@ -1496,7 +1509,12 @@ function alerts() {
      date de rappel) ou « Modifier » (reporter le rappel). */
   for (const x of S.treatments) if (x.next && !(x.rabbit && isExited(rab(x.rabbit)))) { const n = diff(t, x.next); if (n <= 2) out.push({ sev: n < 0 ? "bad" : "warn", icon: "syringe", title: `${x.type} : ${x.product || "rappel"}`, sub: `${x.rabbit ? rname(x.rabbit) : "Tout l'élevage"} — ${n < 0 ? `En retard de ${-n} j` : relDay(n)}`, act: [["Clôturer", "treatdone", x.id], ["Modifier", "edittreat", x.id]] }); }
   for (const b of S.batches) if (b.status === "Actif") { const n = diff(t, b.target); if (n <= 3) out.push({ sev: "ok", icon: "coins", title: `Lot ${b.code} prêt à la vente`, sub: n < 0 ? `Date cible dépassée de ${-n} j` : `Date cible ${relDay(n)}`, act: [["Vendre", "sell", b.id]] }); }
-  for (const r of S.reminders) if (!r.done && r.due <= t && !(r.rabbitId && isExited(rab(r.rabbitId)))) { const _n = diff(t, r.due); out.push({ sev: r.prio === "Haute" ? "bad" : "warn", icon: "bell", title: r.title, sub: `Rappel — ${_n < 0 ? `En retard de ${-_n} j` : relDay(_n)}`, act: [["Fait", "remdone", r.id]] }); }
+  /* Correctif doublon : un soin avec une date de rappel créait aussi un rappel
+     lié (treatmentId). L'accueil affichait alors le même soin deux fois, et
+     cliquer « Fait » sur le rappel ne fermait pas le soin, donc il réapparaissait.
+     Un rappel lié à un soin est maintenant ignoré ici : l'alerte du soin elle-même
+     (avec « Clôturer ») couvre ce rappel, et « Clôturer » ferme les deux. */
+  for (const r of S.reminders) if (!r.done && !r.treatmentId && r.due <= t && !(r.rabbitId && isExited(rab(r.rabbitId)))) { const _n = diff(t, r.due); out.push({ sev: r.prio === "Haute" ? "bad" : "warn", icon: "bell", title: r.title, sub: `Rappel — ${_n < 0 ? `En retard de ${-_n} j` : relDay(_n)}`, act: [["Fait", "remdone", r.id]] }); }
   const stock = feedStock(), rg = ration().grams;
   if (S.inventory.length && stock < 10) out.push({ sev: stock <= 0 ? "bad" : "warn", icon: "grain", title: stock <= 0 ? "Stock d'aliment épuisé" : `Stock d'aliment faible : ${nf1.format(stock)} kg`, sub: stock <= 0 ? "Stock épuisé — pensez à réapprovisionner" : rg ? `Environ ${nf1.format(stock / (rg / 1000))} jours de ration` : "Pensez à réapprovisionner", act: [["Ajouter un achat", "newitem"]] });
   const order = { bad: 0, warn: 1, info: 2, ok: 3 };
@@ -1704,7 +1722,7 @@ const NAV = [
   { id: "donnees", label: "Données & PDF", icon: "data" },
 ];
 const BOTTOM = ["accueil", "lapins", "saillies", "rappels"];
-let ui = { q: "", gq: "", rpage: 1, txpage: 1, spage: 1, feedFrom: "", feedTo: "", sex: "all", st: "actifs", stage: "all", breed: "all", sort: "name_asc", viewMode: "grid", ageBracket: "all", minAgeM: "", maxAgeM: "", minWeight: "", maxWeight: "", txf: "all", txFrom: "", txTo: "" };
+let ui = { q: "", gq: "", rpage: 1, txpage: 1, spage: 1, feedFrom: "", feedTo: "", sex: "all", st: "actifs", stage: "all", breed: "all", sort: "name_asc", viewMode: "grid", ageBracket: "all", minAgeM: "", maxAgeM: "", minWeight: "", maxWeight: "", txf: "all", txFrom: "", txTo: "", advFilters: "" };
 function route() {
   const h = decodeURIComponent(location.hash.slice(1));
   if (h.startsWith("lapin-")) return { name: "lapin", id: h.slice(6) };
@@ -1735,7 +1753,7 @@ function afterRender() { const h = afterHooks; afterHooks = []; h.forEach((f) =>
 
 /* ---------- Small renderers ---------- */
 const emptyBox = (icon, title, text, btn) => `<div class="empty">${ICON[icon]}<b>${title}</b><span>${text}</span>${btn || ""}</div>`;
-const statusChip = (s) => { s = s || "Actif"; const c = s === "Actif" ? "ok" : s === "Vendu" ? "info" : s === "Mort" ? "bad" : s === "Abattu" ? "clay" : ""; return `<span class="chip ${c}">${esc(s)}</span>`; };
+const statusChip = (s) => { s = s || "Actif"; const c = s === "Actif" ? "ok" : s === "Vendu" ? "info" : s === "Mort" ? "bad" : s === "Abattu" ? "clay" : s === "Externe" ? "info" : ""; return `<span class="chip ${c}">${esc(s)}</span>`; };
 const mstChip = (s) => { const c = s === "Mise bas" ? "ok" : s === "Gestation confirmée" ? "info" : s === "Échoué" ? "bad" : "warn"; return `<span class="chip ${c}">${esc(s)}</span>`; };
 const prioChip = (p) => `<span class="chip ${p === "Haute" ? "bad" : p === "Moyenne" ? "warn" : ""}">${esc(p || "Moyenne")}</span>`;
 const sevIco = (a) => `<span class="ico ${a.sev}">${ICON[a.icon]}</span>`;
@@ -1819,7 +1837,7 @@ VIEWS.accueil = () => {
     <div class="tile"><span class="l">Lapins actifs</span><span class="v">${act.length}</span><span class="s">${males} ♂ · ${fem} ♀</span></div>
     <div class="tile"><span class="l">Reproducteurs</span><span class="v">${mature}</span><span class="s">âgés de 5 mois et plus</span></div>
     <div class="tile"><span class="l">Gestations</span><span class="v">${gest.length}</span><span class="s">${gest[0] ? `prochaine ${relDay(diff(today(), gest[0].due))}` : "aucune en cours"}</span></div>
-    <div class="tile ${stock <= 0 && S.inventory.length ? "bad" : stock < 10 && S.inventory.length ? "warn" : ""}"><span class="l">Stock d'aliment</span><span class="v">${nf1.format(stock)} kg</span><span class="s">${autonomy != null ? (autonomy <= 0 ? "Stock épuisé" : `≈ ${nf0.format(autonomy)} jours de ration`) : "—"}</span></div>
+    <div class="tile ${stock <= 0 && S.inventory.length ? "bad" : stock < 10 && S.inventory.length ? "warn" : ""}"><span class="l">Stock d'aliment</span><span class="v">${nf1.format(stock)} kg</span><span class="s">${autonomy != null ? (autonomy <= 0 ? "Stock épuisé" : `≈ ${nf0.format(autonomy)} jours de ration`) : "—"}${feedStockBreakdown().nonConvertible ? ` · ⚠️ ${feedStockBreakdown().nonConvertible} achat(s) non compté(s) en kg` : ""}</span></div>
     <div class="tile"><span class="l">Prolificité moyenne</span><span class="v">${_prolific == null ? "—" : nf1.format(_prolific)}</span><span class="s">lapereaux vivants / portée (${_kindled.length} portées)</span></div>
     <div class="tile"><span class="l">Mortalité enregistrée</span><span class="v">${_mort}</span><span class="s">lapins au statut Mort</span></div>
     <div class="tile"><span class="l">Recettes totales</span><span class="v" style="font-size:1.35rem">${fcfa(_sales)}</span><span class="s">toutes périodes, toutes recettes</span></div>
@@ -2111,6 +2129,16 @@ VIEWS.lapins = () => {
     </button>
   </div>
 
+  <!-- Correctif espace : les deux grands panneaux (répartition par âge + filtres
+       précis) occupaient deux cartes entières même fermés. Ils sont maintenant
+       cachés derrière un seul petit bouton, et n'occupent plus aucune place tant
+       qu'on ne les ouvre pas (sauf si un filtre avancé est déjà actif). -->
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+    <button type="button" class="btn sm ghost" data-act="ui" data-k="advFilters" data-v="${ui.advFilters ? "" : "1"}">${ui.advFilters ? "Masquer les filtres avancés" : "Filtres avancés"}</button>
+    ${((ui.ageBracket && ui.ageBracket !== 'all') || ui.minAgeM !== "" || ui.maxAgeM !== "" || ui.minWeight !== "" || ui.maxWeight !== "") ? `<span class="chip warn sm">Filtre avancé actif</span>` : ""}
+    <span class="hint">Répartition par âge, âge et poids précis</span>
+  </div>
+  <div style="${(ui.advFilters || (ui.ageBracket && ui.ageBracket !== 'all') || ui.minAgeM !== "" || ui.maxAgeM !== "" || ui.minWeight !== "" || ui.maxWeight !== "") ? "" : "display:none"}">
   <!-- 1. SECTION REPLIABLE : 📊 Répartition par tranche d'âge (7 tranches) -->
   <details class="card" style="padding:10px 14px;background:var(--surface);margin-bottom:8px" ${ui.ageBracket && ui.ageBracket !== 'all' ? "open" : ""}>
     <summary style="cursor:pointer;font-weight:700;display:flex;justify-content:space-between;align-items:center;user-select:none">
@@ -2185,6 +2213,7 @@ VIEWS.lapins = () => {
     </div>
   </details>
 
+  </div>
   <!-- Résumé du filtrage -->
   <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.82rem;color:var(--muted);padding:0 2px">
     ${(() => { const _pages = Math.max(1, Math.ceil(list.length / 24)); const _pg = Math.max(1, Math.min(_pages, Number(ui.rpage) || 1)); ui.rpage = _pg; const _shown = list.slice((_pg - 1) * 24, _pg * 24).length; return `<span>Affichage de <b>${_shown}</b> lapin${_shown > 1 ? "s" : ""} sur cette page, <b>${list.length}</b> au total${_pages > 1 ? ` — Page ${_pg} / ${_pages}` : ""}</span><span style="display:flex;gap:6px;align-items:center">${_pages > 1 ? `<button class="btn sm ghost" data-act="ui" data-k="rpage" data-v="${_pg - 1}" ${_pg <= 1 ? "disabled" : ""}>← Précédent</button><button class="btn sm ghost" data-act="ui" data-k="rpage" data-v="${_pg + 1}" ${_pg >= _pages ? "disabled" : ""}>Suivant →</button>` : ""}</span>`; })()}
@@ -2281,14 +2310,14 @@ VIEWS.lapin = ({ id }) => {
   const done = mts.filter((m) => m.status === "Mise bas"), failed = mts.filter((m) => m.status === "Échoué");
   const born = done.reduce((s, m) => s + (Number(m.alive) || 0), 0);
   const rate = done.length + failed.length ? Math.round((done.length / (done.length + failed.length)) * 100) : null;
-  const matur = isExited(r) ? ["", "Sorti", r.exitDate ? `Âge figé à ${ageLabel(a)} (sortie le ${fmtDate(r.exitDate)}).` : `Âge figé à ${ageLabel(a)}.`] : a >= MATURE_DAYS ? ["ok", "Apte à la reproduction", `Âge ≥ 5 mois (${ageLabel(a)}).`] : a >= 90 ? ["warn", "Sub-adulte", `Maturité dans ${MATURE_DAYS - a} jours.`] : ["info", "Jeune en croissance", `Reproduction possible à partir de 5 mois.`];
+  const matur = r.status === "Externe" ? ["info", "Externe — utilisable en reproduction", "Animal extérieur au cheptel : il ne compte pas dans la ration ni dans les cages, mais il peut être choisi comme reproducteur."] : isExited(r) ? ["", "Sorti", r.exitDate ? `Âge figé à ${ageLabel(a)} (sortie le ${fmtDate(r.exitDate)}).` : `Âge figé à ${ageLabel(a)}.`] : a >= MATURE_DAYS ? ["ok", "Apte à la reproduction", `Âge ≥ 5 mois (${ageLabel(a)}).`] : a >= 90 ? ["warn", "Sub-adulte", `Maturité dans ${MATURE_DAYS - a} jours.`] : ["info", "Jeune en croissance", `Reproduction possible à partir de 5 mois.`];
   const F = r.father && r.mother ? makeKinship().F(id) * 100 : 0;
   return `<div class="head"><a class="btn ghost" href="#lapins">${ICON.back}Mes lapins</a>
     <div class="actions"><button class="btn" data-act="editrabbit" data-id="${id}">${ICON.edit}Modifier</button><button class="btn" data-act="status" data-id="${id}">Statut</button><button class="btn ghost danger" data-act="delrabbit" data-id="${id}" aria-label="Supprimer">${ICON.trash}</button></div></div>
   <section class="rcard ${isActive(r) ? sexCls(r) : "off"}" style="padding:22px;cursor:default">
     <div class="top"><div style="min-width:0"><span class="eyebrow">${r.sex === "Male" ? "Mâle" : r.sex === "Female" ? "Femelle" : "Sexe indéterminé"} · ${esc(r.breed || "Race non précisée")}</span><div class="nm" style="font-size:2rem">${esc(r.name)}</div></div><span class="sx" style="font-size:2.2rem">${sexSym(r)}</span></div>
     <div class="actions">${statusChip(r.status)}${r.cage ? `<span class="tag">CAGE ${esc(r.cage)}</span>` : ""}<span class="chip ${matur[0]}">${matur[1]}</span>${wd ? `<span class="chip bad">Délai d'attente jusqu'au ${fmtShort(wd)}</span>` : ""}${F > 0 ? `<span class="chip warn">Consanguinité F = ${nf1.format(F)} %</span>` : ""}</div>
-    <div class="actions">${isActive(r) ? `<button class="btn sm" data-act="newweight" data-id="${id}">${ICON.scale}Pesée</button><button class="btn sm" data-act="newtreat" data-id="${id}">${ICON.syringe}Soin</button>` : ""}${isActive(r) && r.sex !== "Indéterminé" ? `<button class="btn sm" data-act="newmating" data-id="${id}">${ICON.heart}Saillie</button>` : ""}</div>
+    <div class="actions">${(isActive(r) || r.status === "Externe") ? `<button class="btn sm" data-act="newweight" data-id="${id}">${ICON.scale}Pesée</button><button class="btn sm" data-act="newtreat" data-id="${id}">${ICON.syringe}Soin</button>` : ""}${(isActive(r) || r.status === "Externe") && r.sex !== "Indéterminé" ? `<button class="btn sm" data-act="newmating" data-id="${id}">${ICON.heart}Saillie</button>` : ""}</div>
   </section>
   ${wd ? `<div class="banner warn"><span>${ICON.alert.replace("<svg", '<svg width="18" height="18"')} Ne pas vendre ni abattre avant le ${fmtDate(wd)} (délai d'attente après traitement).</span></div>` : ""}
   <div class="grid g2">
@@ -2385,7 +2414,7 @@ function batchCard(b) {
 VIEWS.stocks = () => {
   const stock = feedStock(), rt = ration(), days = rt.grams ? stock / (rt.grams / 1000) : null;
   const items = S.inventory.slice().sort((a, b) => b.date.localeCompare(a.date));
-  const _nonConv = items.some((i) => i.cat === "Nourriture" && !["sac 25 kg", "sac 50 kg", "g", "kg"].includes(i.unit));
+  const _nonConv = items.some((i) => i.cat === "Nourriture" && !isConvertible(i));
   const feeds = S.feed.slice().sort((a, b) => b.date.localeCompare(a.date));
   afterHooks.push(() => { const _f = $("#feedFrom"); if (_f) _f.addEventListener("change", () => { ui.feedFrom = _f.value; render(); }); const _t = $("#feedTo"); if (_t) _t.addEventListener("change", () => { ui.feedTo = _t.value; render(); }); });
   const _feeds = feeds.filter((f) => (!ui.feedFrom || (f.date || "") >= ui.feedFrom) && (!ui.feedTo || (f.date || "") <= ui.feedTo));
@@ -2393,11 +2422,12 @@ VIEWS.stocks = () => {
   const last7 = feeds.filter((f) => diff(f.date, today()) < 7).reduce((s, f) => s + Number(f.grams || 0), 0) / 1000;
   const lvl = stock <= 0 ? "bad" : days != null && days < 7 ? "bad" : days != null && days < 14 ? "warn" : "";
   return `<div class="head"><div><h1>Stocks & Alimentation</h1><p>Approvisionnements et distributions journalières</p></div><div class="actions"><button class="btn pri" data-act="feedQuick" title="Distribuer la ration conseillée du cheptel et la déduire automatiquement du stock">${ICON.grain}Distribuer la ration (${nf1.format(rt.grams / 1000)} kg)</button><button class="btn" data-act="feed" data-v="${rt.grams}">${ICON.edit}Ajuster</button><button class="btn" data-act="newitem">${ICON.plus}Nouvel achat</button></div></div>
+  ${stock < 0 ? `<div class="banner warn"><span>⚠️ Stock négatif (${nf1.format(stock)} kg) : ${nf1.format(-stock)} kg de plus ont été distribués qu'achetés. Un sac acheté est bien compté dans les achats ci-dessous, mais un déficit ancien l'absorbe. Vérifiez les achats non enregistrés, le stock que vous aviez déjà en ouvrant l'application (enregistrez-le comme un achat, catégorie Nourriture), ou les distributions en trop.</span></div>` : ""}
   <div class="tiles"><div class="tile ${lvl}"><span class="l">Stock d'aliment disponible</span><span class="v">${nf1.format(stock)} kg</span><span class="s">${(() => { const _bd = feedStockBreakdown(); return `Acheté ${nf1.format(_bd.bought)} kg · Distribué ${nf1.format(_bd.used)} kg${_bd.nonConvertible ? ` · ${_bd.nonConvertible} article(s) non convertible(s) en kg, non compté(s)` : ""}${days != null ? (days <= 0 ? ` · Stock épuisé` : ` · ≈ ${nf0.format(days)} jours d'autonomie`) : ""}`; })()}</span></div>
   <div class="tile"><span class="l">Distribué (7 derniers jours)</span><span class="v">${nf1.format(last7)} kg</span><span class="s">${nf1.format(last7 / 7)} kg / jour</span></div>
   <div class="tile"><span class="l">Dépenses approvisionnement (ce mois)</span><span class="v" style="font-size:1.35rem">${fcfa(monthSpend)}</span></div></div>
   <div class="grid g2">
-    <section class="card"><div class="row-h"><h2>Achats & Réassorts</h2></div>${_nonConv ? `<p class="hint" style="margin:6px 0">⚠️ Certains achats de nourriture (L, unité, boîte) ne sont pas convertibles en kg et ne sont pas comptés dans le stock total.</p>` : ""}${items.length ? `<div class="list">${items.map((i) => `<div class="li"><span class="ico ${i.cat === "Nourriture" ? "ok" : i.cat === "Médicament" ? "info" : ""}">${ICON[i.cat === "Nourriture" ? "grain" : i.cat === "Médicament" ? "syringe" : "box"]}</span><div class="grow"><div class="t">${esc(i.name)}</div><div class="d">${esc(i.cat)} · ${nf2.format(Number(i.qty) || 0)} ${esc(i.unit)} · ${fmtDate(i.date)}${i.supplier ? ` · ${esc(i.supplier)}` : ""}${i.cat === "Nourriture" ? (["sac 25 kg", "sac 50 kg", "g", "kg"].includes(i.unit) ? ` · restant ≈ ${nf1.format(remainingForItem(i.id))} kg` : ` · restant non mesurable en kg (unité : ${esc(i.unit)})`) : ""}${i.cat === "Nourriture" && Number(i.minQty) > 0 && remainingForItem(i.id) <= Number(i.minQty) ? ` · ⚠️ sous le seuil (${nf1.format(Number(i.minQty))} kg)` : ""}${i.expiry && diff(today(), i.expiry) >= -30 ? ` · ⚠️ péremption ${fmtDate(i.expiry)}` : ""}</div></div><b class="num">${fcfa(i.price)}</b><button class="btn sm ghost" data-act="edititem" data-id="${i.id}" aria-label="Modifier">${ICON.edit}</button><button class="btn sm ghost" data-act="del" data-kind="item" data-id="${i.id}" aria-label="Supprimer">${ICON.trash}</button></div>`).join("")}</div>` : emptyBox("box", "Aucun approvisionnement enregistré", "Enregistrez vos sacs d'aliments, intrants vétérinaires ou matériel.", `<button class="btn pri" data-act="newitem">${ICON.plus}Enregistrer un achat</button>`)}</section>
+    <section class="card"><div class="row-h"><h2>Achats & Réassorts</h2></div>${_nonConv ? `<p class="hint" style="margin:6px 0">⚠️ Certains achats de nourriture (L, unité, boîte) ne sont pas convertibles en kg et ne sont pas comptés dans le stock total.</p>` : ""}${items.length ? `<div class="list">${items.map((i) => `<div class="li"><span class="ico ${i.cat === "Nourriture" ? "ok" : i.cat === "Médicament" ? "info" : ""}">${ICON[i.cat === "Nourriture" ? "grain" : i.cat === "Médicament" ? "syringe" : "box"]}</span><div class="grow"><div class="t">${esc(i.name)}</div><div class="d">${esc(i.cat)} · ${nf2.format(Number(i.qty) || 0)} ${esc(i.unit)} · ${fmtDate(i.date)}${i.supplier ? ` · ${esc(i.supplier)}` : ""}${i.cat === "Nourriture" ? (isConvertible(i) ? ` · restant ≈ ${nf1.format(remainingForItem(i.id))} kg${Number(i.kgPerUnit) > 0 && !CONVERTIBLE_UNITS.includes(i.unit) ? ` (${nf1.format(Number(i.kgPerUnit))} kg / ${esc(i.unit)})` : ""}` : ` · restant non mesurable en kg (unité : ${esc(i.unit)}) — renseignez l'équivalent en kg dans « Modifier » pour le compter`) : ""}${i.cat === "Nourriture" && Number(i.minQty) > 0 && remainingForItem(i.id) <= Number(i.minQty) ? ` · ⚠️ sous le seuil (${nf1.format(Number(i.minQty))} kg)` : ""}${i.expiry && diff(today(), i.expiry) >= -30 ? ` · ⚠️ péremption ${fmtDate(i.expiry)}` : ""}</div></div><b class="num">${fcfa(i.price)}</b><button class="btn sm ghost" data-act="edititem" data-id="${i.id}" aria-label="Modifier">${ICON.edit}</button><button class="btn sm ghost" data-act="del" data-kind="item" data-id="${i.id}" aria-label="Supprimer">${ICON.trash}</button></div>`).join("")}</div>` : emptyBox("box", "Aucun approvisionnement enregistré", "Enregistrez vos sacs d'aliments, intrants vétérinaires ou matériel.", `<button class="btn pri" data-act="newitem">${ICON.plus}Enregistrer un achat</button>`)}</section>
     <section class="card"><div class="row-h"><h2>Journal des distributions d'aliment</h2><div style="display:flex;gap:6px;align-items:center"><label class="hint">Du <input id="feedFrom" type="date" value="${esc(ui.feedFrom || "")}"></label><label class="hint">au <input id="feedTo" type="date" value="${esc(ui.feedTo || "")}"></label></div></div>${_feeds.length ? `<div class="list">${_feeds.slice(0, 30).map((f) => `<div class="li"><span class="ico">${ICON.grain}</span><div class="grow"><div class="t">${nf1.format(Number(f.grams) / 1000)} kg</div><div class="d">${fmtDate(f.date)}${f.notes ? " · " + esc(f.notes) : ""}</div></div><span class="chip">Figée</span></div>`).join("")}</div>` : emptyBox("grain", "Aucune distribution enregistrée", "Chaque distribution enregistrée se déduit automatiquement du stock total.")}</section>
   </div>`;
 };
@@ -3488,8 +3518,8 @@ function rabbitForm(r) {
 }
 function matingForm(preId, ex) {
   const pre = rab(preId);
-  if (preId && !ex && isExited(pre)) { toast("⛔ Animal sorti : plus de nouvelle saillie, ses données sont figées."); return; } const males = (x) => x.sex === "Male" && isActive(x), females = (x) => x.sex === "Female" && isActive(x);
-  if (!S.rabbits.some(males) || !S.rabbits.some(females)) { toast("Il faut au moins un mâle et une femelle actifs enregistrés."); return; }
+  if (preId && !ex && isDeparted(pre)) { toast("⛔ Animal sorti : plus de nouvelle saillie, ses données sont figées."); return; } const males = (x) => x.sex === "Male" && (isActive(x) || x.status === "Externe"), females = (x) => x.sex === "Female" && (isActive(x) || x.status === "Externe");
+  if (!S.rabbits.some(males) || !S.rabbits.some(females)) { toast("Il faut au moins un mâle et une femelle actifs ou externes enregistrés."); return; }
   form({ title: ex ? "Modifier la saillie" : "Enregistrer une saillie", submit: ex ? "Enregistrer" : "Valider la saillie",
     values: ex || { male: pre?.sex === "Male" ? pre.id : "", female: pre?.sex === "Female" ? pre.id : "" },
     fields: [
@@ -3539,7 +3569,7 @@ function kindleForm(id) {
     } });
 }
 function weightForm(rid, ex) {
-  if (!ex && rid && isExited(rab(rid))) { toast("⛔ Animal sorti : plus de nouvelle pesée, ses données sont figées."); return; }
+  if (!ex && rid && isDeparted(rab(rid))) { toast("⛔ Animal sorti : plus de nouvelle pesée, ses données sont figées."); return; }
   form({ title: ex ? "Modifier la pesée" : `Pesée de ${rname(rid)}`, values: ex || {}, fields: [{ k: "kg", label: "Poids mesuré (kg)", type: "number", step: "0.01", min: 0, req: true, def: ex ? ex.kg : (lastWeight(rid) ?? "") }, { k: "date", label: "Date de pesée", type: "date", req: true, def: ex ? ex.date : today() }, { k: "notes", label: "Note", full: true, def: ex ? ex.notes : "" }],
     onSubmit: async (v) => {
       const ok = await save("weight", { ...(ex || {}), rabbit: rid, ...v });
@@ -3548,7 +3578,7 @@ function weightForm(rid, ex) {
     } });
 }
 function treatForm(rid, ex) {
-  if (!ex && rid && isExited(rab(rid))) { toast("⛔ Animal sorti : plus de nouveau soin, ses données sont figées."); return; }
+  if (!ex && rid && isDeparted(rab(rid))) { toast("⛔ Animal sorti : plus de nouveau soin, ses données sont figées."); return; }
   form({ title: ex ? "Modifier le soin" : (rid ? `Soin pour ${rname(rid)}` : "Soin collectif du cheptel"), values: ex || {}, fields: [
       { k: "type", label: "Type d'intervention", type: "select", opts: TREAT_TYPES }, { k: "product", label: "Nom du produit / médicament", req: true, ph: "ex. Ivermectine 1%, Vaccin VHD" },
       { k: "date", label: "Date d'administration", type: "date", req: true, def: today() }, { k: "dosage", label: "Dosage / mode", ph: "ex. 0,5 mL sous-cutané" },
@@ -3565,14 +3595,15 @@ function treatForm(rid, ex) {
 function itemForm(ex) {
   form({ title: ex ? "Modifier l'achat" : "Enregistrer un achat / approvisionnement", values: ex || {}, fields: [
       { k: "name", label: "Désignation de l'article", req: true, ph: "ex. Granulés croissance 25 kg, Vermifuge", def: ex ? ex.name : "" }, { k: "cat", label: "Catégorie", type: "select", opts: INV_CATS, def: ex ? ex.cat : "" },
-      { k: "qty", label: "Quantité", type: "number", step: "0.01", min: 0, req: true, def: ex ? ex.qty : 1 }, { k: "unit", label: "Unité", type: "select", opts: UNITS, def: ex ? ex.unit : "sac 25 kg" },
+      { k: "qty", label: "Quantité", type: "number", step: "0.01", min: 0, req: true, def: ex ? ex.qty : 1 }, { k: "unit", label: "Unité", type: "select", opts: UNITS, def: ex ? ex.unit : "sac 25 kg" }, { k: "kgPerUnit", label: "Équivalent en kg par unité (seulement si l'unité n'est pas en kg/sac, ex. 1 boîte = 5 kg)", type: "number", step: "0.01", min: 0, def: ex ? (ex.kgPerUnit || "") : "", hint: "Laisser vide si l'unité est kg, g ou sac 25/50 kg. Sans équivalent, un achat en L, unité ou boîte ne comptera pas dans le stock en kg." },
       { k: "price", label: "Coût total (FCFA)", type: "number", min: 0, def: ex ? ex.price : "" }, { k: "date", label: "Date d'achat", type: "date", req: true, def: ex ? ex.date : today() },
       { k: "mktx", label: "Imputer directement aux dépenses financières", type: "check", def: true }, { k: "supplier", label: "Fournisseur", ph: "ex. Coopérative, marché" }, { k: "minQty", label: "Seuil d'alerte stock (kg, nourriture uniquement)", type: "number", step: "0.1", min: 0, def: ex ? (ex.minQty || "") : "" }, { k: "expiry", label: "Date de péremption (optionnel)", type: "date", def: ex ? (ex.expiry || "") : "" }, { k: "notes", label: "Détails fournisseur", type: "textarea", full: true, def: ex ? (ex.notes || "") : "" }],
     onSubmit: async (v) => {
       const mk = v.mktx; delete v.mktx;
-      const _it = { ...(ex || {}), ...v, price: Number(v.price) || 0 };
+      const _it = { ...(ex || {}), ...v, price: Number(v.price) || 0, kgPerUnit: Number(v.kgPerUnit) || 0 };
       const ok = await save("item", _it);
       if (!ok) return false;
+      if (v.cat === "Nourriture" && !isConvertible(_it)) toast("⚠️ Achat enregistré, mais il ne compte pas dans le stock en kg : son unité n'est pas convertible et aucun équivalent en kg n'a été renseigné. Modifiez-le pour ajouter l'équivalent.");
       if (!mk && ex) { const _ltx2 = S.tx.find((x) => x.itemId === _it.id); if (_ltx2) await removeDoc("tx", _ltx2.id); }
       if (mk && Number(v.price) > 0) { const _ltx = S.tx.find((x) => x.itemId === _it.id); if (ex && _ltx) await save("tx", { ..._ltx, amount: Number(v.price), date: v.date, label: v.name, cat: v.cat === "Nourriture" ? "Aliment" : v.cat === "Médicament" ? "Santé" : v.cat === "Matériel" ? "Matériel" : "Autre dépense" }); else if (!ex) await save("tx", { type: "out", cat: v.cat === "Nourriture" ? "Aliment" : v.cat === "Médicament" ? "Santé" : v.cat === "Matériel" ? "Matériel" : "Autre dépense", amount: Number(v.price), date: v.date, label: v.name, itemId: _it.id }); }
       closeModal();
@@ -3620,6 +3651,10 @@ function txForm(type, ex) {
       { k: "label", label: "Libellé de l'opération", full: true, ph: type === "in" ? "ex. Vente de 8 lapins de chair" : "ex. Achat de mangeoires", def: ex ? ex.label : "" }, { k: "date", label: "Date", type: "date", req: true, def: ex ? ex.date : today() }],
     onSubmit: async (v) => {
       const ok = await save("tx", { ...(ex || {}), ...v, type });
+      /* Correctif désynchronisation : une dépense « Aliment » saisie en finances
+         ne crée pas de stock. Avant, rien ne le disait, donc l'utilisateur pensait
+         son stock augmenté. On l'avertit et on l'oriente vers Stocks > Nouvel achat. */
+      if (ok && type === "out" && v.cat === "Aliment" && !ex?.itemId) toast("⚠️ Dépense enregistrée en finances, mais elle ne met pas à jour le stock d'aliment. Pour le stock, utilisez Stocks > Nouvel achat.");
       if (ok && ex) {
         /* Correctif propagation inverse : modifier une recette liée en finances
            laissait la fiche d'origine inchangée (prix de vente du lapin, coût de
@@ -3797,7 +3832,7 @@ const A = {
   themeModal: () => themeModal(),
   unauthorizedDomainModal: () => unauthorizedDomainModal(),
   params: () => { form({ title: "Paramètres d'élevage", values: { gestation: GESTATION, mature: MATURE_DAYS, weaning: WEANING, fatten: FATTEN_DAYS }, fields: [{ k: "gestation", label: "Gestation (jours)", type: "number", min: 1, req: true }, { k: "mature", label: "Maturité (jours)", type: "number", min: 1, req: true }, { k: "weaning", label: "Sevrage (jours)", type: "number", min: 1, req: true }, { k: "fatten", label: "Engraissement (jours)", type: "number", min: 1, req: true }], onSubmit: async (v) => { localStorage.setItem("abvfarm_params", JSON.stringify(v)); GESTATION = Number(v.gestation); MATURE_DAYS = Number(v.mature); WEANING = Number(v.weaning); FATTEN_DAYS = Number(v.fatten); for (const _m of S.matings.filter((x) => ["Accouplé", "Gestation confirmée"].includes(x.status))) await save("mating", { ..._m, due: addDays(_m.date, GESTATION) }); for (const _b of S.batches.filter((x) => ["Actif", "Quarantaine"].includes(x.status))) await save("batch", { ..._b, target: addDays(_b.weaning, FATTEN_DAYS) }); closeModal(); toast("Paramètres enregistrés et appliqués aux gestations et lots en cours"); render(); return true; } }); },
-  resetFilters: () => { ui.q = ""; ui.sex = "all"; ui.stage = "all"; ui.breed = "all"; ui.st = "actifs"; ui.ageBracket = "all"; ui.minAgeM = ""; ui.maxAgeM = ""; ui.minWeight = ""; ui.maxWeight = ""; render(); },
+  resetFilters: () => { ui.q = ""; ui.sex = "all"; ui.stage = "all"; ui.breed = "all"; ui.st = "actifs"; ui.ageBracket = "all"; ui.minAgeM = ""; ui.maxAgeM = ""; ui.minWeight = ""; ui.maxWeight = ""; ui.advFilters = ""; render(); },
   resetCustomMetrics: () => { ui.minAgeM = ""; ui.maxAgeM = ""; ui.minWeight = ""; ui.maxWeight = ""; render(); },
   newrabbit: () => rabbitForm(), editrabbit: (el) => rabbitForm(rab(el.dataset.id)),
   status: (el) => { const r = rab(el.dataset.id); form({ title: `Statut de ${r.name}`, values: r, fields: [{ k: "status", label: "Statut", type: "select", opts: STATUSES, full: true, hint: "Un animal vendu, abattu ou décédé passe dans la rubrique « Sortis ». Une vente exige un prix, sinon aucune recette n'est créée." }, { k: "exitDate", label: "Date de sortie (vente, décès, abattage, don)", type: "date", def: today() }, { k: "exitPrice", label: "Prix de vente (FCFA) — obligatoire si Vendu", type: "number", min: 0, hint: "Obligatoire pour une vente : le prix crée la recette en finances. Laisser vide n'est possible que pour un don, un décès ou un abattage." }, { k: "exitBuyer", label: "Acheteur / destinataire", ph: "ex. Client marché, voisin" }, { k: "exitCause", label: "Cause / motif", full: true, ph: "ex. Vente chair, maladie, don" }], onSubmit: async (v) => { const isExit = ["Vendu", "Mort", "Abattu", "Donné"].includes(v.status); if ((v.status === "Vendu" || v.status === "Abattu") && r.status !== v.status) { const wd = underWithdrawal(r.id); if (wd) { toast(`⛔ Vente / abattage interdit : délai d'attente jusqu'au ${fmtDate(wd)} (traitement en cours).`); return false; } } /* Correctif vente : avant, le prix était optionnel, donc un lapin pouvait être déclaré vendu sans prix ni recette en finances (12 cas dans l'export du 2 novembre). Dorénavant, une vente sans prix > 0 est refusée, et le formulaire reste ouvert avec l'erreur affichée. */ if (v.status === "Vendu" && !(Number(v.exitPrice) > 0)) { toast("⛔ Prix de vente obligatoire : indiquez le prix auquel ce lapin a été vendu (FCFA)."); return false; } const obj = { ...r, status: v.status, exitDate: isExit ? (v.exitDate || today()) : "", exitPrice: isExit ? (Number(v.exitPrice) || 0) : 0, exitBuyer: isExit ? (v.exitBuyer || "") : "", exitCause: isExit ? (v.exitCause || "") : "" }; const ok = await save("rabbit", obj); if (ok) { if (isExit) { for (const _rem of S.reminders.filter((x) => x.rabbitId === r.id && !x.done)) await save("reminder", { ..._rem, done: true }); for (const _m of S.matings.filter((x) => (x.male === r.id || x.female === r.id) && ["Accouplé", "Gestation confirmée"].includes(x.status))) await save("mating", { ..._m, status: "Échoué", notes: ((_m.notes || "") + ` [Clôturée automatiquement : animal sorti le ${fmtDate(v.exitDate || today())}]`).trim() }); } const _ltx = saleTxForRabbit(r.id); if (v.status === "Vendu" && Number(v.exitPrice) > 0) { if (_ltx) await save("tx", { ..._ltx, amount: Number(v.exitPrice), date: v.exitDate || today(), label: `Vente ${r.name}${v.exitBuyer ? " → " + v.exitBuyer : ""}`, cat: "Vente chair", type: "in", rabbitId: r.id }); else await save("tx", { type: "in", cat: "Vente chair", amount: Number(v.exitPrice), date: v.exitDate || today(), label: `Vente ${r.name}${v.exitBuyer ? " → " + v.exitBuyer : ""}`, rabbitId: r.id }); } else if (_ltx) { /* Sortie d'une vente, ou prix ramené à 0 : la recette liée ne doit pas rester orpheline en finances. */ await removeDoc("tx", _ltx.id); } toast("Statut mis à jour"); } return ok; } }); },
@@ -3848,8 +3883,8 @@ const A = {
   bdeath: (el) => { const b = byId(S.batches, el.dataset.id); form({ title: `Perte sur le lot ${b.code}`, fields: [{ k: "n", label: "Nombre de lapereaux décédés", type: "number", min: 1, req: true, def: 1 }], onSubmit: async (v) => { /* Correctif perte : avant, déclarer plus de pertes que l'effectif gonflait les pertes et effaçait le surplus (mortalité > 100 % possible). */ if (!Number.isInteger(Number(v.n)) || Number(v.n) < 1) { toast("⛔ Nombre de pertes invalide : entier ≥ 1."); return false; } if (Number(v.n) > (Number(b.current) || 0)) { toast(`⛔ Impossible : il n'en reste que ${Number(b.current) || 0} dans ce lot.`); return false; } const _left = (Number(b.current) || 0) - Number(v.n); const ok = await save("batch", { ...b, current: _left, deaths: (Number(b.deaths) || 0) + Number(v.n), status: _left === 0 ? "Terminé" : b.status }); if (ok) toast(_left === 0 ? "Perte enregistrée — lot terminé (effectif à zéro)" : "Perte enregistrée"); return ok; } }); },
   bweight: (el) => { const b = byId(S.batches, el.dataset.id); form({ title: `Poids moyen du lot ${b.code}`, fields: [{ k: "avgWeight", label: "Poids moyen mesuré (g)", type: "number", min: 0, req: true, def: b.avgWeight || "" }], onSubmit: async (v) => { const ok = await save("batch", { ...b, avgWeight: v.avgWeight }); if (ok) toast("Poids moyen enregistré"); return ok; } }); },
   newrem: () => remForm(),
-  remtoggle: async (el) => { const r = byId(S.reminders, el.dataset.id); if (r) await save("reminder", { ...r, done: !r.done }); },
-  remdone: async (el) => { const r = byId(S.reminders, el.dataset.id); if (r && (await save("reminder", { ...r, done: true }))) toast("Tâche clôturée"); },
+  remtoggle: async (el) => { const r = byId(S.reminders, el.dataset.id); if (r) { await save("reminder", { ...r, done: !r.done }); if (!r.done && r.treatmentId) { const _t = byId(S.treatments, r.treatmentId); if (_t && _t.next) await save("treatment", { ..._t, next: "" }); } } },
+  remdone: async (el) => { const r = byId(S.reminders, el.dataset.id); if (r && (await save("reminder", { ...r, done: true }))) { if (r.treatmentId) { const _t = byId(S.treatments, r.treatmentId); if (_t && _t.next) await save("treatment", { ..._t, next: "" }); } toast("Tâche clôturée"); } },
   treatdone: async (el) => { const x = byId(S.treatments, el.dataset.id); if (x && (await save("treatment", { ...x, next: "" }))) { for (const _rem of S.reminders.filter((r) => r.treatmentId === x.id && !r.done)) await save("reminder", { ..._rem, done: true }); toast("Rappel de soin clôturé"); } },
   del: async (el) => {
     const k = el.dataset.kind, id = el.dataset.id;

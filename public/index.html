@@ -90,6 +90,10 @@
   color-scheme: light;
 }
 details summary { list-style: none; }
+/* Correctif captures : les icônes SVG des résumés repliables n'avaient aucune taille
+   définie, elles s'affichaient donc en grand et déformaient les cartes
+   « Répartition » et « Filtres précis » sur la page Lapins. */
+details summary svg:not(.chevron-rot) { width: 20px; height: 20px; flex: none; }
 details summary::-webkit-details-marker { display: none; }
 .chevron-rot { transition: transform .22s cubic-bezier(0.4, 0, 0.2, 1); color: var(--muted); flex: none; }
 details[open] > summary .chevron-rot { transform: rotate(180deg); color: var(--sage); }
@@ -251,13 +255,13 @@ main { min-width: 0; padding-block: 20px 110px; padding-left: max(16px, env(safe
 
 /* Gestation track */
 .gest { display: flex; flex-direction: column; gap: 8px; }
-.track { position: relative; height: 10px; border-radius: 6px; background: var(--surface-2); margin: 16px 0 18px; }
+.track { position: relative; height: 10px; border-radius: 6px; background: var(--surface-2); margin: 16px 0 26px; }
 .track .fill { position: absolute; inset: 0 auto 0 0; border-radius: 6px; background: var(--clay); }
 .track .zone { position: absolute; top: 0; bottom: 0; background: var(--info); opacity: .28; }
 .track .mk { position: absolute; top: -5px; width: 2px; height: 20px; background: var(--ink); opacity: .45; }
 .track .mk span, .track .zone span { position: absolute; top: 22px; transform: translateX(-50%); font-size: .66rem; color: var(--muted); white-space: nowrap; font-weight: 600; }
 .track .zone span { top: -18px; left: 50%; }
-.track .now { position: absolute; top: -4px; width: 18px; height: 18px; border-radius: 50%; background: var(--surface); border: 3px solid var(--clay); transform: translateX(-50%); }
+.track .now { position: absolute; top: -4px; width: 18px; height: 18px; border-radius: 50%; background: var(--surface); border: 3px solid var(--clay); transform: translateX(-50%); z-index: 2; }
 .gest .gl { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; align-items: center; }
 
 .chart { width: 100%; height: auto; display: block; }
@@ -1486,11 +1490,15 @@ function alerts() {
       if (a >= WEANING - 2 && !S.batches.some((b) => b.mating === m.id)) out.push({ sev: a <= WEANING + 10 ? "info" : "warn", icon: "layers", title: `Sevrer la portée de ${f}`, sub: a <= WEANING + 10 ? `Lapereaux âgés de ${a} j` : `Sevrage en retard : lapereaux âgés de ${a} j`, act: [["Créer un lot", "newbatch", m.id]] });
     }
   }
-  for (const x of S.treatments) if (x.next && !(x.rabbit && isExited(rab(x.rabbit)))) { const n = diff(t, x.next); if (n <= 2) out.push({ sev: n < 0 ? "bad" : "warn", icon: "syringe", title: `${x.type} : ${x.product || "rappel"}`, sub: `${x.rabbit ? rname(x.rabbit) : "Tout l'élevage"} — ${relDay(n)}` }); }
+  /* Correctif captures : un rappel de soin en retard restait affiché « il y a 55 j »
+     dans « À faire aujourd'hui », sans aucun bouton pour le clôturer. Il est
+     maintenant libellé « En retard de X j » et propose « Clôturer » (efface la
+     date de rappel) ou « Modifier » (reporter le rappel). */
+  for (const x of S.treatments) if (x.next && !(x.rabbit && isExited(rab(x.rabbit)))) { const n = diff(t, x.next); if (n <= 2) out.push({ sev: n < 0 ? "bad" : "warn", icon: "syringe", title: `${x.type} : ${x.product || "rappel"}`, sub: `${x.rabbit ? rname(x.rabbit) : "Tout l'élevage"} — ${n < 0 ? `En retard de ${-n} j` : relDay(n)}`, act: [["Clôturer", "treatdone", x.id], ["Modifier", "edittreat", x.id]] }); }
   for (const b of S.batches) if (b.status === "Actif") { const n = diff(t, b.target); if (n <= 3) out.push({ sev: "ok", icon: "coins", title: `Lot ${b.code} prêt à la vente`, sub: n < 0 ? `Date cible dépassée de ${-n} j` : `Date cible ${relDay(n)}`, act: [["Vendre", "sell", b.id]] }); }
-  for (const r of S.reminders) if (!r.done && r.due <= t && !(r.rabbitId && isExited(rab(r.rabbitId)))) out.push({ sev: r.prio === "Haute" ? "bad" : "warn", icon: "bell", title: r.title, sub: `Rappel — ${relDay(diff(t, r.due))}`, act: [["Fait", "remdone", r.id]] });
+  for (const r of S.reminders) if (!r.done && r.due <= t && !(r.rabbitId && isExited(rab(r.rabbitId)))) { const _n = diff(t, r.due); out.push({ sev: r.prio === "Haute" ? "bad" : "warn", icon: "bell", title: r.title, sub: `Rappel — ${_n < 0 ? `En retard de ${-_n} j` : relDay(_n)}`, act: [["Fait", "remdone", r.id]] }); }
   const stock = feedStock(), rg = ration().grams;
-  if (S.inventory.length && stock < 10) out.push({ sev: stock <= 0 ? "bad" : "warn", icon: "grain", title: stock <= 0 ? "Stock d'aliment épuisé" : `Stock d'aliment faible : ${nf1.format(stock)} kg`, sub: rg ? `Environ ${nf1.format(stock / (rg / 1000))} jours de ration` : "Pensez à réapprovisionner", act: [["Ajouter un achat", "newitem"]] });
+  if (S.inventory.length && stock < 10) out.push({ sev: stock <= 0 ? "bad" : "warn", icon: "grain", title: stock <= 0 ? "Stock d'aliment épuisé" : `Stock d'aliment faible : ${nf1.format(stock)} kg`, sub: stock <= 0 ? "Stock épuisé — pensez à réapprovisionner" : rg ? `Environ ${nf1.format(stock / (rg / 1000))} jours de ration` : "Pensez à réapprovisionner", act: [["Ajouter un achat", "newitem"]] });
   const order = { bad: 0, warn: 1, info: 2, ok: 3 };
   return out.sort((a, b) => order[a.sev] - order[b.sev]);
 }
@@ -1737,8 +1745,11 @@ function gestTrack(m) {
   return `<div class="track" role="img" aria-label="Jour ${d} sur ${GESTATION} de gestation">
     <div class="fill" style="width:${pc(d)}%"></div>
     <div class="zone" style="left:${pc(10)}%;width:${pc(4)}%"><span>Palpation</span></div>
-    <div class="mk" style="left:${pc(28)}%"><span>Nid J28</span></div>
-    <div class="mk" style="left:calc(100% - 2px)"><span style="transform:translateX(-90%)">J31</span></div>
+    <!-- Correctif captures : « Nid J28 » (centré sur J28) et « J31 » (bord droit)
+         se chevauchaient sur mobile. Les deux libellés sont maintenant alignés
+         vers la gauche de leur repère, ils ne se touchent plus. -->
+    <div class="mk" style="left:${pc(28)}%"><span style="transform:translateX(-100%);padding-right:2px">Nid J28</span></div>
+    <div class="mk" style="left:calc(100% - 2px)"><span style="transform:translateX(-100%)">J31</span></div>
     <div class="now" style="left:${pc(d)}%"></div></div>`;
 }
 function gestCard(m) {
@@ -1801,14 +1812,14 @@ VIEWS.accueil = () => {
 
   return `
   <section class="hero"><div class="head" style="align-items:flex-start"><div><span class="eyebrow" style="color:inherit;opacity:.8">${esc(fmtDate(today()))}</span><h1>${hello} !</h1>
-    <p>${al.length ? `${al.length} action${al.length > 1 ? "s" : ""} à réaliser aujourd'hui dans l'élevage.` : "Toutes les tâches de l'élevage sont à jour."}</p></div>
+    <p>${al.length ? `${al.length} action${al.length > 1 ? "s" : ""} en attente dans l'élevage (dont les retards).` : "Toutes les tâches de l'élevage sont à jour."}</p></div>
     <div class="actions"><button class="btn" data-act="newrabbit">${ICON.plus}Lapin</button><button class="btn" data-act="newmating">${ICON.heart}Saillie</button><button class="btn" data-act="exportpdf">${ICON.fileText}Inventaire PDF</button></div></div>
     <div class="meta"><span class="chip">${act.length} lapins actifs</span><span class="chip">${gest.length} gestation${gest.length > 1 ? "s" : ""}</span><span class="chip">${fat} en engraissement</span></div>${earsSvg()}</section>
   <div class="tiles">
     <div class="tile"><span class="l">Lapins actifs</span><span class="v">${act.length}</span><span class="s">${males} ♂ · ${fem} ♀</span></div>
     <div class="tile"><span class="l">Reproducteurs</span><span class="v">${mature}</span><span class="s">âgés de 5 mois et plus</span></div>
     <div class="tile"><span class="l">Gestations</span><span class="v">${gest.length}</span><span class="s">${gest[0] ? `prochaine ${relDay(diff(today(), gest[0].due))}` : "aucune en cours"}</span></div>
-    <div class="tile ${stock <= 0 && S.inventory.length ? "bad" : stock < 10 && S.inventory.length ? "warn" : ""}"><span class="l">Stock d'aliment</span><span class="v">${nf1.format(stock)} kg</span><span class="s">${autonomy != null ? `≈ ${nf0.format(autonomy)} jours de ration` : "—"}</span></div>
+    <div class="tile ${stock <= 0 && S.inventory.length ? "bad" : stock < 10 && S.inventory.length ? "warn" : ""}"><span class="l">Stock d'aliment</span><span class="v">${nf1.format(stock)} kg</span><span class="s">${autonomy != null ? (autonomy <= 0 ? "Stock épuisé" : `≈ ${nf0.format(autonomy)} jours de ration`) : "—"}</span></div>
     <div class="tile"><span class="l">Prolificité moyenne</span><span class="v">${_prolific == null ? "—" : nf1.format(_prolific)}</span><span class="s">lapereaux vivants / portée (${_kindled.length} portées)</span></div>
     <div class="tile"><span class="l">Mortalité enregistrée</span><span class="v">${_mort}</span><span class="s">lapins au statut Mort</span></div>
     <div class="tile"><span class="l">Recettes totales</span><span class="v" style="font-size:1.35rem">${fcfa(_sales)}</span><span class="s">toutes périodes, toutes recettes</span></div>
@@ -1816,12 +1827,12 @@ VIEWS.accueil = () => {
   </div>
   <section class="card"><div class="row-h"><h2>Recherche globale</h2></div><label class="search" style="flex:1 1 220px">${ICON.search}<input id="gq" type="search" placeholder="Rechercher lapin, saillie, lot, transaction…" value="${esc(ui.gq)}" aria-label="Recherche globale"></label>${(() => { const _q = (ui.gq || "").trim().toLowerCase(); if (!_q) return `<p class="hint" style="margin-top:8px">Tape un nom, une cage, une race, un code de lot ou un libellé financier.</p>`; const _rab = S.rabbits.filter((r) => [r.name, r.cage, r.breed].join(" ").toLowerCase().includes(_q)).slice(0, 5); const _mat = S.matings.filter((m) => [rname(m.female), rname(m.male)].join(" ").toLowerCase().includes(_q)).slice(0, 5); const _bat = S.batches.filter((b) => (b.code || "").toLowerCase().includes(_q)).slice(0, 5); const _tx = S.tx.filter((x) => [x.label, x.cat].join(" ").toLowerCase().includes(_q)).slice(0, 5); const _all = [..._rab.map((r) => `<a class="li" href="#lapin-${r.id}"><div class="grow"><div class="t">${esc(r.name)}</div><div class="d">Lapin · ${esc(r.cage || "")} · ${esc(r.breed || "")}</div></div></a>`), ..._mat.map((m) => `<a class="li" href="#saillies"><div class="grow"><div class="t">Saillie ${esc(rname(m.female))} × ${esc(rname(m.male))}</div><div class="d">${fmtDate(m.date)} · ${esc(m.status)}</div></div></a>`), ..._bat.map((b) => `<a class="li" href="#engraissement"><div class="grow"><div class="t">${esc(b.code)}</div><div class="d">Lot · ${b.current} / ${b.initial}</div></div></a>`), ..._tx.map((x) => `<a class="li" href="#finances"><div class="grow"><div class="t">${esc(x.label || "")}</div><div class="d">${esc(x.cat)} · ${fcfa(x.amount)}</div></div></a>`)]; return _all.length ? `<div class="list" style="margin-top:10px">${_all.join("")}</div>` : `<p class="hint" style="margin-top:8px">Aucun résultat pour « ${esc(ui.gq)} ».</p>`; })()}</section>
   <div class="grid g2">
-    <section class="card"><div class="row-h"><h2>À faire aujourd'hui</h2><span class="chip ${al.some((a) => a.sev === "bad") ? "bad" : al.length ? "warn" : "ok"}">${al.length}</span></div>
+    <section class="card"><div class="row-h"><h2>À faire</h2><span class="chip ${al.some((a) => a.sev === "bad") ? "bad" : al.length ? "warn" : "ok"}">${al.length}</span></div>
       ${al.length ? `<div class="list">${al.slice(0, 8).map((a) => `<div class="li">${sevIco(a)}<div class="grow"><div class="t">${esc(a.title)}</div><div class="d">${esc(a.sub)}</div>${a.act ? `<div class="actions" style="margin-top:6px">${a.act.map(([l, act, id, v]) => `<button class="btn sm" data-act="${act}" ${id ? `data-id="${id}"` : ""} ${v ? `data-v="${esc(v)}"` : ""}>${esc(l)}</button>`).join("")}</div>` : ""}</div></div>`).join("")}</div>` : emptyBox("check", "Tout est à jour", "Les palpations, nids, mises bas, soins et rappels apparaîtront ici le jour venu.")}
     </section>
     <section class="card"><div class="row-h"><h2>Ration du jour</h2><span class="chip ${fedToday ? "ok" : "warn"}">${fedToday ? `${nf1.format(fedToday / 1000)} kg distribués` : "Pas encore nourris"}</span></div>
       <div style="display:flex;align-items:baseline;gap:8px"><span style="font-family:var(--f-display);font-size:2.2rem;font-weight:800" class="num">${nf1.format(rt.grams / 1000)}</span><span class="hint">kg calculés selon le cheptel</span></div>
-      <div class="list" style="margin:8px 0 12px">${[["Mâles adultes", rt.c.mal, 120], ["Femelles au repos", rt.c.fem, 120], ["Femelles gestantes", rt.c.gest, 180], ["Femelles allaitantes", rt.c.lact, 280], ["Jeunes 1–2 mois", rt.c.y1, 50], ["Jeunes 2–4 mois", rt.c.y2, 90], ["Lapins en engraissement", rt.fat, 110]].filter((x) => x[1]).map(([l, n, g]) => `<div class="li" style="padding:6px 0"><div class="grow d">${l} <span class="num">× ${n}</span></div><span class="num hint">${g} g</span><b class="num" style="min-width:64px;text-align:right">${nf1.format((n * g) / 1000)} kg</b></div>`).join("") || `<p class="hint">Ajoutez des lapins pour calculer la ration.</p>`}</div>
+      <div class="list" style="margin:8px 0 12px">${[["Mâles adultes", rt.c.mal, 120], ["Femelles au repos", rt.c.fem, 120], ["Femelles gestantes", rt.c.gest, 180], ["Femelles allaitantes", rt.c.lact, 280], ["Jeunes 1–2 mois", rt.c.y1, 50], ["Jeunes 2–4 mois", rt.c.y2, 90], ["Lapins en engraissement", rt.fat, 110]].filter((x) => x[1]).map(([l, n, g]) => `<div class="li" style="padding:6px 0"><div class="grow d">${l} <span class="num">× ${n}</span></div><span class="num hint">${g} g</span><b class="num" style="min-width:64px;text-align:right">${nf2.format((n * g) / 1000)} kg</b></div>`).join("") || `<p class="hint">Ajoutez des lapins pour calculer la ration.</p>`}</div>
       <div class="actions" style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn pri" data-act="feedQuick" title="Distribuer la ration conseillée et la déduire automatiquement du stock">${ICON.grain}Distribuer la ration (${nf1.format(rt.grams / 1000)} kg)</button>
         <button class="btn sm" data-act="feed" data-v="${rt.grams}">${ICON.edit}Ajuster</button>
@@ -2011,7 +2022,7 @@ VIEWS.lapins = () => {
   <div class="head">
     <div>
       <h1>Cheptel cunicole</h1>
-      <p><b>${allAct.length}</b> actifs · <b>${allArch.length}</b> archivés / sortis</p>
+      <p><b>${allAct.length}</b> actifs · <b>${allArch.length}</b> sortis / externes</p>
     </div>
     <div class="actions">
       <button class="btn" data-act="exportpdf">${ICON.fileText}Inventaire PDF</button>
@@ -2036,7 +2047,7 @@ VIEWS.lapins = () => {
     <!-- Filtre par Statut (Actifs / Archivés) -->
     <div class="seg" role="group">
       <button type="button" data-act="ui" data-k="st" data-v="actifs" aria-pressed="${ui.st === 'actifs'}">Actifs</button>
-      <button type="button" data-act="ui" data-k="st" data-v="archives" aria-pressed="${ui.st === 'archives'}">Sortis (${allArch.length})</button>
+      <button type="button" data-act="ui" data-k="st" data-v="archives" aria-pressed="${ui.st === 'archives'}">Sortis / Externes (${allArch.length})</button>
       <button type="button" data-act="ui" data-k="st" data-v="all" aria-pressed="${ui.st === 'all'}">Tous</button>
     </div>
 
@@ -2176,8 +2187,7 @@ VIEWS.lapins = () => {
 
   <!-- Résumé du filtrage -->
   <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.82rem;color:var(--muted);padding:0 2px">
-    <span>Affichage de <b>${list.length}</b> lapin${list.length > 1 ? "s" : ""} sur <b>${baseList.length}</b></span>
-    ${(() => { const _pages = Math.max(1, Math.ceil(list.length / 24)); const _pg = Math.max(1, Math.min(_pages, Number(ui.rpage) || 1)); ui.rpage = _pg; return _pages > 1 ? `<span style="display:flex;gap:6px;align-items:center"><button class="btn sm ghost" data-act="ui" data-k="rpage" data-v="${_pg - 1}" ${_pg <= 1 ? "disabled" : ""}>← Précédent</button><span>Page ${_pg} / ${_pages}</span><button class="btn sm ghost" data-act="ui" data-k="rpage" data-v="${_pg + 1}" ${_pg >= _pages ? "disabled" : ""}>Suivant →</button></span>` : ""; })()}
+    ${(() => { const _pages = Math.max(1, Math.ceil(list.length / 24)); const _pg = Math.max(1, Math.min(_pages, Number(ui.rpage) || 1)); ui.rpage = _pg; const _shown = list.slice((_pg - 1) * 24, _pg * 24).length; return `<span>Affichage de <b>${_shown}</b> lapin${_shown > 1 ? "s" : ""} sur cette page, <b>${list.length}</b> au total${_pages > 1 ? ` — Page ${_pg} / ${_pages}` : ""}</span><span style="display:flex;gap:6px;align-items:center">${_pages > 1 ? `<button class="btn sm ghost" data-act="ui" data-k="rpage" data-v="${_pg - 1}" ${_pg <= 1 ? "disabled" : ""}>← Précédent</button><button class="btn sm ghost" data-act="ui" data-k="rpage" data-v="${_pg + 1}" ${_pg >= _pages ? "disabled" : ""}>Suivant →</button>` : ""}</span>`; })()}
     ${hasActiveFilters ? `<span class="chip warn">Filtre actif</span>` : ""}
   </div>
 
@@ -2383,7 +2393,7 @@ VIEWS.stocks = () => {
   const last7 = feeds.filter((f) => diff(f.date, today()) < 7).reduce((s, f) => s + Number(f.grams || 0), 0) / 1000;
   const lvl = stock <= 0 ? "bad" : days != null && days < 7 ? "bad" : days != null && days < 14 ? "warn" : "";
   return `<div class="head"><div><h1>Stocks & Alimentation</h1><p>Approvisionnements et distributions journalières</p></div><div class="actions"><button class="btn pri" data-act="feedQuick" title="Distribuer la ration conseillée du cheptel et la déduire automatiquement du stock">${ICON.grain}Distribuer la ration (${nf1.format(rt.grams / 1000)} kg)</button><button class="btn" data-act="feed" data-v="${rt.grams}">${ICON.edit}Ajuster</button><button class="btn" data-act="newitem">${ICON.plus}Nouvel achat</button></div></div>
-  <div class="tiles"><div class="tile ${lvl}"><span class="l">Stock d'aliment disponible</span><span class="v">${nf1.format(stock)} kg</span><span class="s">${(() => { const _bd = feedStockBreakdown(); return `Acheté ${nf1.format(_bd.bought)} kg · Distribué ${nf1.format(_bd.used)} kg${_bd.nonConvertible ? ` · ${_bd.nonConvertible} article(s) non convertible(s) en kg, non compté(s)` : ""}${days != null ? ` · ≈ ${nf0.format(days)} jours d'autonomie` : ""}`; })()}</span></div>
+  <div class="tiles"><div class="tile ${lvl}"><span class="l">Stock d'aliment disponible</span><span class="v">${nf1.format(stock)} kg</span><span class="s">${(() => { const _bd = feedStockBreakdown(); return `Acheté ${nf1.format(_bd.bought)} kg · Distribué ${nf1.format(_bd.used)} kg${_bd.nonConvertible ? ` · ${_bd.nonConvertible} article(s) non convertible(s) en kg, non compté(s)` : ""}${days != null ? (days <= 0 ? ` · Stock épuisé` : ` · ≈ ${nf0.format(days)} jours d'autonomie`) : ""}`; })()}</span></div>
   <div class="tile"><span class="l">Distribué (7 derniers jours)</span><span class="v">${nf1.format(last7)} kg</span><span class="s">${nf1.format(last7 / 7)} kg / jour</span></div>
   <div class="tile"><span class="l">Dépenses approvisionnement (ce mois)</span><span class="v" style="font-size:1.35rem">${fcfa(monthSpend)}</span></div></div>
   <div class="grid g2">
@@ -2512,7 +2522,7 @@ function exportHerdPDF() {
       ["Reproducteurs aptes (≥ 5 mois)", `${mature} sujets`],
       ["Gestations en cours", `${gest.length} portée(s) attendue(s)`],
       ["Lapins en engraissement", `${fat} lapereaux`],
-      ["Stock d'aliment disponible", `${nf1.format(stock)} kg (${rt.grams ? Math.round(stock / (rt.grams / 1000)) : "—"} jours d'autonomie)`],
+      ["Stock d'aliment disponible", `${nf1.format(stock)} kg (${rt.grams ? (stock <= 0 ? "stock épuisé" : Math.round(stock / (rt.grams / 1000)) + " jours d'autonomie") : "—"})`],
       ["Trésorerie mensuelle nette", `${bal >= 0 ? "+" : "−"}${fcfa(Math.abs(bal))}`]
     ];
 
@@ -3840,6 +3850,7 @@ const A = {
   newrem: () => remForm(),
   remtoggle: async (el) => { const r = byId(S.reminders, el.dataset.id); if (r) await save("reminder", { ...r, done: !r.done }); },
   remdone: async (el) => { const r = byId(S.reminders, el.dataset.id); if (r && (await save("reminder", { ...r, done: true }))) toast("Tâche clôturée"); },
+  treatdone: async (el) => { const x = byId(S.treatments, el.dataset.id); if (x && (await save("treatment", { ...x, next: "" }))) { for (const _rem of S.reminders.filter((r) => r.treatmentId === x.id && !r.done)) await save("reminder", { ..._rem, done: true }); toast("Rappel de soin clôturé"); } },
   del: async (el) => {
     const k = el.dataset.kind, id = el.dataset.id;
     if (k === "feed") { toast("⛔ Distribution figée : une distribution enregistrée ne peut plus être supprimée, pour que le stock reste cohérent."); return; }

@@ -657,8 +657,15 @@ async function retryPendingSync() {
    donc un réseau lent/bloqué laissait le bouton sur "Enregistrement…" pour toujours, alors
    que les données étaient déjà enregistrées en local. */
 function queuePendingSync(entry) { try { const _q = JSON.parse(localStorage.getItem("abvfarm_pending_sync") || "[]"); _q.push(entry); localStorage.setItem("abvfarm_pending_sync", JSON.stringify(_q)); } catch (e) {} }
+/* Correctif synchro cloud (audit en direct 2026-11-02) : la base Firestore était
+   vide alors que le téléphone affichait « Compte Google Cloud actif ». Cause :
+   pushToCloud abandonnait silencieusement une fiche quand la connexion n'était
+   pas encore prête, hors-ligne, ou sans session, sans la mettre en file d'attente,
+   donc elle n'était jamais renvoyée ensuite. Maintenant, une fiche qui ne peut
+   pas partir tout de suite est mise en file d'attente et renvoyée à la prochaine
+   connexion, au lieu d'être perdue pour le cloud. */
 function pushToCloud(kind, id, doc, action) {
-  if (!userSession.isLoggedIn || !isOnline || !window.firebaseDb || !userSession.uid) return;
+  if (!userSession.isLoggedIn || !isOnline || !window.firebaseDb || !userSession.uid) { queuePendingSync(action === "delete" ? { action: "delete", kind, id } : { action: "set", kind, id, doc }); return; }
   const col = window.firebaseDb.collection("users").doc(userSession.uid).collection("cheptel");
   const op = action === "delete" ? col.doc(kind + "-" + id).delete() : col.doc(kind + "-" + id).set(doc);
   const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error("cloud timeout")), 8000));
@@ -895,7 +902,7 @@ function handleUserAuthenticated(user, msg) {
           window.firebaseDb.collection("users").doc(user.uid).collection("cheptel").doc(d.kind + "-" + d.id).set({
             ...d,
             updatedAt: new Date().toISOString()
-          }, { merge: true }).catch((err) => console.warn("Push doc notice:", err));
+          }, { merge: true }).catch((err) => { console.warn("Push doc notice:", err); queuePendingSync({ action: "set", kind: d.kind, id: d.id, doc: { ...d, updatedAt: new Date().toISOString() } }); });
         }
       });
     }
@@ -3136,14 +3143,19 @@ function accountModal() {
       btnForceSync.disabled = true;
       toast("Synchronisation Cloud en cours…");
       const all = getLocalData();
+      /* Correctif synchro : avant, ce bouton affichait « synchronisée ! » même si
+         tous les envois avaient échoué, les erreurs étant avalées silencieusement.
+         Maintenant il compte les succès, met les échecs en file d'attente, et dit
+         honnêtement ce qui est parti et ce qui reste en attente. */
+      let _ok = 0, _fail = 0;
       if (window.firebaseDb && userSession.uid) {
         for (const [k, doc] of Object.entries(all)) {
-          await window.firebaseDb.collection("users").doc(userSession.uid).collection("cheptel").doc(k).set(doc).catch(() => {});
+          try { await window.firebaseDb.collection("users").doc(userSession.uid).collection("cheptel").doc(k).set(doc); _ok++; } catch (e) { _fail++; queuePendingSync({ action: "set", kind: doc.kind, id: doc.id, doc }); }
         }
-      }
+      } else { _fail = Object.keys(all).length; }
       userSession.lastSync = new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
       saveUserSession();
-      toast("Base de données Cloud synchronisée !");
+      toast(_fail ? `⚠️ Synchronisation partielle : ${_ok} fiche(s) envoyée(s), ${_fail} en attente — réessayez avec une meilleure connexion.` : `Base de données Cloud synchronisée : ${_ok} fiche(s) envoyée(s).`);
       closeModal();
     });
   }

@@ -656,7 +656,7 @@ async function retryPendingSync() {
    part en arrière-plan avec un délai limite. Avant, save() attendait Firestore sans timeout,
    donc un réseau lent/bloqué laissait le bouton sur "Enregistrement…" pour toujours, alors
    que les données étaient déjà enregistrées en local. */
-function queuePendingSync(entry) { try { const _q = JSON.parse(localStorage.getItem("abvfarm_pending_sync") || "[]"); _q.push(entry); localStorage.setItem("abvfarm_pending_sync", JSON.stringify(_q)); } catch (e) {} }
+function queuePendingSync(entry) { try { const _q = JSON.parse(localStorage.getItem("abvfarm_pending_sync") || "[]"); const _f = _q.filter((x) => !(x.kind === entry.kind && String(x.id) === String(entry.id))); _f.push(entry); localStorage.setItem("abvfarm_pending_sync", JSON.stringify(_f)); } catch (e) {} }
 /* Correctif synchro cloud (audit en direct 2026-11-02) : la base Firestore était
    vide alors que le téléphone affichait « Compte Google Cloud actif ». Cause :
    pushToCloud abandonnait silencieusement une fiche quand la connexion n'était
@@ -825,7 +825,7 @@ function ensureCloudSyncListener(uid) {
   }
 }
 
-function handleUserAuthenticated(user, msg) {
+async function handleUserAuthenticated(user, msg) {
   if (unsubscribeSnapshot) {
     try { unsubscribeSnapshot(); } catch (e) {}
     unsubscribeSnapshot = null;
@@ -897,9 +897,22 @@ function handleUserAuthenticated(user, msg) {
     // Sauvegarder les fiches existantes dans le cloud Firestore
     const docsToPush = Object.values(userLocalData);
     if (docsToPush.length > 0) {
+      let _cloudMap = null; let _seenSet = new Set();
+      try { const _snap = await window.firebaseDb.collection("users").doc(user.uid).collection("cheptel").get(); _cloudMap = {}; _snap.docs.forEach((dc) => { const _cd = dc.data(); if (_cd && _cd.kind && _cd.id) _cloudMap[_cd.kind + "-" + _cd.id] = _cd.updatedAt || ""; }); } catch (e) { _cloudMap = null; }
+      try { _seenSet = new Set(JSON.parse(localStorage.getItem("abvfarm_cloud_ids") || "[]")); } catch (e) {}
       docsToPush.forEach((d) => {
         if (d && d.kind && d.id) {
-          window.firebaseDb.collection("users").doc(user.uid).collection("cheptel").doc(d.kind + "-" + d.id).set({
+          const _key = d.kind + "-" + d.id;
+          /* Correctif synchro constante (2026-11-02) : à la connexion, ne pas écraser
+             une fiche cloud plus récente (ex. correction faite depuis un autre appareil)
+             par la version locale plus ancienne, sinon les corrections sont perdues à
+             chaque ouverture de l'appli. Si le cloud a déjà vu cette fiche et qu'elle
+             n'y est plus, c'est une suppression cloud, on ne la ressuscite pas. */
+          if (_cloudMap) {
+            if (_cloudMap[_key] && d.updatedAt && _cloudMap[_key] > d.updatedAt) return;
+            if (!_cloudMap[_key] && _seenSet.has(_key)) return;
+          }
+          window.firebaseDb.collection("users").doc(user.uid).collection("cheptel").doc(_key).set({
             ...d,
             updatedAt: new Date().toISOString()
           }, { merge: true }).catch((err) => { console.warn("Push doc notice:", err); queuePendingSync({ action: "set", kind: d.kind, id: d.id, doc: { ...d, updatedAt: new Date().toISOString() } }); });
@@ -3518,6 +3531,7 @@ function rabbitForm(r) {
       const w = v.weight; delete v.weight;
       const obj = { ...r, ...v, status: r.status || "Actif" };
       const ok = await save("rabbit", obj); if (!ok) return false;
+      if (editing && r.name && obj.name && obj.name !== r.name) { const _stx = saleTxForRabbit(obj.id); if (_stx) await save("tx", { ..._stx, label: `Vente ${obj.name}${obj.exitBuyer ? " → " + obj.exitBuyer : ""}` }); }
       if (!editing && obj.birth) { await save("reminder", { title: `Premier vermifuge — ${obj.name}`, due: addDays(obj.birth, 30), prio: "Moyenne", desc: "Protocole santé par défaut (modifiable / supprimable).", done: false, rabbitId: obj.id, kind: "vermifuge" }); await save("reminder", { title: `Vaccination — ${obj.name}`, due: addDays(obj.birth, 45), prio: "Moyenne", desc: "Protocole santé par défaut (modifiable / supprimable).", done: false, rabbitId: obj.id, kind: "vaccination" }); }
       if (editing && r.birth && obj.birth && obj.birth !== r.birth) { for (const _rem of S.reminders.filter((x) => x.rabbitId === obj.id && !x.done && (x.kind === "vermifuge" || x.kind === "vaccination"))) await save("reminder", { ..._rem, due: addDays(obj.birth, _rem.kind === "vermifuge" ? 30 : 45), title: `${_rem.kind === "vermifuge" ? "Premier vermifuge" : "Vaccination"} — ${obj.name}` }); }
       if (w !== "" && w > 0) await save("weight", { rabbit: obj.id, date: today(), kg: w, notes: editing ? "" : "Poids initial" });
@@ -3625,7 +3639,7 @@ function itemForm(ex) {
 }
 function cageForm(ex) {
   form({ title: ex ? "Modifier la cage" : "Définir une cage", values: ex || {}, fields: [{ k: "name", label: "Nom / numéro de la cage", req: true, ph: "ex. A1, B2", def: ex ? ex.name : "" }, { k: "capacity", label: "Capacité (nombre de lapins)", type: "number", min: 1, def: ex ? ex.capacity : 1 }, { k: "location", label: "Emplacement", ph: "ex. Bâtiment 1, rangée A", def: ex ? ex.location : "" }, { k: "notes", label: "Notes", type: "textarea", full: true, def: ex ? ex.notes : "" }],
-    onSubmit: async (v) => { const _old = ex?.name || ""; const ok = await save("cage", { ...(ex || {}), ...v, capacity: Number(v.capacity) || 1 }); if (ok && ex && _old && v.name && v.name !== _old) { for (const _r of S.rabbits.filter((x) => (x.cage || "") === _old)) await save("rabbit", { ..._r, cage: v.name }); for (const _b of S.batches.filter((x) => (x.cage || "") === _old)) await save("batch", { ..._b, cage: v.name }); } if (ok) { closeModal(); toast(ex ? "Cage modifiée" : "Cage définie"); } return ok; } });
+    onSubmit: async (v) => { const _old = ex?.name || ""; const ok = await save("cage", { ...(ex || {}), ...v, capacity: Number(v.capacity) || 1 }); if (ok && ex && _old && v.name && v.name !== _old) { for (const _r of S.rabbits.filter((x) => (x.cage || "").trim().toLowerCase() === _old.trim().toLowerCase())) await save("rabbit", { ..._r, cage: v.name }); for (const _b of S.batches.filter((x) => (x.cage || "").trim().toLowerCase() === _old.trim().toLowerCase())) await save("batch", { ..._b, cage: v.name }); } if (ok) { closeModal(); toast(ex ? "Cage modifiée" : "Cage définie"); } return ok; } });
 }
 function feedForm(grams, ex) {
   if (ex) { toast("⛔ Distribution figée : une distribution enregistrée ne peut plus être modifiée, pour que le stock ne soit pas décrémenté plusieurs fois."); return; }
@@ -3855,7 +3869,7 @@ const A = {
     /* Correctif cascade : avant, supprimer un reproducteur effaçait ses saillies
        sans la cascade de suppression d'une saillie (lots liés, fiches lapereaux,
        rappels liés), laissant des lots et rappels orphelins. */
-    for (const m of S.matings.filter((x) => x.male === r.id || x.female === r.id)) { for (const _b of S.batches.filter((x) => x.mating === m.id)) await removeDoc("batch", _b.id); for (const _k of S.rabbits.filter((x) => x.matingId === m.id)) await save("rabbit", { ..._k, matingId: "" }); for (const _rem of S.reminders.filter((x) => x.matingId === m.id)) await removeDoc("reminder", _rem.id); await removeDoc("mating", m.id); }
+    for (const m of S.matings.filter((x) => x.male === r.id || x.female === r.id)) { for (const _b of S.batches.filter((x) => x.mating === m.id)) { for (const _tx of S.tx.filter((x) => x.batchId === _b.id)) await removeDoc("tx", _tx.id); await removeDoc("batch", _b.id); } for (const _k of S.rabbits.filter((x) => x.matingId === m.id)) await save("rabbit", { ..._k, matingId: "" }); for (const _rem of S.reminders.filter((x) => x.matingId === m.id)) await removeDoc("reminder", _rem.id); await removeDoc("mating", m.id); }
     for (const _rem of S.reminders.filter((x) => x.rabbitId === r.id)) await removeDoc("reminder", _rem.id);
     const _stx = saleTxForRabbit(r.id); if (_stx) await removeDoc("tx", _stx.id);
     for (const k of S.rabbits.filter((x) => x.father === r.id || x.mother === r.id)) await save("rabbit", { ...k, father: k.father === r.id ? "" : k.father, mother: k.mother === r.id ? "" : k.mother });
@@ -3926,10 +3940,11 @@ const A = {
       desc = "ce rappel";
     }
     confirmBox(`Supprimer définitivement ${desc} ? Cette action est irréversible.`, "Supprimer", async () => {
-          if (k === "mating") { for (const _b of S.batches.filter((x) => x.mating === id)) await removeDoc("batch", _b.id); for (const _r of S.rabbits.filter((x) => x.matingId === id)) await save("rabbit", { ..._r, matingId: "" }); for (const _rem of S.reminders.filter((x) => x.matingId === id)) await removeDoc("reminder", _rem.id); }
+          if (k === "tx") { const _tx0 = byId(S.tx, id); if (_tx0 && (_tx0.rabbitId || _tx0.itemId || _tx0.batchId)) { toast("⛔ Opération liée à une fiche (lapin, achat ou lot) : supprimez-la via cette fiche, pas ici, sinon les données se désynchronisent."); return; } }
+          if (k === "mating") { for (const _b of S.batches.filter((x) => x.mating === id)) { for (const _tx of S.tx.filter((x) => x.batchId === _b.id)) await removeDoc("tx", _tx.id); await removeDoc("batch", _b.id); } for (const _r of S.rabbits.filter((x) => x.matingId === id)) await save("rabbit", { ..._r, matingId: "" }); for (const _rem of S.reminders.filter((x) => x.matingId === id)) await removeDoc("reminder", _rem.id); }
     if (k === "item") { for (const _f of S.feed.filter((x) => x.item === id)) await removeDoc("feed", _f.id); for (const _tx of S.tx.filter((x) => x.itemId === id)) await removeDoc("tx", _tx.id); }
     if (k === "batch") { for (const _tx of S.tx.filter((x) => x.batchId === id)) await removeDoc("tx", _tx.id); }
-    if (k === "cage") { const _c = byId(S.cages || [], id); if (_c) { for (const _r of S.rabbits.filter((x) => (x.cage || "") === _c.name)) await save("rabbit", { ..._r, cage: "" }); for (const _b of S.batches.filter((x) => (x.cage || "") === _c.name)) await save("batch", { ..._b, cage: "" }); } }
+    if (k === "cage") { const _c = byId(S.cages || [], id); if (_c) { for (const _r of S.rabbits.filter((x) => (x.cage || "").trim().toLowerCase() === _c.name.trim().toLowerCase())) await save("rabbit", { ..._r, cage: "" }); for (const _b of S.batches.filter((x) => (x.cage || "").trim().toLowerCase() === _c.name.trim().toLowerCase())) await save("batch", { ..._b, cage: "" }); } }
     if (k === "treatment") { for (const _rem of S.reminders.filter((x) => x.treatmentId === id)) await removeDoc("reminder", _rem.id); }
       if (await removeDoc(k, id)) toast("Suppression effectuée avec succès");
     });

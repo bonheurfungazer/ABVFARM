@@ -104,6 +104,7 @@ function auditData(payload) {
       else codes.set(_k, r.id);
     }
     if (day(r.birth) && day(r.birth) > today) push('error', 'RABBIT_BIRTH_FUTURE', 'rabbit', r.id, label, `Date de naissance ${day(r.birth)} dans le futur.`, 'Corriger la date de naissance.');
+    if (r.status === 'Vendu' && !(num(r.exitPrice) > 0)) push('error', 'VENDU_NO_PRICE', 'rabbit', r.id, label, 'Animal vendu sans prix de vente : aucune recette ne peut etre creee en finances.', 'Renseigner le prix de vente dans le formulaire de statut.');
     if (exited(r) && !r.exitDate) push('warning', 'RABBIT_EXIT_NO_DATE', 'rabbit', r.id, label, `Animal sorti (${r.status}) sans date de sortie : son age ne peut pas etre fige.`, 'Renseigner la date de sortie.');
     if (r.father && str(r.father) === str(r.id)) push('error', 'RABBIT_PARENT_SELF', 'rabbit', r.id, label, 'Le lapin est indique comme son propre pere.', 'Corriger le pere.');
     if (r.mother && str(r.mother) === str(r.id)) push('error', 'RABBIT_PARENT_SELF', 'rabbit', r.id, label, 'Le lapin est indique comme sa propre mere.', 'Corriger la mere.');

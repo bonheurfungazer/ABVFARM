@@ -547,12 +547,29 @@ const nf1 = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 });
 const nf2 = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 2 });
 const fcfa = (n) => nf0.format(Math.round(n || 0)) + " F";
 const relDay = (n) => n === 0 ? "aujourd'hui" : n === 1 ? "demain" : n === -1 ? "hier" : n > 0 ? `dans ${n} j` : `il y a ${-n} j`;
-function ageLabel(days) {
+function ageLabel(days, birth, ref) {
+  /* Âge exact : si la date de naissance est connue, on calcule en années / mois
+     calendaires pleins + jours supplémentaires (ex. 8 mois 21 j), au lieu
+     d'arrondir à « 8 mois » et de perdre les jours. Sans date de naissance,
+     on décompose les jours en gardant le reste. */
+  if (birth && ref) {
+    const b = parse(birth), e = parse(ref);
+    if (e < b) return "—";
+    let y = e.getFullYear() - b.getFullYear();
+    let m = e.getMonth() - b.getMonth();
+    let d = e.getDate() - b.getDate();
+    if (d < 0) { m--; const prev = new Date(e.getFullYear(), e.getMonth(), 0); d += prev.getDate(); }
+    if (m < 0) { y--; m += 12; }
+    if (y === 0 && m === 0) return `${d} j`;
+    if (y === 0) return `${m} mois${d ? ` ${d} j` : ""}`;
+    return `${y} an${y > 1 ? "s" : ""}${m ? ` ${m} mois` : ""}${d ? ` ${d} j` : ""}`;
+  }
   if (days < 0) return "—";
   if (days < 60) return `${days} j`;
-  if (days < 365) return `${Math.floor(days / 30.44)} mois`;
-  const y = Math.floor(days / 365.25), m = Math.floor((days - y * 365.25) / 30.44);
-  return `${y} an${y > 1 ? "s" : ""}${m ? ` ${m} m` : ""}`;
+  if (days < 365) { const m = Math.floor(days / 30.44); const d = Math.round(days - m * 30.44); return d > 0 && d < 30 ? `${m} mois ${d} j` : `${m} mois`; }
+  let y = Math.floor(days / 365.25), m = Math.floor((days - y * 365.25) / 30.44), d = Math.round(days - y * 365.25 - m * 30.44);
+  if (d >= 30) { m++; d -= 30; } if (m >= 12) { y++; m -= 12; }
+  return `${y} an${y > 1 ? "s" : ""}${m ? ` ${m} mois` : ""}${d > 0 ? ` ${d} j` : ""}`;
 }
 
 /* ---------- Farm rules ---------- */
@@ -2279,7 +2296,7 @@ function rabbitCard(r) {
   const lact = S.matings.find((m) => m.female === r.id && m.status === "Mise bas" && m.birthDate && diff(m.birthDate, today()) <= WEANING);
   return `<a class="rcard ${isActive(r) ? sexCls(r) : "off"}" href="#lapin-${r.id}">
     <div class="top"><div style="min-width:0"><div class="nm">${esc(r.name)}</div><div class="hint">${esc(r.breed || "Race non précisée")}</div></div><span class="sx">${sexSym(r)}</span></div>
-    <div class="facts"><span>Âge <b>${ageLabel(a)}</b></span><span>Poids <b>${w != null ? nf2.format(w) + " kg" : "—"}</b></span></div>
+    <div class="facts"><span>Âge <b>${ageLabel(a, r.birth, (isExited(r) && r.exitDate ? r.exitDate : today()))}</b></span><span>Poids <b>${w != null ? nf2.format(w) + " kg" : "—"}</b></span></div>
     <div class="actions">
       ${r.cage ? `<span class="tag">CAGE ${esc(r.cage)}</span>` : ""}
       ${!isActive(r) ? statusChip(r.status) : ""}
@@ -2304,7 +2321,7 @@ function rabbitTableRow(r) {
     </td>
     <td>${r.cage ? `<span class="tag">CAGE ${esc(r.cage)}</span>` : '<span class="hint">—</span>'}</td>
     <td class="hint">${esc(r.breed || "—")}</td>
-    <td class="num">${ageLabel(a)}</td>
+    <td class="num">${ageLabel(a, r.birth, (isExited(r) && r.exitDate ? r.exitDate : today()))}</td>
     <td class="r num"><b>${w != null ? nf2.format(w) + " kg" : "—"}</b></td>
     <td>
       ${!isActive(r) ? statusChip(r.status) : gest ? `<span class="chip clay">Gestante · J${diff(gest.date, today())}</span>` : lact ? `<span class="chip info">Allaitante</span>` : a >= MATURE_DAYS ? `<span class="chip ok">Reproducteur</span>` : `<span class="chip">Jeune</span>`}
@@ -2330,7 +2347,7 @@ VIEWS.lapin = ({ id }) => {
   const done = mts.filter((m) => m.status === "Mise bas"), failed = mts.filter((m) => m.status === "Échoué");
   const born = done.reduce((s, m) => s + (Number(m.alive) || 0), 0);
   const rate = done.length + failed.length ? Math.round((done.length / (done.length + failed.length)) * 100) : null;
-  const matur = r.status === "Externe" ? ["info", "Externe — utilisable en reproduction", "Animal extérieur au cheptel : il ne compte pas dans la ration ni dans les cages, mais il peut être choisi comme reproducteur."] : isExited(r) ? ["", "Sorti", r.exitDate ? `Âge figé à ${ageLabel(a)} (sortie le ${fmtDate(r.exitDate)}).` : `Âge figé à ${ageLabel(a)}.`] : a >= MATURE_DAYS ? ["ok", "Apte à la reproduction", `Âge ≥ 5 mois (${ageLabel(a)}).`] : a >= 90 ? ["warn", "Sub-adulte", `Maturité dans ${MATURE_DAYS - a} jours.`] : ["info", "Jeune en croissance", `Reproduction possible à partir de 5 mois.`];
+  const matur = r.status === "Externe" ? ["info", "Externe — utilisable en reproduction", "Animal extérieur au cheptel : il ne compte pas dans la ration ni dans les cages, mais il peut être choisi comme reproducteur."] : isExited(r) ? ["", "Sorti", r.exitDate ? `Âge figé à ${ageLabel(a, r.birth, r.exitDate)} (sortie le ${fmtDate(r.exitDate)}).` : `Âge figé à ${ageLabel(a, r.birth, today())}.`] : a >= MATURE_DAYS ? ["ok", "Apte à la reproduction", `Âge ≥ 5 mois (${ageLabel(a, r.birth, today())}).`] : a >= 90 ? ["warn", "Sub-adulte", `Maturité dans ${MATURE_DAYS - a} jours.`] : ["info", "Jeune en croissance", `Reproduction possible à partir de 5 mois.`];
   const F = r.father && r.mother ? makeKinship().F(id) * 100 : 0;
   return `<div class="head"><a class="btn ghost" href="#lapins">${ICON.back}Mes lapins</a>
     <div class="actions"><button class="btn" data-act="editrabbit" data-id="${id}">${ICON.edit}Modifier</button><button class="btn" data-act="status" data-id="${id}">Statut</button><button class="btn ghost danger" data-act="delrabbit" data-id="${id}" aria-label="Supprimer">${ICON.trash}</button></div></div>
@@ -2342,7 +2359,7 @@ VIEWS.lapin = ({ id }) => {
   ${wd ? `<div class="banner warn"><span>${ICON.alert.replace("<svg", '<svg width="18" height="18"')} Ne pas vendre ni abattre avant le ${fmtDate(wd)} (délai d'attente après traitement).</span></div>` : ""}
   <div class="grid g2">
     <section class="card"><div class="row-h"><h2>Informations</h2></div><dl class="kv" style="margin:0">
-      <div><dt>Naissance</dt><dd>${fmtDate(r.birth)}</dd></div><div><dt>Âge</dt><dd>${ageLabel(a)}</dd></div>
+      <div><dt>Naissance</dt><dd>${fmtDate(r.birth)}</dd></div><div><dt>Âge</dt><dd>${ageLabel(a, r.birth, (isExited(r) && r.exitDate ? r.exitDate : today()))}</dd></div>
       <div><dt>Dernier poids</dt><dd>${ws.length ? nf2.format(ws[ws.length - 1].kg) + " kg" : "—"}</dd></div><div><dt>Gain moyen (GMQ)</dt><dd class="${g == null ? "" : g >= 0 ? "pos" : "neg"}">${g == null ? "—" : `${g >= 0 ? "+" : ""}${nf1.format(g)} g/j`}</dd></div>
       <div><dt>Maturité</dt><dd>${matur[2]}</dd></div><div><dt>Cage</dt><dd>${esc(r.cage || "—")}</dd></div>${isExited(r) ? `<div><dt>Sortie</dt><dd>${r.exitDate ? fmtDate(r.exitDate) : "—"}${r.status ? ` · ${esc(r.status)}` : ""}</dd></div>${r.status === "Vendu" && Number(r.exitPrice) > 0 ? `<div><dt>Prix de vente</dt><dd>${fcfa(Number(r.exitPrice))}</dd></div>` : ""}${r.exitBuyer ? `<div><dt>Acheteur</dt><dd>${esc(r.exitBuyer)}</dd></div>` : ""}${r.exitCause ? `<div><dt>Motif</dt><dd>${esc(r.exitCause)}</dd></div>` : ""}` : ""}
     </dl>${r.notes ? `<p class="hint" style="margin-top:12px">${esc(r.notes)}</p>` : ""}</section>
@@ -2601,7 +2618,7 @@ function exportHerdPDF() {
         r.breed || "—",
         r.cage || "—",
         fmtShort(r.birth),
-        ageLabel(age(r)),
+        ageLabel(age(r), r.birth, (isExited(r) && r.exitDate ? r.exitDate : today())),
         w != null ? `${nf2.format(w)} kg` : "—",
         g != null ? `${Math.round(g)} g/j` : "—",
         r.status || "Actif"

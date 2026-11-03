@@ -3219,10 +3219,28 @@ function accountModal() {
           for (const [_k, _cd] of Object.entries(_cloud)) { const _loc = _all2[_k]; if (!_loc || !_loc.updatedAt || !_cd.updatedAt || _cd.updatedAt >= _loc.updatedAt) { _all2[_k] = _cd; _pulled++; } }
           setLocalData(_all2); ingest(Object.values(_all2));
           const _all3 = getLocalData();
+          /* Correctif lenteur synchro : avant, ce bouton renvoyait les 159 fiches une
+             par une, même celles déjà dans le cloud à l'identique — d'où des minutes
+             d'attente pour de simples textes, chaque envoi attendant la confirmation
+             du serveur. Maintenant on ne pousse que les fiches nouvelles ou plus
+             récentes que le cloud, et par lots (un seul envoi groupé) au lieu d'une
+             par une. Une seule fiche nouvelle comme Hector part donc en secondes. */
+          const _toPush = [];
           for (const [k, doc] of Object.entries(_all3)) {
             const _cd = _cloud[k];
-            if (_cd && doc.updatedAt && _cd.updatedAt && _cd.updatedAt > doc.updatedAt) continue;
-            try { await _col.doc(k).set(cleanForCloud(doc)); _ok++; clearPendingFor(doc.kind, doc.id); } catch (e) { _fail++; queuePendingSync({ action: "set", kind: doc.kind, id: doc.id, doc: cleanForCloud(doc) }); }
+            if (_cd && doc.updatedAt && _cd.updatedAt && _cd.updatedAt >= doc.updatedAt) continue;
+            _toPush.push([k, doc]);
+          }
+          for (let _i = 0; _i < _toPush.length; _i += 450) {
+            const _chunk = _toPush.slice(_i, _i + 450);
+            try {
+              const _batch = window.firebaseDb.batch();
+              _chunk.forEach(([k, doc]) => { _batch.set(_col.doc(k), cleanForCloud(doc)); });
+              await _batch.commit();
+              _chunk.forEach(([k, doc]) => { _ok++; clearPendingFor(doc.kind, doc.id); });
+            } catch (e) {
+              for (const [k, doc] of _chunk) { try { await _col.doc(k).set(cleanForCloud(doc)); _ok++; clearPendingFor(doc.kind, doc.id); } catch (e2) { _fail++; queuePendingSync({ action: "set", kind: doc.kind, id: doc.id, doc: cleanForCloud(doc) }); } }
+            }
           }
         } catch (e) {
           for (const [k, doc] of Object.entries(all)) {

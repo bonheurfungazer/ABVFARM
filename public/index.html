@@ -665,15 +665,33 @@ async function retryPendingSync() {
   let _q = []; try { _q = JSON.parse(localStorage.getItem("abvfarm_pending_sync") || "[]"); } catch (e) {}
   if (!_q.length) return;
   const _col = window.firebaseDb.collection("users").doc(userSession.uid).collection("cheptel");
+  /* Correctif file en attente qui ne se vide jamais : d'abord, on enlève les fiches
+     déjà dans le cloud (arrivées par une autre voie : connexion, import, bouton
+     Synchroniser) au lieu de les renvoyer en boucle, et les suppressions déjà
+     effectives dans le cloud. Ensuite seulement on renvoie le reste, nettoyé. */
+  let _cloudMap = null;
+  try { const _snap = await _col.get(); _cloudMap = {}; _snap.docs.forEach((d) => { const _cd = d.data(); if (_cd && _cd.kind && _cd.id) _cloudMap[_cd.kind + "-" + _cd.id] = _cd.updatedAt || ""; }); } catch (e) { _cloudMap = null; }
+  const _todo = [];
+  for (const _it of _q) {
+    const _key = _it.kind + "-" + _it.id;
+    if (_cloudMap) {
+      if (_it.action === "delete" && !_cloudMap[_key]) continue;
+      if (_it.action !== "delete" && _cloudMap[_key] && _it.doc && _it.doc.updatedAt && _cloudMap[_key] >= _it.doc.updatedAt) continue;
+    }
+    _todo.push(_it);
+  }
   const _left = [];
-  for (const _it of _q) { try { if (_it.action === "delete") await _col.doc(_it.kind + "-" + _it.id).delete(); else await _col.doc(_it.kind + "-" + _it.id).set(_it.doc); } catch (e) { _left.push(_it); } }
-  try { localStorage.setItem("abvfarm_pending_sync", JSON.stringify(_left)); if (_left.length < _q.length) toast(`Synchronisation rattrapée : ${_q.length - _left.length} fiche(s) envoyée(s).`); } catch (e) {}
+  let _lastErr = "";
+  for (const _it of _todo) { try { if (_it.action === "delete") await _col.doc(_it.kind + "-" + _it.id).delete(); else await _col.doc(_it.kind + "-" + _it.id).set(cleanForCloud(_it.doc)); } catch (e) { _left.push(_it); _lastErr = e.code || e.message || ""; } }
+  try { localStorage.setItem("abvfarm_pending_sync", JSON.stringify(_left)); if (_left.length) localStorage.setItem("abvfarm_last_sync_error", _lastErr); else localStorage.removeItem("abvfarm_last_sync_error"); if (_left.length < _q.length) toast(`Synchronisation rattrapée : ${_q.length - _left.length} fiche(s) envoyée(s).`); } catch (e) {}
 }
 /* Correctif formulaires figés : la sauvegarde locale répond tout de suite, la synchro cloud
    part en arrière-plan avec un délai limite. Avant, save() attendait Firestore sans timeout,
    donc un réseau lent/bloqué laissait le bouton sur "Enregistrement…" pour toujours, alors
    que les données étaient déjà enregistrées en local. */
 function queuePendingSync(entry) { try { const _q = JSON.parse(localStorage.getItem("abvfarm_pending_sync") || "[]"); const _f = _q.filter((x) => !(x.kind === entry.kind && String(x.id) === String(entry.id))); _f.push(entry); localStorage.setItem("abvfarm_pending_sync", JSON.stringify(_f)); } catch (e) {} }
+function cleanForCloud(doc) { const out = {}; for (const [k, v] of Object.entries(doc || {})) { if (v === undefined || typeof v === "function") continue; if (typeof v === "number" && !isFinite(v)) out[k] = 0; else if (Array.isArray(v)) out[k] = v.map((x) => (x === undefined || typeof x === "function" ? null : (typeof x === "number" && !isFinite(x) ? 0 : x))); else if (v && typeof v === "object" && !(v instanceof Date)) out[k] = cleanForCloud(v); else out[k] = v; } return out; }
+function clearPendingFor(kind, id) { try { const _q = JSON.parse(localStorage.getItem("abvfarm_pending_sync") || "[]"); const _f = _q.filter((x) => !(x.kind === kind && String(x.id) === String(id))); localStorage.setItem("abvfarm_pending_sync", JSON.stringify(_f)); } catch (e) {} }
 /* Correctif synchro cloud (audit en direct 2026-11-02) : la base Firestore était
    vide alors que le téléphone affichait « Compte Google Cloud actif ». Cause :
    pushToCloud abandonnait silencieusement une fiche quand la connexion n'était
@@ -684,15 +702,24 @@ function queuePendingSync(entry) { try { const _q = JSON.parse(localStorage.getI
 function pushToCloud(kind, id, doc, action) {
   if (!userSession.isLoggedIn || !isOnline || !window.firebaseDb || !userSession.uid) { queuePendingSync(action === "delete" ? { action: "delete", kind, id } : { action: "set", kind, id, doc }); return; }
   const col = window.firebaseDb.collection("users").doc(userSession.uid).collection("cheptel");
-  const op = action === "delete" ? col.doc(kind + "-" + id).delete() : col.doc(kind + "-" + id).set(doc);
-  const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error("cloud timeout")), 8000));
-  Promise.race([Promise.resolve(op), timeout]).then(() => {
+  const clean = action === "delete" ? null : cleanForCloud(doc);
+  const op = action === "delete" ? col.doc(kind + "-" + id).delete() : col.doc(kind + "-" + id).set(clean);
+  /* Correctif synchro directe : avant, un délai de 8 s déclarait l'envoi en échec
+     même sur une connexion lente, alors que Firestore allait finir l'envoi quelques
+     secondes plus tard — d'où une notification « Non synchronisé » à chaque
+     enregistrement et une file qui ne se vidait jamais, pour de simples textes.
+     Maintenant on laisse Firestore finir son envoi (il gère lui-même la file
+     hors-ligne), on ne met en attente que sur une vraie erreur, et on enlève
+     cette fiche de la file dès qu'elle part. */
+  Promise.resolve(op).then(() => {
     userSession.lastSync = new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
     saveUserSession();
+    clearPendingFor(kind, id);
     retryPendingSync();
   }).catch((err) => {
     console.warn("Cloud push notice:", err);
-    queuePendingSync(action === "delete" ? { action: "delete", kind, id } : { action: "set", kind, id, doc });
+    try { localStorage.setItem("abvfarm_last_sync_error", err.code || err.message || ""); } catch (e) {}
+    queuePendingSync(action === "delete" ? { action: "delete", kind, id } : { action: "set", kind, id, doc: clean });
     toast("⚠️ Non synchronisé : sera renvoyé à la prochaine connexion.");
   });
 }
@@ -929,10 +956,10 @@ async function handleUserAuthenticated(user, msg) {
             if (_cloudMap[_key] && d.updatedAt && _cloudMap[_key] > d.updatedAt) return;
             if (!_cloudMap[_key] && _seenSet.has(_key)) return;
           }
-          window.firebaseDb.collection("users").doc(user.uid).collection("cheptel").doc(_key).set({
+          window.firebaseDb.collection("users").doc(user.uid).collection("cheptel").doc(_key).set(cleanForCloud({
             ...d,
             updatedAt: new Date().toISOString()
-          }, { merge: true }).catch((err) => { console.warn("Push doc notice:", err); queuePendingSync({ action: "set", kind: d.kind, id: d.id, doc: { ...d, updatedAt: new Date().toISOString() } }); });
+          }), { merge: true }).then(() => clearPendingFor(d.kind, d.id)).catch((err) => { console.warn("Push doc notice:", err); queuePendingSync({ action: "set", kind: d.kind, id: d.id, doc: cleanForCloud({ ...d, updatedAt: new Date().toISOString() }) }); });
         }
       });
     }
@@ -2528,7 +2555,7 @@ VIEWS.donnees = () => {
       <button class="btn sm" data-act="accountModal">${ICON.cloud}${(userSession.isLoggedIn && window.firebaseAuth && window.firebaseAuth.currentUser) ? "Compte Synchronisé" : (userSession.isLoggedIn ? "Compte local · non synchronisé" : "Connexion Compte (Email / Google)")}</button>
     </div>
     <p>Vos données sont protégées et enregistrées instantanément sur cet appareil pour vous garantir un fonctionnement continu avec ou sans connexion Internet. Connectez votre compte par Email ou Google pour une sauvegarde automatique et permanente dans le Cloud Firebase.</p>
-    <p>${(() => { let _q = []; try { _q = JSON.parse(localStorage.getItem("abvfarm_pending_sync") || "[]"); } catch (e) {} return _q.length ? `⚠️ ${_q.length} fiche(s) en attente de synchronisation.` : "Aucune fiche en attente de synchronisation."; })()} <button class="btn sm" data-act="retrySync">Renvoyer maintenant</button></p>
+    <p>${(() => { let _q = []; try { _q = JSON.parse(localStorage.getItem("abvfarm_pending_sync") || "[]"); } catch (e) {} const _err = (() => { try { return localStorage.getItem("abvfarm_last_sync_error") || ""; } catch (e) { return ""; } })(); return (_q.length ? `⚠️ ${_q.length} fiche(s) en attente de synchronisation.` : "Aucune fiche en attente de synchronisation.") + (_err ? ` <span class="hint">Dernière erreur : ${esc(_err)}</span>` : ""); })()} <button class="btn sm" data-act="retrySync">Renvoyer maintenant</button></p>
   </section>
   <section class="card full"><h2>Audit API — Toutes les données</h2><p class="hint" style="margin:6px 0 12px">L'API Netlify reçoit toutes les données de l'élevage (lapins, saillies, lots, pesées, soins, stocks, distributions, finances, rappels, cages) et renvoie la liste complète des incohérences de logique, sans rien stocker : l'analyse est renvoyée dans la réponse, puis oubliée. En local (fichier ouvert sans déploiement Netlify), l'API n'est pas joignable : déployez le site pour l'utiliser.</p><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn pri" data-act="auditApi">Auditer mes données actuelles (toutes)</button><button class="btn" data-act="auditApiFile">Auditer un fichier exporté</button></div><div id="auditApiResult" style="margin-top:12px"></div></section>
   <div class="grid g2">
@@ -3177,15 +3204,35 @@ function accountModal() {
          tous les envois avaient échoué, les erreurs étant avalées silencieusement.
          Maintenant il compte les succès, met les échecs en file d'attente, et dit
          honnêtement ce qui est parti et ce qui reste en attente. */
-      let _ok = 0, _fail = 0;
+      let _ok = 0, _fail = 0, _pulled = 0;
       if (window.firebaseDb && userSession.uid) {
-        for (const [k, doc] of Object.entries(all)) {
-          try { await window.firebaseDb.collection("users").doc(userSession.uid).collection("cheptel").doc(k).set(doc); _ok++; } catch (e) { _fail++; queuePendingSync({ action: "set", kind: doc.kind, id: doc.id, doc }); }
+        /* Correctif bouton Synchroniser : avant il ne faisait que pousser les fiches
+           locales, sans jamais récupérer le cloud, donc une fiche corrigée dans le
+           cloud ne revenait jamais sur le téléphone. Maintenant il récupère d'abord
+           le cloud, fusionne les fiches cloud plus récentes en local, puis ne pousse
+           que les fiches locales plus récentes ou absentes du cloud. */
+        try {
+          const _col = window.firebaseDb.collection("users").doc(userSession.uid).collection("cheptel");
+          const _snap = await _col.get();
+          const _cloud = {}; _snap.docs.forEach((d) => { const _cd = d.data(); if (_cd && _cd.kind && _cd.id) _cloud[_cd.kind + "-" + _cd.id] = _cd; });
+          const _all2 = getLocalData();
+          for (const [_k, _cd] of Object.entries(_cloud)) { const _loc = _all2[_k]; if (!_loc || !_loc.updatedAt || !_cd.updatedAt || _cd.updatedAt >= _loc.updatedAt) { _all2[_k] = _cd; _pulled++; } }
+          setLocalData(_all2); ingest(Object.values(_all2));
+          const _all3 = getLocalData();
+          for (const [k, doc] of Object.entries(_all3)) {
+            const _cd = _cloud[k];
+            if (_cd && doc.updatedAt && _cd.updatedAt && _cd.updatedAt > doc.updatedAt) continue;
+            try { await _col.doc(k).set(cleanForCloud(doc)); _ok++; clearPendingFor(doc.kind, doc.id); } catch (e) { _fail++; queuePendingSync({ action: "set", kind: doc.kind, id: doc.id, doc: cleanForCloud(doc) }); }
+          }
+        } catch (e) {
+          for (const [k, doc] of Object.entries(all)) {
+            try { await window.firebaseDb.collection("users").doc(userSession.uid).collection("cheptel").doc(k).set(cleanForCloud(doc)); _ok++; } catch (e2) { _fail++; queuePendingSync({ action: "set", kind: doc.kind, id: doc.id, doc: cleanForCloud(doc) }); }
+          }
         }
       } else { _fail = Object.keys(all).length; }
       userSession.lastSync = new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
       saveUserSession();
-      toast(_fail ? `⚠️ Synchronisation partielle : ${_ok} fiche(s) envoyée(s), ${_fail} en attente — réessayez avec une meilleure connexion.` : `Base de données Cloud synchronisée : ${_ok} fiche(s) envoyée(s).`);
+      toast(_fail ? `⚠️ Synchronisation partielle : ${_ok} fiche(s) envoyée(s), ${_pulled} récupérée(s), ${_fail} en attente — réessayez avec une meilleure connexion.` : `Base de données Cloud synchronisée : ${_ok} fiche(s) envoyée(s), ${_pulled} récupérée(s).`);
       closeModal();
     });
   }
@@ -3819,7 +3866,7 @@ async function bulk(docs, label) {
           const chunk = batchDocsToCloud.slice(i, i + 450);
           const batch = window.firebaseDb.batch();
           chunk.forEach(doc => {
-            batch.set(userRef.doc(doc.kind + "-" + doc.id), doc);
+            batch.set(userRef.doc(doc.kind + "-" + doc.id), cleanForCloud(doc));
           });
           await batch.commit();
         }

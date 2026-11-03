@@ -670,7 +670,7 @@ async function retryPendingSync() {
      Synchroniser) au lieu de les renvoyer en boucle, et les suppressions déjà
      effectives dans le cloud. Ensuite seulement on renvoie le reste, nettoyé. */
   let _cloudMap = null;
-  try { const _snap = await _col.get(); _cloudMap = {}; _snap.docs.forEach((d) => { const _cd = d.data(); if (_cd && _cd.kind && _cd.id) _cloudMap[_cd.kind + "-" + _cd.id] = _cd.updatedAt || ""; }); } catch (e) { _cloudMap = null; }
+  try { const _snap = await _col.get({ source: "server" }); _cloudMap = {}; _snap.docs.forEach((d) => { const _cd = d.data(); if (_cd && _cd.kind && _cd.id) _cloudMap[_cd.kind + "-" + _cd.id] = _cd.updatedAt || ""; }); } catch (e) { _cloudMap = null; }
   const _todo = [];
   for (const _it of _q) {
     const _key = _it.kind + "-" + _it.id;
@@ -839,6 +839,10 @@ function ensureCloudSyncListener(uid) {
   if (unsubscribeSnapshot || !window.firebaseDb || !uid) return;
   try {
     unsubscribeSnapshot = window.firebaseDb.collection("users").doc(uid).collection("cheptel").onSnapshot((snap) => {
+      /* Audit synchro : ignorer les instantanés venant du cache local, sinon l'appli
+         fusionne ses propres fiches locales en croyant que c'est le cloud, et peut
+         même supprimer une fiche locale absente du cache. Seul le serveur fait foi. */
+      if (snap.metadata && snap.metadata.fromCache) return;
       cloudSyncActive = true;
       const cloudDocs = snap.docs.map((d) => d.data());
       const all = getLocalData();
@@ -942,7 +946,7 @@ async function handleUserAuthenticated(user, msg) {
     const docsToPush = Object.values(userLocalData);
     if (docsToPush.length > 0) {
       let _cloudMap = null; let _seenSet = new Set();
-      try { const _snap = await window.firebaseDb.collection("users").doc(user.uid).collection("cheptel").get(); _cloudMap = {}; _snap.docs.forEach((dc) => { const _cd = dc.data(); if (_cd && _cd.kind && _cd.id) _cloudMap[_cd.kind + "-" + _cd.id] = _cd.updatedAt || ""; }); } catch (e) { _cloudMap = null; }
+      try { const _snap = await window.firebaseDb.collection("users").doc(user.uid).collection("cheptel").get({ source: "server" }); _cloudMap = {}; _snap.docs.forEach((dc) => { const _cd = dc.data(); if (_cd && _cd.kind && _cd.id) _cloudMap[_cd.kind + "-" + _cd.id] = _cd.updatedAt || ""; }); } catch (e) { _cloudMap = null; }
       try { _seenSet = new Set(JSON.parse(localStorage.getItem("abvfarm_cloud_ids") || "[]")); } catch (e) {}
       docsToPush.forEach((d) => {
         if (d && d.kind && d.id) {
@@ -3213,7 +3217,11 @@ function accountModal() {
            que les fiches locales plus récentes ou absentes du cloud. */
         try {
           const _col = window.firebaseDb.collection("users").doc(userSession.uid).collection("cheptel");
-          const _snap = await _col.get();
+          /* Correctif lecture cache : sans source:"server", get() pouvait renvoyer le
+             cache local (162 fiches locales) au lieu du cloud (159), d'où un message
+             "0 envoyée, 162 récupérée" alors que les fiches nouvelles n'étaient jamais
+             poussées, car l'appli croyait à tort qu'elles étaient déjà dans le cloud. */
+          const _snap = await _col.get({ source: "server" });
           const _cloud = {}; _snap.docs.forEach((d) => { const _cd = d.data(); if (_cd && _cd.kind && _cd.id) _cloud[_cd.kind + "-" + _cd.id] = _cd; });
           const _all2 = getLocalData();
           for (const [_k, _cd] of Object.entries(_cloud)) { const _loc = _all2[_k]; if (!_loc || !_loc.updatedAt || !_cd.updatedAt || _cd.updatedAt >= _loc.updatedAt) { _all2[_k] = _cd; _pulled++; } }

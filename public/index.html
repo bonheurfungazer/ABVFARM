@@ -1375,10 +1375,14 @@ function updateUserUI() {
     if (userSession.isLocalProfile) {
       statusHtml = `<span class="dot local"></span><span>Profil local (${esc(userSession.email || "actif")})</span>`;
       subText = "Mode local • Enregistré";
-    } else if (cloudFirstSnapshotPending) {
+    } else if (cloudFirstSnapshotPending && !cloudSyncActive) {
       /* Section 2 (S6) : tant que le premier snapshot serveur n'est pas arrivé, le
          jeu affiché est le jeu local seul — il ne doit pas s'afficher « Synchronisé ».
-         Branche placée AVANT le cas en ligne, y compris hors-ligne à la connexion. */
+         Branche placée AVANT le cas en ligne, y compris hors-ligne à la connexion.
+         Correctif indicateur latéral (2026-11-04) : la garde !cloudSyncActive évite
+         que la pastille reste figée sur « Fusion cloud en attente » après qu'un
+         snapshot serveur est déjà arrivé ; dans ce cas on retombe sur le statut
+         honnête getSyncStatus() ci-dessous, comme l'écran Compte et la vue Données. */
       statusHtml = `<span class="dot offline"></span><span style="color:var(--warn)">Fusion cloud en attente${cloudLoginError ? " — échec de lecture cloud" : ""}</span>`;
       subText = cloudLoginError ? "Données locales affichées • Envoi cloud en attente" : "Données locales affichées • Fusion cloud en attente";
     } else if (isOnline) {

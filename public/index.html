@@ -232,16 +232,29 @@ main { min-width: 0; padding-block: 20px 110px; padding-left: max(16px, env(safe
 .rcard .facts b { color: var(--ink); font-weight: 700; }
 .sx { font-size: 1.3rem; line-height: 1; font-weight: 800; }
 
-.toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-.chip-bar { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
-.chip-bar::-webkit-scrollbar { display: none; }
+/* Filtres repensés (2026-11-04) : par défaut, une seule barre compacte —
+   recherche + bouton Filtres. Tout le reste vit dans la feuille "Filtres",
+   et seuls les filtres réellement actifs apparaissent, sous forme de
+   pastilles supprimables. Plus de barre horizontale à défiler, plus de
+   cartes de filtres permanentes. */
+.filter-bar { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+.filter-btn { display: inline-flex; align-items: center; gap: 6px; border: 1.5px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 12px; padding: 9px 13px; font-weight: 700; font-size: .88rem; cursor: pointer; flex: none; white-space: nowrap; }
+.filter-btn svg { width: 17px; height: 17px; }
+.filter-btn .badge { background: var(--sage); color: #fff; min-width: 20px; height: 20px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; padding: 0 5px; font-size: .72rem; font-weight: 800; }
+.active-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.active-chip { display: inline-flex; align-items: center; gap: 6px; border: 1.5px solid var(--sage); background: var(--sage-soft, var(--surface-2)); color: var(--ink); border-radius: 999px; padding: 4px 6px 4px 11px; font-size: .78rem; font-weight: 700; cursor: pointer; }
+.active-chip i { font-style: normal; font-size: 1rem; line-height: 1; color: var(--muted); }
+.fsec { display: flex; flex-direction: column; gap: 8px; }
+.fsec h3 { font-size: .82rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 6px 0 0; }
+.fchips { display: flex; flex-wrap: wrap; gap: 6px; }
+.fchips .chip-btn { padding: 7px 12px; font-size: .84rem; }
+.fgrid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .chip-btn { border: 1.5px solid var(--line); background: var(--surface); color: var(--muted); padding: 5px 11px; border-radius: 999px; font-size: .8rem; font-weight: 700; white-space: nowrap; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: background .12s ease, color .12s ease, border-color .12s ease; }
 .chip-btn:hover { background: var(--surface-2); color: var(--ink); }
 .chip-btn[aria-pressed="true"] { background: var(--sage); color: var(--sage-ink); border-color: transparent; }
 .chip-btn .badge { background: rgba(0,0,0,0.08); padding: 1px 6px; border-radius: 999px; font-size: .72rem; }
 .chip-btn[aria-pressed="true"] .badge { background: rgba(255,255,255,0.28); color: #fff; }
-.filter-select { border: 1.5px solid var(--line); border-radius: 11px; background: var(--surface); padding: 7px 10px; font-size: .82rem; font-weight: 600; color: var(--ink); outline: none; cursor: pointer; }
-.filter-select:focus { border-color: var(--sage); }
+
 .view-toggle { display: inline-flex; background: var(--surface-2); border-radius: 10px; padding: 2px; gap: 2px; }
 .view-toggle button { border: 0; background: transparent; padding: 6px 9px; border-radius: 8px; cursor: pointer; color: var(--muted); display: grid; place-items: center; }
 .view-toggle button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
@@ -503,6 +516,7 @@ const ICON = {
   more: I('<circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/>'),
   plus: I('<path d="M12 5v14M5 12h14"/>'),
   search: I('<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>'),
+  filter: I('<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>'),
   scale: I('<path d="M5 20h14l-1.5-11h-11Z"/><circle cx="12" cy="5" r="2"/><path d="m12 13 2-2"/>'),
   syringe: I('<path d="m18 2 4 4M16 4l4 4M14 6l4 4-9 9H5v-4Z"/><path d="m10 10 2 2M7 13l2 2"/>'),
   edit: I('<path d="M4 20h4L19 9l-4-4L4 16Z"/><path d="m14 6 4 4"/>'),
@@ -1943,6 +1957,55 @@ const AGE_BRACKETS = [
   { id: "2y+", label: "+ de 2 ans", desc: "2 ans et + (seniors)", minD: 730, maxD: 99999 }
 ];
 
+/* Filtres Lapins repensés : la liste n'affiche par défaut qu'une barre
+   compacte (recherche + bouton Filtres). Tous les critères vivent dans
+   cette feuille du bas, qui s'applique immédiatement au fur et à mesure
+   des choix, sans jamais masquer la liste derrière des cartes permanentes. */
+const STAGE_LABELS = { all: "Tous", female: "♀ Femelles", male: "♂ Mâles", gest: "🤰 Gestantes", lact: "🤱 Allaitantes", mature: "🐇 Reproducteurs (≥5m)", young: "🌱 Jeunes (<5m)", treat: "💊 Sous soin / Délai" };
+function lapinFilterSheet() {
+  const t = today();
+  const baseList = ui.st === "archives" ? S.rabbits.filter((r) => !isActive(r)) : ui.st === "all" ? S.rabbits : S.rabbits.filter(isActive);
+  const counts = {
+    all: baseList.length,
+    male: baseList.filter((r) => r.sex === "Male").length,
+    female: baseList.filter((r) => r.sex === "Female").length,
+    gest: baseList.filter((r) => S.matings.some((m) => m.female === r.id && ["Accouplé", "Gestation confirmée"].includes(m.status))).length,
+    lact: baseList.filter((r) => S.matings.some((m) => m.female === r.id && m.status === "Mise bas" && m.birthDate && diff(m.birthDate, t) <= WEANING)).length,
+    mature: baseList.filter((r) => age(r) >= MATURE_DAYS).length,
+    young: baseList.filter((r) => { const a = age(r); return a >= 0 && a < MATURE_DAYS; }).length,
+    treat: baseList.filter((r) => underWithdrawal(r.id) != null).length
+  };
+  const breeds = Array.from(new Set(S.rabbits.map((r) => (r.breed || "").trim()).filter(Boolean))).sort();
+  const chip = (fk, fv, label, active, badge) => `<button type="button" class="chip-btn" data-fk="${fk}" data-fv="${esc(fv)}" aria-pressed="${active}"><span>${label}</span>${badge != null ? `<span class="badge">${badge}</span>` : ""}</button>`;
+  const sortOpts = [["age_desc", "Âge : du + âgé au + jeune"], ["age_asc", "Âge : du + jeune au + âgé"], ["weight_desc", "Poids : du + lourd au + léger"], ["weight_asc", "Poids : du + léger au + lourd"], ["name_asc", "Nom (A → Z)"], ["name_desc", "Nom (Z → A)"], ["cage_asc", "Numéro de cage"]];
+  sheet("Filtres", `<div class="fsec">
+    <div class="fsec"><h3>Statut</h3><div class="fchips">${[["actifs", "Actifs"], ["archives", `Sortis / Externes`], ["all", "Tous"]].map(([v, l]) => chip("st", v, l, ui.st === v)).join("")}</div></div>
+    <div class="fsec"><h3>Stade</h3><div class="fchips">${Object.entries(STAGE_LABELS).map(([v, l]) => chip("stage", v, l, ui.stage === v, counts[v] ?? counts.all)).join("")}</div></div>
+    <div class="fsec"><h3>Race</h3><div class="fchips">${chip("breed", "all", "Toutes les races", !ui.breed || ui.breed === "all")}${breeds.map((b) => chip("breed", b, esc(b), ui.breed === b)).join("")}</div></div>
+    <div class="fsec"><h3>Tranche d'âge</h3><div class="fchips">${chip("ageBracket", "all", "Tous les âges", !ui.ageBracket || ui.ageBracket === "all")}${AGE_BRACKETS.map((b) => { const n = baseList.filter((r) => { const a = age(r); return a >= b.minD && a <= b.maxD; }).length; return chip("ageBracket", ui.ageBracket === b.id ? "all" : b.id, `${b.label} (${n})`, ui.ageBracket === b.id); }).join("")}</div></div>
+    <div class="fsec"><h3>Âge précis (mois)</h3><div class="fgrid2"><div class="field"><label for="fsMinAge">Âge min</label><input type="number" id="fsMinAge" step="0.5" min="0" placeholder="ex. 3" value="${esc(ui.minAgeM || "")}"></div><div class="field"><label for="fsMaxAge">Âge max</label><input type="number" id="fsMaxAge" step="0.5" min="0" placeholder="ex. 6" value="${esc(ui.maxAgeM || "")}"></div></div></div>
+    <div class="fsec"><h3>Poids précis (kg)</h3><div class="fgrid2"><div class="field"><label for="fsMinWeight">Poids min</label><input type="number" id="fsMinWeight" step="0.1" min="0" placeholder="ex. 2.2" value="${esc(ui.minWeight || "")}"></div><div class="field"><label for="fsMaxWeight">Poids max</label><input type="number" id="fsMaxWeight" step="0.1" min="0" placeholder="ex. 4.0" value="${esc(ui.maxWeight || "")}"></div></div></div>
+    <div class="fsec"><h3>Tri</h3><div class="field"><label for="fsSort">Trier la liste</label><select id="fsSort">${sortOpts.map(([v, l]) => `<option value="${v}" ${ui.sort === v ? "selected" : ""}>${l}</option>`).join("")}</select></div></div>
+    <div class="fsec"><h3>Affichage</h3><div class="fchips">${chip("viewMode", "grid", "Cartes", ui.viewMode !== "table")}${chip("viewMode", "table", "Tableau compact", ui.viewMode === "table")}</div></div>
+    <div class="actions" style="justify-content:space-between;margin-top:8px"><button type="button" class="btn ghost" id="fsReset" style="color:var(--bad)">Réinitialiser</button><button type="button" class="btn pri" id="fsApply">Voir les résultats</button></div>
+  </div>`);
+  const sh = document.querySelector("#modal .sheet");
+  if (!sh) return;
+  sh.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-fk]"); if (!b) return;
+    ui[b.dataset.fk] = b.dataset.fv; render(); lapinFilterSheet();
+  });
+  const applyNums = () => {
+    ui.minAgeM = $("#fsMinAge")?.value || ""; ui.maxAgeM = $("#fsMaxAge")?.value || "";
+    ui.minWeight = $("#fsMinWeight")?.value || ""; ui.maxWeight = $("#fsMaxWeight")?.value || "";
+    ui.sort = $("#fsSort")?.value || ui.sort;
+  };
+  ["fsMinAge", "fsMaxAge", "fsMinWeight", "fsMaxWeight"].forEach((id) => { const el = document.getElementById(id); if (el) el.addEventListener("change", () => { applyNums(); render(); lapinFilterSheet(); }); });
+  const sortEl = document.getElementById("fsSort"); if (sortEl) sortEl.addEventListener("change", () => { applyNums(); render(); lapinFilterSheet(); });
+  const applyBtn = document.getElementById("fsApply"); if (applyBtn) applyBtn.addEventListener("click", () => { applyNums(); closeModal(); render(); });
+  const resetBtn = document.getElementById("fsReset"); if (resetBtn) resetBtn.addEventListener("click", () => { closeModal(); ui.q = ""; ui.sex = "all"; ui.stage = "all"; ui.breed = "all"; ui.st = "actifs"; ui.ageBracket = "all"; ui.minAgeM = ""; ui.maxAgeM = ""; ui.minWeight = ""; ui.maxWeight = ""; ui.advFilters = ""; render(); });
+}
+
 VIEWS.lapins = () => {
   const q = (ui.q || "").trim().toLowerCase();
   const t = today();
@@ -2077,6 +2140,17 @@ VIEWS.lapins = () => {
 
   const allBreeds = Array.from(new Set(S.rabbits.map((r) => (r.breed || "").trim()).filter(Boolean))).sort();
   const hasActiveFilters = (ui.stage && ui.stage !== "all") || (ui.sex && ui.sex !== "all") || (ui.breed && ui.breed !== "all") || ui.st !== "actifs" || (ui.ageBracket && ui.ageBracket !== "all") || ui.minAgeM !== "" || ui.maxAgeM !== "" || ui.minWeight !== "" || ui.maxWeight !== "" || q;
+  // Pastilles des filtres actifs : seules elles restent visibles sous la barre.
+  const activeChips = [];
+  if (ui.stage && ui.stage !== "all") activeChips.push([STAGE_LABELS[ui.stage] || ui.stage, "stage"]);
+  if (ui.sex && ui.sex !== "all") activeChips.push([ui.sex === "Female" ? "♀ Femelles" : ui.sex === "Male" ? "♂ Mâles" : "Sexe indéterminé", "sex"]);
+  if (ui.breed && ui.breed !== "all") activeChips.push([`Race : ${ui.breed}`, "breed"]);
+  if (ui.st === "archives") activeChips.push(["Sortis / Externes", "st"]);
+  if (ui.st === "all") activeChips.push(["Tous les statuts", "st"]);
+  if (ui.ageBracket && ui.ageBracket !== "all") { const _br = AGE_BRACKETS.find((b) => b.id === ui.ageBracket); activeChips.push([_br ? `Âge : ${_br.label}` : "Tranche d'âge", "ageBracket"]); }
+  if (ui.minAgeM !== "" || ui.maxAgeM !== "") activeChips.push([`Âge ${ui.minAgeM !== "" ? "≥ " + ui.minAgeM + " m" : ""}${ui.maxAgeM !== "" ? " ≤ " + ui.maxAgeM + " m" : ""}`.trim(), "ageRange"]);
+  if (ui.minWeight !== "" || ui.maxWeight !== "") activeChips.push([`Poids ${ui.minWeight !== "" ? "≥ " + ui.minWeight + " kg" : ""}${ui.maxWeight !== "" ? " ≤ " + ui.maxWeight + " kg" : ""}`.trim(), "weightRange"]);
+  const activeFilterCount = activeChips.length;
 
   afterHooks.push(() => {
     const input = $("#q");
@@ -2089,20 +2163,8 @@ VIEWS.lapins = () => {
         if (next) { next.focus(); next.setSelectionRange(pos, pos); }
       });
     }
-    const breedSel = $("#filterBreed");
-    if (breedSel) breedSel.addEventListener("change", (e) => { ui.breed = e.target.value; render(); });
-    const sortSel = $("#filterSort");
-    if (sortSel) sortSel.addEventListener("change", (e) => { ui.sort = e.target.value; render(); });
-
-    // Inputs d'âge et de poids saisis par l'utilisateur
-    const inpMinAge = $("#inpMinAge");
-    if (inpMinAge) inpMinAge.addEventListener("input", (e) => { ui.minAgeM = e.target.value; render(); });
-    const inpMaxAge = $("#inpMaxAge");
-    if (inpMaxAge) inpMaxAge.addEventListener("input", (e) => { ui.maxAgeM = e.target.value; render(); });
-    const inpMinWeight = $("#inpMinWeight");
-    if (inpMinWeight) inpMinWeight.addEventListener("input", (e) => { ui.minWeight = e.target.value; render(); });
-    const inpMaxWeight = $("#inpMaxWeight");
-    if (inpMaxWeight) inpMaxWeight.addEventListener("input", (e) => { ui.maxWeight = e.target.value; render(); });
+    // Les autres critères (race, tri, âge, poids…) vivent dans la feuille
+    // "Filtres" : leurs écouteurs y sont attachés à l'ouverture.
   });
 
   return `
@@ -2117,176 +2179,21 @@ VIEWS.lapins = () => {
     </div>
   </div>
 
-  <!-- Barre d'outils et filtres principaux en haut -->
-  <div class="toolbar" style="gap:10px">
-    <label class="search" style="flex:1 1 220px">
+  <!-- Barre de filtres repensée : recherche + un seul bouton Filtres.
+       Tout le reste est dans la feuille "Filtres" ; seuls les filtres
+       actifs apparaissent, sous forme de pastilles supprimables. -->
+  <div class="filter-bar">
+    <label class="search" style="flex:1">
       ${ICON.search}
       <input id="q" type="search" placeholder="Rechercher par nom, cage, race…" value="${esc(ui.q)}" aria-label="Rechercher">
       ${ui.q ? `<button type="button" data-act="ui" data-k="q" data-v="" style="border:none;background:none;cursor:pointer;color:var(--muted);padding:0" title="Effacer">${ICON.x}</button>` : ""}
     </label>
-
-    <!-- Filtre par Race -->
-    <select id="filterBreed" class="filter-select" aria-label="Filtrer par race">
-      <option value="all" ${!ui.breed || ui.breed === "all" ? "selected" : ""}>Toutes les races (${counts.all})</option>
-      ${allBreeds.map((b) => `<option value="${esc(b)}" ${ui.breed === b ? "selected" : ""}>Race : ${esc(b)}</option>`).join("")}
-    </select>
-
-    <!-- Filtre par Statut (Actifs / Archivés) -->
-    <div class="seg" role="group">
-      <button type="button" data-act="ui" data-k="st" data-v="actifs" aria-pressed="${ui.st === 'actifs'}">Actifs</button>
-      <button type="button" data-act="ui" data-k="st" data-v="archives" aria-pressed="${ui.st === 'archives'}">Sortis / Externes (${allArch.length})</button>
-      <button type="button" data-act="ui" data-k="st" data-v="all" aria-pressed="${ui.st === 'all'}">Tous</button>
-    </div>
-
-    <!-- Sélecteur de Tri enrichi (Âge, Poids, Nom, Cage) -->
-    <select id="filterSort" class="filter-select" aria-label="Trier la liste">
-      <option value="age_desc" ${ui.sort === "age_desc" ? "selected" : ""}>Âge : du + âgé au + jeune</option>
-      <option value="age_asc" ${ui.sort === "age_asc" ? "selected" : ""}>Âge : du + jeune au + âgé</option>
-      <option value="weight_desc" ${ui.sort === "weight_desc" ? "selected" : ""}>Poids : du + lourd au + léger</option>
-      <option value="weight_asc" ${ui.sort === "weight_asc" ? "selected" : ""}>Poids : du + léger au + lourd</option>
-      <option value="name_asc" ${ui.sort === "name_asc" ? "selected" : ""}>Nom (A → Z)</option>
-      <option value="name_desc" ${ui.sort === "name_desc" ? "selected" : ""}>Nom (Z → A)</option>
-      <option value="cage_asc" ${ui.sort === "cage_asc" ? "selected" : ""}>Numéro de cage</option>
-    </select>
-
-    <!-- Bascule d'affichage Grille / Tableau -->
-    <div class="view-toggle" role="group" aria-label="Mode d'affichage">
-      <button type="button" data-act="ui" data-k="viewMode" data-v="grid" aria-pressed="${ui.viewMode !== 'table'}" title="Vue Cartes">${ICON.grid}</button>
-      <button type="button" data-act="ui" data-k="viewMode" data-v="table" aria-pressed="${ui.viewMode === 'table'}" title="Vue Tableau compact">${ICON.list}</button>
-    </div>
-
-    ${hasActiveFilters ? `
-      <button class="btn sm ghost" data-act="resetFilters" style="color:var(--bad);gap:4px">
-        ${ICON.refresh}<span>Réinitialiser</span>
-      </button>
-    ` : ""}
+    <button type="button" class="filter-btn" data-act="filterSheet" aria-label="Ouvrir les filtres">${ICON.filter}<span>Filtres</span>${activeFilterCount ? `<span class="badge">${activeFilterCount}</span>` : ""}</button>
   </div>
-
-  <!-- Puces d'état rapides (Chips bar) -->
-  <div class="chip-bar" role="toolbar" aria-label="Filtres rapides d'élevage">
-    <button type="button" class="chip-btn" data-act="ui" data-k="stage" data-v="all" aria-pressed="${!ui.stage || ui.stage === 'all'}">
-      <span>Tous</span>
-      <span class="badge">${counts.all}</span>
-    </button>
-    <button type="button" class="chip-btn" data-act="ui" data-k="stage" data-v="female" aria-pressed="${ui.stage === 'female'}">
-      <span>♀ Femelles</span>
-      <span class="badge">${counts.female}</span>
-    </button>
-    <button type="button" class="chip-btn" data-act="ui" data-k="stage" data-v="male" aria-pressed="${ui.stage === 'male'}">
-      <span>♂ Mâles</span>
-      <span class="badge">${counts.male}</span>
-    </button>
-    <button type="button" class="chip-btn" data-act="ui" data-k="stage" data-v="gest" aria-pressed="${ui.stage === 'gest'}">
-      <span>🤰 Gestantes</span>
-      <span class="badge">${counts.gest}</span>
-    </button>
-    <button type="button" class="chip-btn" data-act="ui" data-k="stage" data-v="lact" aria-pressed="${ui.stage === 'lact'}">
-      <span>🤱 Allaitantes</span>
-      <span class="badge">${counts.lact}</span>
-    </button>
-    <button type="button" class="chip-btn" data-act="ui" data-k="stage" data-v="mature" aria-pressed="${ui.stage === 'mature'}">
-      <span>🐇 Reproducteurs (≥5m)</span>
-      <span class="badge">${counts.mature}</span>
-    </button>
-    <button type="button" class="chip-btn" data-act="ui" data-k="stage" data-v="young" aria-pressed="${ui.stage === 'young'}">
-      <span>🌱 Jeunes (<5m)</span>
-      <span class="badge">${counts.young}</span>
-    </button>
-    <button type="button" class="chip-btn" data-act="ui" data-k="stage" data-v="treat" aria-pressed="${ui.stage === 'treat'}">
-      <span>💊 Sous soin / Délai</span>
-      <span class="badge">${counts.treat}</span>
-    </button>
-  </div>
-
-  <!-- Correctif espace : les deux grands panneaux (répartition par âge + filtres
-       précis) occupaient deux cartes entières même fermés. Ils sont maintenant
-       cachés derrière un seul petit bouton, et n'occupent plus aucune place tant
-       qu'on ne les ouvre pas (sauf si un filtre avancé est déjà actif). -->
-  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
-    <button type="button" class="btn sm ghost" data-act="ui" data-k="advFilters" data-v="${ui.advFilters ? "" : "1"}">${ui.advFilters ? "Masquer les filtres avancés" : "Filtres avancés"}</button>
-    ${((ui.ageBracket && ui.ageBracket !== 'all') || ui.minAgeM !== "" || ui.maxAgeM !== "" || ui.minWeight !== "" || ui.maxWeight !== "") ? `<span class="chip warn sm">Filtre avancé actif</span>` : ""}
-    <span class="hint">Répartition par âge, âge et poids précis</span>
-  </div>
-  <div style="${(ui.advFilters || (ui.ageBracket && ui.ageBracket !== 'all') || ui.minAgeM !== "" || ui.maxAgeM !== "" || ui.minWeight !== "" || ui.maxWeight !== "") ? "" : "display:none"}">
-  <!-- 1. SECTION REPLIABLE : 📊 Répartition par tranche d'âge (7 tranches) -->
-  <details class="card" style="padding:10px 14px;background:var(--surface);margin-bottom:8px" ${ui.ageBracket && ui.ageBracket !== 'all' ? "open" : ""}>
-    <summary style="cursor:pointer;font-weight:700;display:flex;justify-content:space-between;align-items:center;user-select:none">
-      <div style="display:flex;align-items:center;gap:8px">
-        ${ICON.tree}
-        <span>📊 Répartition par tranche d'âge (7 tranches)</span>
-        <span class="chip sm ok">${baseList.length} lapins</span>
-      </div>
-      <svg class="chevron-rot" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
-    </summary>
-    <div style="margin-top:10px">
-      <p class="hint" style="margin-bottom:8px">Cliquez sur une tranche d'âge pour filtrer automatiquement la liste :</p>
-      <div class="grid g3" style="gap:8px">
-        ${ageDistribution.map((st) => {
-          const isSelected = ui.ageBracket === st.id;
-          return `
-          <div class="tile" style="cursor:pointer;border-color:${isSelected ? 'var(--sage)' : 'var(--line)'};background:${isSelected ? 'var(--sage-soft)' : 'var(--surface-2)'};padding:8px 10px;border-radius:10px;transition:all .15s ease" data-act="ui" data-k="ageBracket" data-v="${isSelected ? 'all' : st.id}" title="Filtrer pour ${esc(st.label)}">
-            <div style="display:flex;justify-content:space-between;align-items:flex-start">
-              <b style="font-size:0.85rem;color:${isSelected ? 'var(--sage-soft-ink)' : 'inherit'}">${esc(st.label)}</b>
-              <span class="v" style="font-size:1.15rem;color:${isSelected ? 'var(--sage)' : st.count ? 'var(--ink)' : 'var(--muted)'}">${st.count}</span>
-            </div>
-            <div style="display:flex;justify-content:space-between;font-size:0.72rem;color:var(--muted);margin-top:2px">
-              <span>${esc(st.desc)}</span>
-              ${st.count ? `<span style="font-weight:700">${st.males}♂ ${st.females}♀</span>` : "<span>0</span>"}
-            </div>
-            <div class="bar" style="margin-top:4px;height:4px">
-              <i style="width:${st.percent}%;background:${isSelected ? 'var(--sage)' : 'var(--clay)'}"></i>
-            </div>
-          </div>
-          `;
-        }).join("")}
-      </div>
-    </div>
-  </details>
-
-  <!-- 2. PANNEAU REPLIABLE : ⚖️ Filtres précis (Âge min/max et Poids min/max) -->
-  <details class="card" style="padding:10px 14px;background:var(--surface-2);border-color:var(--line);margin-bottom:8px" ${(ui.minAgeM !== "" || ui.maxAgeM !== "" || ui.minWeight !== "" || ui.maxWeight !== "") ? "open" : ""}>
-    <summary style="cursor:pointer;font-weight:700;display:flex;justify-content:space-between;align-items:center;user-select:none">
-      <div style="display:flex;align-items:center;gap:6px;font-size:0.9rem">
-        ${ICON.scale}
-        <span>⚖️ Filtres précis (Âge min/max et Poids min/max)</span>
-        ${(ui.minAgeM !== "" || ui.maxAgeM !== "" || ui.minWeight !== "" || ui.maxWeight !== "") ? `<span class="chip warn sm">Actif</span>` : ""}
-      </div>
-      <svg class="chevron-rot" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
-    </summary>
-    <div style="margin-top:10px">
-      <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(130px, 1fr));gap:10px">
-        <div class="field">
-          <label style="font-size:0.75rem">Âge min (mois)</label>
-          <input type="number" id="inpMinAge" step="0.5" min="0" placeholder="ex. 3" value="${esc(ui.minAgeM || '')}" style="padding:6px 9px;font-size:0.85rem">
-        </div>
-        <div class="field">
-          <label style="font-size:0.75rem">Âge max (mois)</label>
-          <input type="number" id="inpMaxAge" step="0.5" min="0" placeholder="ex. 6" value="${esc(ui.maxAgeM || '')}" style="padding:6px 9px;font-size:0.85rem">
-        </div>
-        <div class="field">
-          <label style="font-size:0.75rem">Poids min (kg)</label>
-          <input type="number" id="inpMinWeight" step="0.1" min="0" placeholder="ex. 2.2" value="${esc(ui.minWeight || '')}" style="padding:6px 9px;font-size:0.85rem">
-        </div>
-        <div class="field">
-          <label style="font-size:0.75rem">Poids max (kg)</label>
-          <input type="number" id="inpMaxWeight" step="0.1" min="0" placeholder="ex. 4.0" value="${esc(ui.maxWeight || '')}" style="padding:6px 9px;font-size:0.85rem">
-        </div>
-      </div>
-      ${(ui.minAgeM !== "" || ui.maxAgeM !== "" || ui.minWeight !== "" || ui.maxWeight !== "") ? `
-        <div style="margin-top:8px;text-align:right">
-          <button class="btn sm ghost" data-act="resetCustomMetrics" style="color:var(--bad);padding:2px 6px;font-size:0.76rem">
-            Effacer âge/poids
-          </button>
-        </div>
-      ` : ""}
-    </div>
-  </details>
-
-  </div>
+  ${activeChips.length ? `<div class="active-chips" aria-label="Filtres actifs">${activeChips.map(([label, k]) => `<button type="button" class="active-chip" data-act="clearFilter" data-k="${k}" title="Retirer ce filtre"><span>${esc(label)}</span><i aria-hidden="true">×</i></button>`).join("")}</div>` : ""}
   <!-- Résumé du filtrage -->
   <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.82rem;color:var(--muted);padding:0 2px">
     ${(() => { const _pages = Math.max(1, Math.ceil(list.length / 24)); const _pg = Math.max(1, Math.min(_pages, Number(ui.rpage) || 1)); ui.rpage = _pg; const _shown = list.slice((_pg - 1) * 24, _pg * 24).length; return `<span>Affichage de <b>${_shown}</b> lapin${_shown > 1 ? "s" : ""} sur cette page, <b>${list.length}</b> au total${_pages > 1 ? ` — Page ${_pg} / ${_pages}` : ""}</span><span style="display:flex;gap:6px;align-items:center">${_pages > 1 ? `<button class="btn sm ghost" data-act="ui" data-k="rpage" data-v="${_pg - 1}" ${_pg <= 1 ? "disabled" : ""}>← Précédent</button><button class="btn sm ghost" data-act="ui" data-k="rpage" data-v="${_pg + 1}" ${_pg >= _pages ? "disabled" : ""}>Suivant →</button>` : ""}</span>`; })()}
-    ${hasActiveFilters ? `<span class="chip warn">Filtre actif</span>` : ""}
   </div>
 
   <!-- Contenu : Cartes ou Tableau -->
@@ -3982,6 +3889,8 @@ const A = {
   unauthorizedDomainModal: () => unauthorizedDomainModal(),
   params: () => { form({ title: "Paramètres d'élevage", values: { gestation: GESTATION, mature: MATURE_DAYS, weaning: WEANING, fatten: FATTEN_DAYS }, fields: [{ k: "gestation", label: "Gestation (jours)", type: "number", min: 1, req: true }, { k: "mature", label: "Maturité (jours)", type: "number", min: 1, req: true }, { k: "weaning", label: "Sevrage (jours)", type: "number", min: 1, req: true }, { k: "fatten", label: "Engraissement (jours)", type: "number", min: 1, req: true }], onSubmit: async (v) => { localStorage.setItem("abvfarm_params", JSON.stringify(v)); GESTATION = Number(v.gestation); MATURE_DAYS = Number(v.mature); WEANING = Number(v.weaning); FATTEN_DAYS = Number(v.fatten); for (const _m of S.matings.filter((x) => ["Accouplé", "Gestation confirmée"].includes(x.status))) await save("mating", { ..._m, due: addDays(_m.date, GESTATION) }); for (const _b of S.batches.filter((x) => ["Actif", "Quarantaine"].includes(x.status))) await save("batch", { ..._b, target: addDays(_b.weaning, FATTEN_DAYS) }); closeModal(); toast("Paramètres enregistrés et appliqués aux gestations et lots en cours"); render(); return true; } }); },
   resetFilters: () => { ui.q = ""; ui.sex = "all"; ui.stage = "all"; ui.breed = "all"; ui.st = "actifs"; ui.ageBracket = "all"; ui.minAgeM = ""; ui.maxAgeM = ""; ui.minWeight = ""; ui.maxWeight = ""; ui.advFilters = ""; render(); },
+  filterSheet: () => lapinFilterSheet(),
+  clearFilter: (el) => { const k = el.dataset.k; if (k === "ageRange") { ui.minAgeM = ""; ui.maxAgeM = ""; } else if (k === "weightRange") { ui.minWeight = ""; ui.maxWeight = ""; } else if (k === "st") { ui.st = "actifs"; } else if (k === "stage") { ui.stage = "all"; } else if (k === "sex") { ui.sex = "all"; } else if (k === "breed") { ui.breed = "all"; } else if (k === "ageBracket") { ui.ageBracket = "all"; } render(); },
   resetCustomMetrics: () => { ui.minAgeM = ""; ui.maxAgeM = ""; ui.minWeight = ""; ui.maxWeight = ""; render(); },
   newrabbit: () => rabbitForm(), editrabbit: (el) => rabbitForm(rab(el.dataset.id)),
   status: (el) => { const r = rab(el.dataset.id); form({ title: `Statut de ${r.name}`, values: r, fields: [{ k: "status", label: "Statut", type: "select", opts: STATUSES, full: true, hint: "Un animal vendu, abattu ou décédé passe dans la rubrique « Sortis ». Une vente exige un prix, sinon aucune recette n'est créée." }, { k: "exitDate", label: "Date de sortie (vente, décès, abattage, don)", type: "date", def: today() }, { k: "exitPrice", label: "Prix de vente (FCFA) — obligatoire si Vendu", type: "number", min: 0, hint: "Obligatoire pour une vente : le prix crée la recette en finances. Laisser vide n'est possible que pour un don, un décès ou un abattage." }, { k: "exitBuyer", label: "Acheteur / destinataire", ph: "ex. Client marché, voisin" }, { k: "exitCause", label: "Cause / motif", full: true, ph: "ex. Vente chair, maladie, don" }], onSubmit: async (v) => { const isExit = ["Vendu", "Mort", "Abattu", "Donné"].includes(v.status); if ((v.status === "Vendu" || v.status === "Abattu") && r.status !== v.status) { const wd = underWithdrawal(r.id); if (wd) { toast(`⛔ Vente / abattage interdit : délai d'attente jusqu'au ${fmtDate(wd)} (traitement en cours).`); return false; } } /* Correctif vente : avant, le prix était optionnel, donc un lapin pouvait être déclaré vendu sans prix ni recette en finances (12 cas dans l'export du 2 novembre). Dorénavant, une vente sans prix > 0 est refusée, et le formulaire reste ouvert avec l'erreur affichée. */ if (v.status === "Vendu" && !(Number(v.exitPrice) > 0)) { toast("⛔ Prix de vente obligatoire : indiquez le prix auquel ce lapin a été vendu (FCFA)."); return false; } const obj = { ...r, status: v.status, exitDate: isExit ? (v.exitDate || today()) : "", exitPrice: isExit ? (Number(v.exitPrice) || 0) : 0, exitBuyer: isExit ? (v.exitBuyer || "") : "", exitCause: isExit ? (v.exitCause || "") : "" }; const ok = await save("rabbit", obj); if (ok) { if (isExit) { for (const _rem of S.reminders.filter((x) => x.rabbitId === r.id && !x.done)) await save("reminder", { ..._rem, done: true }); for (const _m of S.matings.filter((x) => (x.male === r.id || x.female === r.id) && ["Accouplé", "Gestation confirmée"].includes(x.status))) await save("mating", { ..._m, status: "Échoué", notes: ((_m.notes || "") + ` [Clôturée automatiquement : animal sorti le ${fmtDate(v.exitDate || today())}]`).trim() }); } const _ltx = saleTxForRabbit(r.id); if (v.status === "Vendu" && Number(v.exitPrice) > 0) { if (_ltx) await save("tx", { ..._ltx, amount: Number(v.exitPrice), date: v.exitDate || today(), label: `Vente ${r.name}${v.exitBuyer ? " → " + v.exitBuyer : ""}`, cat: "Vente chair", type: "in", rabbitId: r.id }); else await save("tx", { type: "in", cat: "Vente chair", amount: Number(v.exitPrice), date: v.exitDate || today(), label: `Vente ${r.name}${v.exitBuyer ? " → " + v.exitBuyer : ""}`, rabbitId: r.id }); } else if (_ltx) { /* Sortie d'une vente, ou prix ramené à 0 : la recette liée ne doit pas rester orpheline en finances. */ await removeDoc("tx", _ltx.id); } toast("Statut mis à jour"); } return ok; } }); },

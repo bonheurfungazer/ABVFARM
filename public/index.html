@@ -654,6 +654,114 @@ let cloudFirstSnapshotPending = false;
    lors d'une simple navigation, ce qui figeait la pastille sur « Fusion en attente ». */
 let cloudSnapshotEver = false;
 let cloudLoginError = "";
+/* Volet B — état d'écoute cloud (2026-11-04, affichage seul) : ces variables
+   ne changent AUCUNE logique de synchronisation des données ; elles ne font
+   que rendre visibles les états d'absence (écoute absente, cache sans serveur,
+   erreur, persistance). Noms figés, réutilisés tels quels par le volet C. */
+const LISTENER_ERROR_KEY = "abvfarm_last_listener_error";
+let listenerInstalledAt = null;
+let listenerLastServerAt = null;
+let listenerCacheCount = 0;
+let listenerCacheLastAt = null;
+let listenerLastError = null;
+try { listenerLastError = JSON.parse(localStorage.getItem(LISTENER_ERROR_KEY) || "null"); } catch (e) { listenerLastError = null; }
+if (!listenerLastError || typeof listenerLastError !== "object") listenerLastError = null;
+let listenerLastEarlyReturn = null;
+let listenerPersistenceError = null;
+let listenerAttempts = 0;
+let listenerStopped = false;
+/* Volet C — réinstallation gardée + chien de garde (2026-11-04) : génération
+   (invalide les rappels d'une ancienne installation), uid de l'écoute installée,
+   et identifiants des timers de réinstallation / chien de garde (une seule
+   tentative en vol, cap de 5 tentatives — voir ensureCloudSyncListener). */
+let listenerGeneration = 0;
+let listenerUid = null;
+let listenerRetryTimer = null;
+let listenerWatchdogTimer = null;
+function saveListenerLastError() {
+  try { if (listenerLastError) localStorage.setItem(LISTENER_ERROR_KEY, JSON.stringify(listenerLastError)); else localStorage.removeItem(LISTENER_ERROR_KEY); } catch (e) {}
+}
+function setListenerLastError(text) {
+  listenerLastError = { text: String(text || "erreur de synchronisation cloud"), at: Date.now() };
+  saveListenerLastError();
+}
+function clearListenerLastError() { listenerLastError = null; saveListenerLastError(); }
+function fmtHHMM(ts) {
+  if (!ts) return "";
+  try { return new Date(ts).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }); } catch (e) { return ""; }
+}
+/* Volet B — résumé court de l'état d'écoute, sans HTML non échappé (les
+   appelants passent le résultat par esc() avant insertion). Ordre des cas :
+   arrêtée > erreur > serveur OK > cache sans serveur > installée > absente. */
+function listenerStatusText() {
+  if (listenerStopped) return `arrêtée après ${listenerAttempts} échec${listenerAttempts > 1 ? "s" : ""}`;
+  if (listenerLastError) return `erreur ${listenerLastError.text}`;
+  if (listenerLastServerAt) return `serveur OK à ${fmtHHMM(listenerLastServerAt)}`;
+  if (listenerCacheCount > 0) return `${listenerCacheCount} cache, 0 serveur`;
+  if (unsubscribeSnapshot) {
+    if (listenerInstalledAt) { const _s = Math.max(0, Math.floor((Date.now() - listenerInstalledAt) / 1000)); return `installée depuis ${_s}s`; }
+    return "installée";
+  }
+  if (listenerLastEarlyReturn) return `absente (${listenerLastEarlyReturn.reason})`;
+  return "absente";
+}
+/* Volet C — helpers de réinstallation gardée. cancelListenerTimers() annule les
+   deux timers et remet leurs identifiants à null. canReinstallListener() est la
+   garde commune (erreur, chien de garde, online, retry) : jamais de réinstallation
+   si l'utilisateur n'est plus connecté en session, si firebaseAuth.currentUser est
+   null, si l'uid demandé diffère du compte connecté, ou si l'uid diffère de celui
+   de l'écoute installée (listenerUid null = aucune écoute installée : autorisé).
+   La branche auth-null reste l'autorité : elle désabonne et annule. */
+function cancelListenerTimers() {
+  if (listenerRetryTimer) { clearTimeout(listenerRetryTimer); listenerRetryTimer = null; }
+  if (listenerWatchdogTimer) { clearTimeout(listenerWatchdogTimer); listenerWatchdogTimer = null; }
+}
+function canReinstallListener(uid) {
+  if (!userSession.isLoggedIn) return false;
+  const _cu = window.firebaseAuth && window.firebaseAuth.currentUser;
+  if (!_cu || !_cu.uid) return false;
+  if (uid && _cu.uid !== uid) return false;
+  if (listenerUid && _cu.uid !== listenerUid) return false;
+  return true;
+}
+/* Volet C — planifie UNE réinstallation après backoff (tentative 1 → 5 s,
+   2 → 15 s, 3+ → 30 s). Annule tout timer de réinstallation précédent : une
+   seule tentative en vol. Une réinstallation planifiée qui se déclenche alors
+   qu'une écoute est déjà installée ne fait rien. */
+function scheduleListenerRetry(uid) {
+  if (listenerRetryTimer) { clearTimeout(listenerRetryTimer); listenerRetryTimer = null; }
+  const _delay = listenerAttempts === 1 ? 5000 : (listenerAttempts === 2 ? 15000 : 30000);
+  listenerRetryTimer = setTimeout(() => {
+    listenerRetryTimer = null;
+    if (listenerStopped) return;
+    if (unsubscribeSnapshot) return;
+    if (!canReinstallListener(uid)) return;
+    ensureCloudSyncListener(uid);
+  }, _delay);
+}
+/* Volet C — chien de garde à 30 s après une installation réussie. Ne se réarme
+   jamais tout seul. Au déclenchement, ne fait rien si : écoute arrêtée, génération
+   périmée, désabonnée, ou snapshot serveur arrivé depuis l'installation
+   (listenerLastServerAt a changé par rapport à la valeur mémorisée). Sinon
+   (0 snapshot serveur depuis l'installation, cache compté ou rien du tout) :
+   UNE SEULE réinstallation + UNE SEULE sonde probeServerContact(), sans boucle. */
+function armListenerWatchdog(gen, serverAtInstall, cacheAtInstall) {
+  if (listenerWatchdogTimer) { clearTimeout(listenerWatchdogTimer); listenerWatchdogTimer = null; }
+  listenerWatchdogTimer = setTimeout(() => {
+    listenerWatchdogTimer = null;
+    if (listenerStopped) return;
+    if (gen !== listenerGeneration) return;
+    if (!unsubscribeSnapshot) return;
+    if (listenerLastServerAt !== serverAtInstall) return;
+    void cacheAtInstall;
+    if (!canReinstallListener(listenerUid)) return;
+    cancelListenerTimers();
+    try { unsubscribeSnapshot(); } catch (e) {}
+    unsubscribeSnapshot = null;
+    ensureCloudSyncListener(listenerUid);
+    probeServerContact();
+  }, 30000);
+}
 /* Section 3 : verrou retryPendingSync (voir retryPendingSync ci-dessous). */
 let retryPendingSyncRunning = false;
 let retryPendingSyncQueued = false;
@@ -1060,6 +1168,7 @@ function initFirebaseSync() {
     if (db) {
       db.enablePersistence({ synchronizeTabs: true }).catch((err) => {
         console.log("Firestore offline persistence notice:", err.code);
+        listenerPersistenceError = (err && (err.code || err.message)) || String(err);
       });
     }
 
@@ -1103,6 +1212,10 @@ function initFirebaseSync() {
           try { unsubscribeSnapshot(); } catch (e) {}
           unsubscribeSnapshot = null;
         }
+        /* Volet C : invalide les rappels d'une ancienne installation et annule
+           les timers en vol ; la branche auth-null reste l'autorité. */
+        listenerGeneration += 1;
+        cancelListenerTimers();
         cloudSyncActive = false;
         cloudSnapshotEver = false;
         updateUserUI();
@@ -1115,20 +1228,88 @@ function initFirebaseSync() {
 
 let unsubscribeSnapshot = null;
 
+/* Volet A — sonde serveur (2026-11-04) : lecture SEULE, sans fusion ni envoi.
+   probeServerContact() lit users/{uid}/cheptel avec source:"server" et ne fait
+   rien d'autre : elle ne modifie aucune donnée locale, ne vide aucune file et
+   ne change aucun indicateur de snapshot. La pastille ne verdit donc jamais à
+   cause de la sonde. Résultat conservé en mémoire et dans localStorage sous
+   "abvfarm_last_probe" pour survivre à une navigation. Réutilisable telle
+   quelle par un futur chien de garde (promesse {ok, count} / {ok, code}). */
+const PROBE_STORAGE_KEY = "abvfarm_last_probe";
+let lastServerProbe = null;
+try { lastServerProbe = JSON.parse(localStorage.getItem(PROBE_STORAGE_KEY) || "null"); } catch (e) { lastServerProbe = null; }
+function readLastProbe() {
+  try { const _p = JSON.parse(localStorage.getItem(PROBE_STORAGE_KEY) || "null"); if (_p && typeof _p === "object") return _p; } catch (e) {}
+  return lastServerProbe;
+}
+function saveLastProbe(state) {
+  lastServerProbe = state;
+  try { localStorage.setItem(PROBE_STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
+}
+function probeLineText() {
+  const _p = readLastProbe();
+  if (!_p) return "Contact serveur : jamais vérifié.";
+  if (_p.status === "ok") {
+    let _hhmm = "";
+    try { _hhmm = new Date(_p.at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }); } catch (e) { _hhmm = String(_p.at || "").slice(11, 16); }
+    return `Contact serveur vérifié à ${_hhmm} (${_p.count} fiches).`;
+  }
+  if (_p.status === "error") return `Contact serveur : échec (${_p.code || "erreur inconnue"}).`;
+  return `Contact serveur : non disponible (${_p.code || "raison inconnue"}).`;
+}
+async function probeServerContact() {
+  const _now = () => new Date().toISOString();
+  if (!userSession.isLoggedIn || !window.firebaseDb || !userSession.uid) {
+    const _reason = !userSession.isLoggedIn ? "non connecté" : (!window.firebaseDb ? "base cloud indisponible" : "identifiant utilisateur manquant");
+    const _state = { status: "unavailable", at: _now(), count: null, code: _reason };
+    saveLastProbe(_state);
+    updateUserUI();
+    return { ok: false, code: _reason };
+  }
+  try {
+    const _snap = await window.firebaseDb.collection("users").doc(userSession.uid).collection("cheptel").get({ source: "server" });
+    const _count = (_snap && _snap.docs) ? _snap.docs.length : 0;
+    const _state = { status: "ok", at: _now(), count: _count, code: null };
+    saveLastProbe(_state);
+    updateUserUI();
+    return { ok: true, count: _count };
+  } catch (err) {
+    const _code = (err && err.code) || (err && err.message) || "erreur inconnue";
+    const _state = { status: "error", at: _now(), count: null, code: _code };
+    saveLastProbe(_state);
+    updateUserUI();
+    return { ok: false, code: _code };
+  }
+}
+
 function ensureCloudSyncListener(uid) {
-  if (unsubscribeSnapshot || !window.firebaseDb || !uid) return;
+  if (unsubscribeSnapshot || !window.firebaseDb || !uid) {
+    listenerLastEarlyReturn = { reason: unsubscribeSnapshot ? "déjà installée" : (!window.firebaseDb ? ("no-db" + (window.firebaseDbError ? ": " + window.firebaseDbError : "")) : "no-uid"), at: Date.now() };
+    return;
+  }
   /* Section 2 (S6, complément) : couvre aussi la restauration de session au
      rechargement, qui passe ici sans repasser par handleUserAuthenticated : tant
      que cloudSyncActive est faux, aucun snapshot serveur n'est encore arrivé. */
   if (!cloudSyncActive) cloudFirstSnapshotPending = true;
+  /* Volet C : nouvelle génération pour cette installation ; les rappels des
+     installations précédentes seront ignorés silencieusement. */
+  listenerGeneration += 1;
+  const _listenerGen = listenerGeneration;
+  listenerUid = uid;
   try {
     unsubscribeSnapshot = window.firebaseDb.collection("users").doc(uid).collection("cheptel").onSnapshot((snap) => {
+      if (_listenerGen !== listenerGeneration) return;
       /* Audit synchro : ignorer les instantanés venant du cache local, sinon l'appli
          fusionne ses propres fiches locales en croyant que c'est le cloud, et peut
          même supprimer une fiche locale absente du cache. Seul le serveur fait foi. */
-      if (snap.metadata && snap.metadata.fromCache) return;
+      if (snap.metadata && snap.metadata.fromCache) { listenerCacheCount += 1; listenerCacheLastAt = Date.now(); return; }
       cloudSyncActive = true;
       cloudSnapshotEver = true;
+      listenerLastServerAt = Date.now();
+      /* Volet C : le chien de garde n'est plus utile une fois le premier
+         snapshot serveur reçu pour cette installation (timer seul annulé). */
+      if (listenerWatchdogTimer) { clearTimeout(listenerWatchdogTimer); listenerWatchdogTimer = null; }
+      clearListenerLastError();
       /* Section 2 (S6) : premier snapshot serveur reçu — le jeu affiché n'est plus
          seulement local. Les snapshots cache sont déjà filtrés ci-dessus. */
       if (cloudFirstSnapshotPending) cloudFirstSnapshotPending = false;
@@ -1165,15 +1346,38 @@ function ensureCloudSyncListener(uid) {
       userSession.lastSync = new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
       updateUserUI();
     }, (err) => {
+      if (_listenerGen !== listenerGeneration) return;
       console.warn("Cloud snapshot notice:", err);
+      /* Volet C — correction du verrou : désabonner puis REMETTRE
+         unsubscribeSnapshot à null, sinon l'early-return bloquait toute
+         réinstallation jusqu'au prochain login. */
+      try { if (unsubscribeSnapshot) unsubscribeSnapshot(); } catch (e) {}
+      unsubscribeSnapshot = null;
       /* Section 2 (S2/S6) : une erreur du listener ne doit pas faire passer le jeu
          local pour synchronisé ; l'indicateur reste en attente/erreur. */
       cloudLoginError = err.code || err.message || "erreur de synchronisation cloud";
       try { localStorage.setItem(lastSyncErrorKey(), cloudLoginError); } catch (e2) {}
-      updateUserUI();
+      setListenerLastError(cloudLoginError);
+      /* Volet C — backoff gardé, CAP IMPÉRATIF de 5 tentatives au total : chaque
+         réinstallation relit toute la collection, aucune boucle sans cap. */
+      listenerAttempts += 1;
+      if (listenerAttempts >= 5) {
+        listenerStopped = true;
+        updateUserUI();
+      } else {
+        updateUserUI();
+        scheduleListenerRetry(uid);
+      }
     });
+    listenerInstalledAt = Date.now();
+    /* Volet C : chien de garde à 30 s après cette installation réussie. */
+    armListenerWatchdog(_listenerGen, listenerLastServerAt, listenerCacheCount);
   } catch (e) {
     console.warn("Cloud listener error:", e);
+    cloudLoginError = e.code || e.message || "erreur de synchronisation cloud";
+    try { localStorage.setItem(lastSyncErrorKey(), cloudLoginError); } catch (e2) {}
+    setListenerLastError(cloudLoginError);
+    updateUserUI();
   }
 }
 
@@ -1182,6 +1386,8 @@ async function handleUserAuthenticated(user, msg) {
     try { unsubscribeSnapshot(); } catch (e) {}
     unsubscribeSnapshot = null;
   }
+  /* Volet C : annule les timers en vol avant la réinstallation de fin de fonction. */
+  cancelListenerTimers();
 
   // 1. Récupérer les données existantes avant de basculer
   const guestKey = "abvfarm_data_guest";
@@ -1242,6 +1448,8 @@ async function handleUserAuthenticated(user, msg) {
   cloudSnapshotEver = false;
   cloudSyncActive = false;
   cloudLoginError = "";
+  /* Volet B : listenerLastError n'est PAS effacé ici — seule une snapshot
+     serveur réussie l'efface (voir ensureCloudSyncListener). */
   ingest(Object.values(userLocalData));
   updateUserUI();
 
@@ -1343,6 +1551,10 @@ window.addEventListener("online", () => {
   toast("Connexion Internet rétablie. Synchronisation active.");
   updateUserUI();
   retryPendingSync();
+  /* Volet C : réinstallation gardée (ne réinstalle jamais si currentUser null
+     ou uid différent ; l'early-return bloque si déjà installée). */
+  const _onlineUid = (userSession.isLoggedIn && userSession.uid) || (window.firebaseAuth && window.firebaseAuth.currentUser && window.firebaseAuth.currentUser.uid);
+  if (_onlineUid && canReinstallListener(_onlineUid)) ensureCloudSyncListener(_onlineUid);
 });
 window.addEventListener("offline", () => {
   isOnline = false;
@@ -1393,7 +1605,11 @@ function updateUserUI() {
          la pastille. Une fois le premier snapshot reçu, on retombe sur le statut
          honnête getSyncStatus() ci-dessous, comme l'écran Compte et la vue Données. */
       statusHtml = `<span class="dot offline"></span><span style="color:var(--warn)">Fusion cloud en attente${cloudLoginError ? " — échec de lecture cloud" : ""}</span>`;
-      subText = cloudLoginError ? "Données locales affichées • Envoi cloud en attente" : "Données locales affichées • Fusion cloud en attente";
+      subText = listenerStopped ? "Données locales affichées • Écoute arrêtée"
+        : (listenerLastError ? `Données locales affichées • Erreur d'écoute : ${listenerLastError.text}`
+        : (listenerCacheCount > 0 ? `Données locales affichées • ${listenerCacheCount} instantané(s) cache, 0 serveur`
+        : (listenerLastEarlyReturn ? `Données locales affichées • Écoute absente (${listenerLastEarlyReturn.reason})`
+        : (cloudLoginError ? "Données locales affichées • Envoi cloud en attente" : "Données locales affichées • Fusion cloud en attente"))));
     } else if (isOnline) {
       /* S3 — statut honnête : l'ancien affichage disait « Synchronisé » dès
          que connecté + en ligne, même avec une file non vide ou un échec.
@@ -2391,6 +2607,7 @@ VIEWS.accueil = () => {
         <span class="chip">0 lapin enregistré</span>
         <span class="chip">${userSession.isLoggedIn ? "Compte Google Cloud actif" : "Stockage local sécurisé"}</span>
       </div>
+      <p class="hint">Écoute cloud : ${esc(listenerStatusText())}</p>
       ${earsSvg()}
     </section>
     <div class="grid g3">
@@ -2404,7 +2621,7 @@ VIEWS.accueil = () => {
   <section class="hero"><div class="head" style="align-items:flex-start"><div><span class="eyebrow" style="color:inherit;opacity:.8">${esc(fmtDate(today()))}</span><h1>${hello} !</h1>
     <p>${al.length ? `${al.length} action${al.length > 1 ? "s" : ""} en attente dans l'élevage (dont les retards).` : "Toutes les tâches de l'élevage sont à jour."}</p></div>
     <div class="actions"><button class="btn" data-act="newrabbit">${ICON.plus}Lapin</button><button class="btn" data-act="newmating">${ICON.heart}Saillie</button><button class="btn" data-act="exportpdf">${ICON.fileText}Inventaire PDF</button></div></div>
-    <div class="meta"><span class="chip">${act.length} lapins actifs</span><span class="chip">${gest.length} gestation${gest.length > 1 ? "s" : ""}</span><span class="chip">${fat} en engraissement</span></div>${earsSvg()}</section>
+    <div class="meta"><span class="chip">${act.length} lapins actifs</span><span class="chip">${gest.length} gestation${gest.length > 1 ? "s" : ""}</span><span class="chip">${fat} en engraissement</span></div><p class="hint">Écoute cloud : ${esc(listenerStatusText())}</p>${earsSvg()}</section>
   <div class="tiles">
     <div class="tile"><span class="l">Lapins actifs</span><span class="v">${act.length}</span><span class="s">${males} ♂ · ${fem} ♀</span></div>
     <div class="tile"><span class="l">Reproducteurs</span><span class="v">${mature}</span><span class="s">âgés de 5 mois et plus</span></div>
@@ -2960,10 +3177,13 @@ VIEWS.donnees = () => {
   <section class="card">
     <div class="row-h">
       <h2>Synchronisation & Sécurité des Données</h2>
-      <button class="btn sm" data-act="accountModal">${ICON.cloud}${(userSession.isLoggedIn && window.firebaseAuth && window.firebaseAuth.currentUser) ? (() => { const _s = getSyncStatus(); return _s.conflicts ? `Compte · ${_s.conflicts} conflit(s)` : (_s.pending ? `Compte · ${_s.pending} en attente` : "Compte Synchronisé"); })() : (userSession.isLoggedIn ? "Compte local · non synchronisé" : "Connexion Compte (Email / Google)")}</button>
+      <button class="btn sm" data-act="accountModal">${ICON.cloud}${(userSession.isLoggedIn && window.firebaseAuth && window.firebaseAuth.currentUser) ? (() => { const _s = getSyncStatus(); return _s.conflicts ? `Compte · ${_s.conflicts} conflit(s)` : (_s.pending ? `Compte · ${_s.pending} en attente` : (_s.lastError ? "Compte · erreur" : "Compte Synchronisé")); })() : (userSession.isLoggedIn ? "Compte local · non synchronisé" : "Connexion Compte (Email / Google)")}</button>
     </div>
     <p>Vos données sont protégées et enregistrées instantanément sur cet appareil pour vous garantir un fonctionnement continu avec ou sans connexion Internet. Connectez votre compte par Email ou Google pour une sauvegarde automatique et permanente dans le Cloud Firebase.</p>
     <p>${(() => { const _st = getSyncStatus(); return (_st.pending ? `⚠️ ${_st.pending} fiche(s) en attente de synchronisation.` : "Aucune fiche en attente de synchronisation.") + (_st.conflicts ? ` ⚠️ ${_st.conflicts} conflit(s) : une version cloud plus récente existe pour ces fiches — votre version locale n'a PAS écrasé le cloud.` : "") + (_st.lastError ? ` <span class="hint">Dernière erreur : ${esc(_st.lastError)}</span>` : ""); })()} <button class="btn sm" data-act="retrySync">Renvoyer maintenant</button>${(() => { const _c = getSyncConflicts(); return _c.length ? ` <button class="btn sm" data-act="resolveConflictsLocal">Garder mes versions locales (${_c.length})</button> <button class="btn sm" data-act="resolveConflictsCloud">Garder les versions cloud (${_c.length})</button>` : ""; })()}</p>
+    <p>${esc(probeLineText())} <button class="btn sm" data-act="probeServer">Vérifier le contact serveur</button></p>
+    <p>Écoute cloud : ${esc(listenerStatusText())} <button class="btn sm" data-act="retryListener">Réessayer l'écoute</button></p>
+    <p class="hint">${(() => { const _le = listenerLastError; const _er = listenerLastEarlyReturn; return `Dernière erreur d'écoute : ${_le ? `${esc(_le.text)} à ${fmtHHMM(_le.at)}` : "aucune"} · Dernier snapshot serveur : ${listenerLastServerAt ? fmtHHMM(listenerLastServerAt) : "jamais"} · Tentatives : ${listenerAttempts} · Dernier early-return : ${_er ? `${esc(_er.reason)} à ${fmtHHMM(_er.at)}` : "aucun"} · Instantanés cache jetés : ${listenerCacheCount}${listenerCacheLastAt ? ` (dernier à ${fmtHHMM(listenerCacheLastAt)})` : ""}${listenerPersistenceError ? ` · ⚠️ Persistance : ${esc(listenerPersistenceError)}` : ""}`; })()}</p>
   </section>
   <section class="card full"><h2>Audit API — Toutes les données</h2><p class="hint" style="margin:6px 0 12px">L'API Netlify reçoit toutes les données de l'élevage (lapins, saillies, lots, pesées, soins, stocks, distributions, finances, rappels, cages) et renvoie la liste complète des incohérences de logique, sans rien stocker : l'analyse est renvoyée dans la réponse, puis oubliée. En local (fichier ouvert sans déploiement Netlify), l'API n'est pas joignable : déployez le site pour l'utiliser.</p><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn pri" data-act="auditApi">Auditer mes données actuelles (toutes)</button><button class="btn" data-act="auditApiFile">Auditer un fichier exporté</button></div><div id="auditApiResult" style="margin-top:12px"></div></section>
   <div class="grid g2">
@@ -3246,6 +3466,7 @@ async function deleteAccount() {
       document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (e) { toast("⚠️ Sauvegarde impossible : suppression annulée."); return; }
     if (unsubscribeSnapshot) { try { unsubscribeSnapshot(); } catch (e) {} unsubscribeSnapshot = null; }
+    cancelListenerTimers();
     for (const [kind, key] of Object.entries(KIND)) for (const x of S[key].slice()) await removeDoc(kind, x.id);
     let profileErr = "";
     if (!userSession.isLocalProfile && window.firebaseDb && userSession.uid) {
@@ -3292,7 +3513,7 @@ function accountModal() {
         <span>${isLogged 
           ? (userSession.isLocalProfile 
               ? "Profil local actif • Sauvegarde garantie sur cet appareil"
-              : (isOnline ? (() => { const _s = getSyncStatus(); return _s.conflicts ? `${provName} actif • ${_s.conflicts} conflit(s) à résoudre` : (_s.pending ? `${provName} actif • ${_s.pending} fiche(s) en attente` : `${provName} actif • Synchronisé en temps réel`); })() : "Mode Hors-Ligne • Enregistrement local garanti"))
+              : (isOnline ? (() => { const _s = getSyncStatus(); return _s.conflicts ? `${provName} actif • ${_s.conflicts} conflit(s) à résoudre` : (_s.pending ? `${provName} actif • ${_s.pending} fiche(s) en attente` : (cloudSnapshotEver ? `${provName} actif • Synchronisé en temps réel` : `${provName} actif • Contact serveur non confirmé`)); })() : "Mode Hors-Ligne • Enregistrement local garanti"))
           : (isOnline ? "Stockage local actif (Connectez-vous par Email ou Google pour sauvegarder dans le Cloud)" : "Mode Hors-Ligne (Stockage local garanti)")}</span>
       </div>
     </div>
@@ -3636,6 +3857,7 @@ function accountModal() {
         try { unsubscribeSnapshot(); } catch (e) {}
         unsubscribeSnapshot = null;
       }
+      cancelListenerTimers();
       if (window.firebaseAuth) {
         await window.firebaseAuth.signOut().catch(() => {});
       }
@@ -4656,7 +4878,9 @@ const A = {
   newweight: (el) => weightForm(el.dataset.id), newtreat: (el) => treatForm(el.dataset.id),
   newitem: () => itemForm(), edititem: (el) => { const i = byId(S.inventory, el.dataset.id); if (i) itemForm(i); },
   newcage: () => cageForm(), editcage: (el) => { const c = byId(S.cages || [], el.dataset.id); if (c) cageForm(c); },
-  retrySync: async () => { await retryPendingSync(); toast("Synchronisation relancée"); render(); },
+  retrySync: async () => { await retryPendingSync(); const _rsUid = (userSession.isLoggedIn && userSession.uid) || (window.firebaseAuth && window.firebaseAuth.currentUser && window.firebaseAuth.currentUser.uid); if (_rsUid && canReinstallListener(_rsUid)) ensureCloudSyncListener(_rsUid); toast("Synchronisation relancée"); render(); },
+  probeServer: async () => { await probeServerContact(); render(); },
+  retryListener: () => { const _cu = window.firebaseAuth && window.firebaseAuth.currentUser; if (!_cu || !_cu.uid) return; if (listenerUid && _cu.uid !== listenerUid) return; cancelListenerTimers(); listenerStopped = false; listenerAttempts = 0; ensureCloudSyncListener(_cu.uid); render(); },
   resolveConflictsLocal: () => confirmBox("Garder vos versions locales ? Cela ÉCRASERA les versions cloud plus récentes pour les fiches en conflit. Cette action est volontaire et irréversible côté cloud.", "Garder mes versions", async () => { await resolveSyncConflicts("local"); }),
   resolveConflictsCloud: () => confirmBox("Garder les versions cloud ? Vos modifications locales en conflit seront ABANDONNÉES pour ces fiches (le reste de vos données n'est pas touché).", "Garder les versions cloud", async () => { await resolveSyncConflicts("cloud"); }),
   restoreTrash: async (el) => { let _t = []; try { _t = JSON.parse(localStorage.getItem("abvfarm_trash") || "[]"); } catch (e) {} const _x = _t.find((x) => x.kind === el.dataset.kind && x.id === el.dataset.id); if (!_x) { toast("Élément introuvable dans la corbeille."); return; } const { kind: _k, ..._doc } = _x.doc; if (await save(_x.kind, _doc)) { try { localStorage.setItem("abvfarm_trash", JSON.stringify(_t.filter((x) => !(x.kind === el.dataset.kind && x.id === el.dataset.id)))); } catch (e) {} toast("Élément restauré"); render(); } },

@@ -1716,6 +1716,11 @@ function updateUserUI() {
      identifiant n'existe qu'une fois dans le DOM à la fois. */
   const homeListenerEl = $("#homeListenerStatus");
   if (homeListenerEl) homeListenerEl.textContent = `Écoute cloud : ${listenerStatusText()}`;
+  /* Même motif pour la sonde : updateUserUI() ne re-rend pas #main, donc la
+     ligne de sonde de Données n'affichait « vérification en cours… » qu'après
+     navigation/rechargement. Mise à jour par textContent du seul <span>. */
+  const probeEl = $("#probeServerStatus");
+  if (probeEl) probeEl.textContent = probeLineText();
 }
 
 /* ---------- Google & Email Authentication Layer ---------- */
@@ -3256,7 +3261,7 @@ VIEWS.donnees = () => {
     </div>
     <p>Vos données sont protégées et enregistrées instantanément sur cet appareil pour vous garantir un fonctionnement continu avec ou sans connexion Internet. Connectez votre compte par Email ou Google pour une sauvegarde automatique et permanente dans le Cloud Firebase.</p>
     <p>${(() => { const _st = getSyncStatus(); return (_st.pending ? `⚠️ ${_st.pending} fiche(s) en attente de synchronisation.` : "Aucune fiche en attente de synchronisation.") + (_st.sending ? ` ⏳ ${_st.sending} fiche(s) en cours d'envoi.` : "") + (_st.conflicts ? ` ⚠️ ${_st.conflicts} conflit(s) : une version cloud plus récente existe pour ces fiches — votre version locale n'a PAS écrasé le cloud.` : "") + (_st.lastError ? ` <span class="hint">Dernière erreur : ${esc(_st.lastError)}</span>` : ""); })()} <button class="btn sm" data-act="retrySync">Renvoyer maintenant</button>${(() => { const _c = getSyncConflicts(); return _c.length ? ` <button class="btn sm" data-act="resolveConflictsLocal">Garder mes versions locales (${_c.length})</button> <button class="btn sm" data-act="resolveConflictsCloud">Garder les versions cloud (${_c.length})</button>` : ""; })()}</p>
-    <p>${esc(probeLineText())} <button class="btn sm" data-act="probeServer">Vérifier le contact serveur</button></p>
+    <p><span id="probeServerStatus">${esc(probeLineText())}</span> <button class="btn sm" data-act="probeServer">Vérifier le contact serveur</button></p>
     <p>Écoute cloud : ${esc(listenerStatusText())} <button class="btn sm" data-act="retryListener">Réessayer l'écoute</button></p>
     <p class="hint">${(() => { const _le = listenerLastError; const _er = listenerLastEarlyReturn; return `Dernière erreur d'écoute : ${_le ? `${esc(_le.text)} à ${fmtHHMM(_le.at)}` : "aucune"} · Dernier snapshot serveur : ${listenerLastServerAt ? fmtHHMM(listenerLastServerAt) : "jamais"} · Tentatives : ${listenerAttempts} · Dernier early-return : ${_er ? `${esc(_er.reason)} à ${fmtHHMM(_er.at)}` : "aucun"} · Instantanés cache jetés : ${listenerCacheCount}${listenerCacheLastAt ? ` (dernier à ${fmtHHMM(listenerCacheLastAt)})` : ""}${listenerPersistenceError ? ` · ⚠️ Persistance : ${esc(listenerPersistenceError)}` : ""}`; })()}</p>
   </section>

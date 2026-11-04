@@ -907,6 +907,10 @@ async function retryPendingSyncLocked() {
   const _qRaw = _q;
   _q = _q.filter((x) => !x.uid || x.uid === _uid);
   if (_q.length !== _qRaw.length) { try { localStorage.setItem(pendingSyncKey(_uid), JSON.stringify(_q)); } catch (e) {} }
+  /* Visibilité d'écriture : un drapeau sending périmé (timeout ou plantage d'un
+     pushToCloud antérieur) ne doit jamais bloquer le retry : on l'efface avant
+     toute tentative, l'entrée restant relançable normalement. */
+  for (const _it of _q) delete _it.sending;
   if (!_q.length) return;
   const _col = window.firebaseDb.collection("users").doc(_uid).collection("cheptel");
   /* Correctif file en attente qui ne se vide jamais : d'abord, on enlève les fiches
@@ -961,12 +965,17 @@ async function retryPendingSyncLocked() {
    donc un réseau lent/bloqué laissait le bouton sur "Enregistrement…" pour toujours, alors
    que les données étaient déjà enregistrées en local. */
 function queuePendingSync(entry) { try { const _q = JSON.parse(localStorage.getItem(pendingSyncKey()) || "[]"); const _f = _q.filter((x) => !(x.kind === entry.kind && String(x.id) === String(entry.id))); _f.push({ ...entry, uid: (userSession.isLoggedIn && userSession.uid) || "guest" }); localStorage.setItem(pendingSyncKey(), JSON.stringify(_f)); if (retryPendingSyncRunning) retryPendingSyncQueued = true; } catch (e) {} }
+/* Visibilité d'écriture : mise à jour d'une entrée de file PAR FUSION. Seuls les
+   champs de suivi (sending, lastError) sont touchés ; action/kind/id/doc/deletedAt
+   sont préservés tels quels et doc.updatedAt n'est jamais réécrit ici. No-op si
+   l'entrée n'existe pas (on ne crée jamais d'entrée partielle par ce chemin). */
+function updatePendingSyncEntry(kind, id, patch) { try { const _q = JSON.parse(localStorage.getItem(pendingSyncKey()) || "[]"); let _found = false; const _nq = _q.map((x) => { if (x.kind === kind && String(x.id) === String(id)) { _found = true; return { ...x, ...patch }; } return x; }); if (_found) localStorage.setItem(pendingSyncKey(), JSON.stringify(_nq)); } catch (e) {} }
 function cleanForCloud(doc) { const out = {}; for (const [k, v] of Object.entries(doc || {})) { if (v === undefined || typeof v === "function") continue; if (typeof v === "number" && !isFinite(v)) out[k] = 0; else if (Array.isArray(v)) out[k] = v.map((x) => (x === undefined || typeof x === "function" ? null : (typeof x === "number" && !isFinite(x) ? 0 : x))); else if (v && typeof v === "object" && !(v instanceof Date)) out[k] = cleanForCloud(v); else out[k] = v; } return out; }
 function clearPendingFor(kind, id) { try { const _q = JSON.parse(localStorage.getItem(pendingSyncKey()) || "[]"); const _f = _q.filter((x) => !(x.kind === kind && String(x.id) === String(id))); localStorage.setItem(pendingSyncKey(), JSON.stringify(_f)); } catch (e) {} }
 function syncTs(v) { try { if (v == null) return 0; if (typeof v === "number") return v; if (typeof v.toMillis === "function") return v.toMillis(); if (typeof v.toDate === "function") return v.toDate().getTime(); if (typeof v.seconds === "number") return v.seconds * 1000 + Math.floor((v.nanoseconds || 0) / 1e6); if (typeof v === "string") { const _ms = Date.parse(v); return isNaN(_ms) ? 0 : _ms; } return 0; } catch (e) { return 0; } }
 function getPendingSyncList() { try { return JSON.parse(localStorage.getItem(pendingSyncKey()) || "[]"); } catch (e) { return []; } }
 function getSyncConflicts() { try { return JSON.parse(localStorage.getItem("abvfarm_sync_conflicts") || "[]"); } catch (e) { return []; } }
-function getSyncStatus() { const _p = getPendingSyncList(); const _c = getSyncConflicts(); let _e = ""; try { _e = localStorage.getItem(lastSyncErrorKey()) || ""; } catch (e) {} return { pending: _p.length, conflicts: _c.length, lastError: _e }; }
+function getSyncStatus() { const _p = getPendingSyncList(); const _c = getSyncConflicts(); let _e = ""; try { _e = localStorage.getItem(lastSyncErrorKey()) || ""; } catch (e) {} return { pending: _p.length, sending: _p.filter((x) => x.sending).length, conflicts: _c.length, lastError: _e }; }
 function queueSyncConflict(kind, id, localTs, cloudTs, action) { try { const _c = getSyncConflicts().filter((x) => !(x.kind === kind && String(x.id) === String(id))); _c.unshift({ kind, id, action: action || "set", localUpdatedAt: localTs || "", cloudUpdatedAt: cloudTs || "", at: new Date().toISOString() }); localStorage.setItem("abvfarm_sync_conflicts", JSON.stringify(_c.slice(0, 50))); } catch (e) {} }
 function clearSyncConflict(kind, id) { try { localStorage.setItem("abvfarm_sync_conflicts", JSON.stringify(getSyncConflicts().filter((x) => !(x.kind === kind && String(x.id) === String(id))))); } catch (e) {} }
 /* Contournement ponctuel de la garde, réservé à la résolution explicite
@@ -1046,6 +1055,23 @@ function isValidCheptelDocForCloud(doc) {
    donc elle n'était jamais renvoyée ensuite. Maintenant, une fiche qui ne peut
    pas partir tout de suite est mise en file d'attente et renvoyée à la prochaine
    connexion, au lieu d'être perdue pour le cloud. */
+/* Correctif visibilité d'écriture (2026-11-04) : avant, save() appelait pushToCloud
+   SANS await et l'écriture normale ne passait PAS par la file d'abord — un envoi
+   coincé (lecture de garde ou set/delete qui ne se règle jamais) restait invisible
+   (file vide, aucun toast, « 0 en attente » alors que le serveur n'avait rien reçu).
+   Maintenant : (1) l'entrée est en file AVANT la tentative (save()/removeDoc() la
+   posent déjà, on la repose ici pour les autres appelants — la déduplication par
+   (kind,id) de queuePendingSync empêche tout doublon) ; (2) la tentative est bornée
+   à 20 s au total, garde serveur + set/delete ensemble, via Promise.race ; (3) l'entrée
+   porte un drapeau sending pendant l'envoi, effacé au succès, conservé avec une
+   dernière erreur explicite en cas d'échec/timeout. Règles : jamais d'écrasement
+   d'entrée par un objet partiel (les mises à jour passent par updatePendingSyncEntry,
+   qui fusionne et préserve action/kind/id/doc/deletedAt) ; doc.updatedAt n'est jamais
+   réécrit ici ; un retour « conservé » (conflit / format incompatible) n'efface JAMAIS
+   la file — seul le résultat « envoyé » appelle clearPendingFor ; un succès tardif
+   après timeout nettoie quand même la file via le gestionnaire attaché à la tentative,
+   sauf si une édition plus récente a entre-temps remplacé l'entrée (auquel cas c'est
+   la nouvelle entrée, et sa propre tentative, qui gère le nettoyage). */
 async function pushToCloud(kind, id, doc, action) {
   if (!userSession.isLoggedIn || !isOnline || !window.firebaseDb || !userSession.uid) { queuePendingSync(action === "delete" ? { action: "delete", kind, id, deletedAt: doc && doc.deletedAt ? doc.deletedAt : undefined } : { action: "set", kind, id, doc }); return; }
   const col = window.firebaseDb.collection("users").doc(userSession.uid).collection("cheptel");
@@ -1055,44 +1081,70 @@ async function pushToCloud(kind, id, doc, action) {
     toast("⚠️ Fiche non synchronisee : format incompatible avec le cloud (sauvegardee en local).");
     return;
   }
-  /* S3 — garde d'écriture : avant, set()/delete() inconditionnel écrasait le
-     cloud même si un autre appareil venait d'écrire plus récent. On lit le
-     serveur d'abord ; si le serveur est strictement plus récent, on N'ÉCRASE
-     PAS : la modification locale reste en file + conflit signalé. La lecture
-     n'est qu'une garde, pas une transaction : deux appareils écrivant dans la
-     même seconde peuvent encore se croiser — le conflit sera alors détecté au
-     retry / listener suivant, jamais effacé silencieusement. */
+  /* File AVANT tentative (idempotent : save()/removeDoc() l'ont déjà posée). */
+  const _queueEntry = action === "delete" ? { action: "delete", kind, id, deletedAt: doc && doc.deletedAt ? doc.deletedAt : undefined } : { action: "set", kind, id, doc: clean };
+  queuePendingSync(_queueEntry);
+  updatePendingSyncEntry(kind, id, { sending: true, lastError: "" });
   const _forceKey = kind + "-" + id;
-  if (!_syncForceOnce.has(_forceKey)) {
-    try {
-      const _srv = await col.doc(_forceKey).get({ source: "server" });
-      if (_srv.exists) {
-        const _sd = _srv.data() || {};
-        if (action === "set" && doc && doc.updatedAt && syncTs(_sd.updatedAt) > syncTs(doc.updatedAt)) { queueSyncConflict(kind, id, doc.updatedAt, _sd.updatedAt, "set"); queuePendingSync({ action: "set", kind, id, doc: clean }); toast("⚠️ Conflit : une version cloud plus récente existe — votre modification est conservée en attente, elle n'a pas écrasé le cloud."); return; }
-        if (action === "delete" && doc && doc.deletedAt && syncTs(_sd.updatedAt) > syncTs(doc.deletedAt)) { queueSyncConflict(kind, id, doc.deletedAt, _sd.updatedAt, "delete"); queuePendingSync({ action: "delete", kind, id, deletedAt: doc.deletedAt }); toast("⚠️ Conflit : ce document a été modifié dans le cloud après votre suppression locale — suppression mise en attente, pas appliquée."); return; }
-      }
-    } catch (e) { /* Lecture serveur impossible : on retombe sur l'ancien comportement (tentative d'écriture, échec mis en file). Ne jamais bloquer save() locale. */ }
-  } else { _syncForceOnce.delete(_forceKey); }
-  const op = action === "delete" ? col.doc(kind + "-" + id).delete() : col.doc(kind + "-" + id).set(clean);
-  /* Correctif synchro directe : avant, un délai de 8 s déclarait l'envoi en échec
-     même sur une connexion lente, alors que Firestore allait finir l'envoi quelques
-     secondes plus tard — d'où une notification « Non synchronisé » à chaque
-     enregistrement et une file qui ne se vidait jamais, pour de simples textes.
-     Maintenant on laisse Firestore finir son envoi (il gère lui-même la file
-     hors-ligne), on ne met en attente que sur une vraie erreur, et on enlève
-     cette fiche de la file dès qu'elle part. */
-  Promise.resolve(op).then(() => {
-    userSession.lastSync = new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
-    saveUserSession();
-    clearPendingFor(kind, id);
-    clearSyncConflict(kind, id);
-    retryPendingSync();
-  }).catch((err) => {
+  /* L'entrée en file correspond-elle encore à CETTE tentative ? Si une édition plus
+     récente a remplacé l'entrée entre-temps, le succès de cette tentative ne doit pas
+     effacer l'entrée plus récente (sa propre tentative la gérera). */
+  const _entryIsCurrent = () => { const _cur = getPendingSyncList().find((x) => x.kind === kind && String(x.id) === String(id)); if (!_cur) return true; if (action === "delete") return !_cur.doc && (!_cur.deletedAt || !doc || _cur.deletedAt === doc.deletedAt); return !!(_cur.doc && doc && _cur.doc.updatedAt === doc.updatedAt); };
+  /* Tentative complète (garde + écriture) : son résultat distingue explicitement
+     « envoyé » (seul cas qui efface la file) de « conservé » (conflit : la file
+     reste, sans écrasement). */
+  const _attempt = (async () => {
+    /* S3 — garde d'écriture : avant, set()/delete() inconditionnel écrasait le
+       cloud même si un autre appareil venait d'écrire plus récent. On lit le
+       serveur d'abord ; si le serveur est strictement plus récent, on N'ÉCRASE
+       PAS : la modification locale reste en file + conflit signalé. La lecture
+       n'est qu'une garde, pas une transaction : deux appareils écrivant dans la
+       même seconde peuvent encore se croiser — le conflit sera alors détecté au
+       retry / listener suivant, jamais effacé silencieusement. */
+    if (!_syncForceOnce.has(_forceKey)) {
+      try {
+        const _srv = await col.doc(_forceKey).get({ source: "server" });
+        if (_srv.exists) {
+          const _sd = _srv.data() || {};
+          if (action === "set" && doc && doc.updatedAt && syncTs(_sd.updatedAt) > syncTs(doc.updatedAt)) { queueSyncConflict(kind, id, doc.updatedAt, _sd.updatedAt, "set"); queuePendingSync({ action: "set", kind, id, doc: clean }); toast("⚠️ Conflit : une version cloud plus récente existe — votre modification est conservée en attente, elle n'a pas écrasé le cloud."); return "conservé"; }
+          if (action === "delete" && doc && doc.deletedAt && syncTs(_sd.updatedAt) > syncTs(doc.deletedAt)) { queueSyncConflict(kind, id, doc.deletedAt, _sd.updatedAt, "delete"); queuePendingSync({ action: "delete", kind, id, deletedAt: doc.deletedAt }); toast("⚠️ Conflit : ce document a été modifié dans le cloud après votre suppression locale — suppression mise en attente, pas appliquée."); return "conservé"; }
+        }
+      } catch (e) { /* Lecture serveur impossible : on retombe sur l'ancien comportement (tentative d'écriture, échec mis en file). Ne jamais bloquer save() locale. */ }
+    } else { _syncForceOnce.delete(_forceKey); }
+    const op = action === "delete" ? col.doc(kind + "-" + id).delete() : col.doc(kind + "-" + id).set(clean);
+    await op;
+    return "envoyé";
+  })();
+  /* Succès tardif après timeout : le SDK peut terminer l'envoi en arrière-plan ;
+     ce succès doit toujours pouvoir nettoyer la file, jamais laisser une entrée
+     ineffaçable. clearPendingFor est idempotent, donc un double nettoyage est sans risque. */
+  _attempt.then((_r) => { if (_r === "envoyé" && _entryIsCurrent()) { clearPendingFor(kind, id); clearSyncConflict(kind, id); } }).catch(() => {});
+  let _timeoutId = null;
+  try {
+    const _timeoutPromise = new Promise((_, reject) => { _timeoutId = setTimeout(() => { const _err = new Error("délai dépassé (20 s)"); _err.code = "délai dépassé (20 s)"; reject(_err); }, 20000); });
+    const _result = await Promise.race([_attempt, _timeoutPromise]);
+    if (_timeoutId) clearTimeout(_timeoutId);
+    if (_result === "envoyé") {
+      userSession.lastSync = new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+      saveUserSession();
+      if (_entryIsCurrent()) { clearPendingFor(kind, id); clearSyncConflict(kind, id); }
+      retryPendingSync();
+    } else {
+      /* Conflit (« conservé ») : l'entrée reste en file, le drapeau d'envoi seul
+         est effacé — jamais d'effacement de file sur ce chemin. */
+      updatePendingSyncEntry(kind, id, { sending: false });
+    }
+  } catch (err) {
+    if (_timeoutId) clearTimeout(_timeoutId);
     console.warn("Cloud push notice:", err);
-    try { localStorage.setItem(lastSyncErrorKey(), err.code || err.message || ""); } catch (e) {}
-    queuePendingSync(action === "delete" ? { action: "delete", kind, id, deletedAt: doc && doc.deletedAt ? doc.deletedAt : undefined } : { action: "set", kind, id, doc: clean });
-    toast("⚠️ Non synchronisé : sera renvoyé à la prochaine connexion.");
-  });
+    const _msg = err.code || err.message || "";
+    try { localStorage.setItem(lastSyncErrorKey(), _msg); } catch (e) {}
+    /* Échec/timeout : entrée conservée en file avec sa dernière erreur explicite
+       (fusion, pas d'écrasement : doc/deletedAt préservés), relançable par retry. */
+    queuePendingSync(_queueEntry);
+    updatePendingSyncEntry(kind, id, { sending: false, lastError: _msg });
+    toast(_msg === "délai dépassé (20 s)" ? "⚠️ Envoi non confirmé après 20 s : conservé en attente, sera renvoyé." : "⚠️ Non synchronisé : sera renvoyé à la prochaine connexion.");
+  }
 }
 async function save(kind, obj) {
   if (!obj.id) obj.id = uid();
@@ -1103,6 +1155,8 @@ async function save(kind, obj) {
   if (!setLocalData(all)) { toast("⛔ Enregistrement NON sauvegardé : stockage local indisponible (quota ou accès refusé). Le formulaire reste ouvert : réessayez après avoir libéré de l'espace, sans fermer la fiche."); return false; }
   ingest(Object.values(all));
   // Synchro cloud en arrière-plan, sans bloquer le formulaire.
+  // Visibilité d'écriture : file AVANT tentative — un envoi coincé reste visible en attente.
+  queuePendingSync({ action: "set", kind, id: obj.id, doc });
   pushToCloud(kind, obj.id, doc, "set");
   logActivity("Enregistré", `${kind} ${obj.name || obj.label || obj.title || obj.id}`);
   return true;
@@ -1121,6 +1175,8 @@ async function removeDoc(kind, id) {
   // puisse comparer avec une modification cloud plus récente (sans elle, une
   // suppression ne peut pas être distinguée d'un écrasement).
   const _deletedAt = (() => { try { const _t = JSON.parse(localStorage.getItem("abvfarm_trash") || "[]"); const _x = _t.find((x) => x.kind === kind && String(x.id) === String(id)); return (_x && _x.deletedAt) || new Date().toISOString(); } catch (e) { return new Date().toISOString(); } })();
+  // Visibilité d'écriture : file AVANT tentative, comme save().
+  queuePendingSync({ action: "delete", kind, id, deletedAt: _deletedAt });
   pushToCloud(kind, id, { deletedAt: _deletedAt }, "delete");
   return true;
 }
@@ -1254,6 +1310,7 @@ function probeLineText() {
     try { _hhmm = new Date(_p.at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }); } catch (e) { _hhmm = String(_p.at || "").slice(11, 16); }
     return `Contact serveur vérifié à ${_hhmm} (${_p.count} fiches).`;
   }
+  if (_p.status === "checking") return "Contact serveur : vérification en cours…";
   if (_p.status === "error") return `Contact serveur : échec (${_p.code || "erreur inconnue"}).`;
   return `Contact serveur : non disponible (${_p.code || "raison inconnue"}).`;
 }
@@ -1266,14 +1323,24 @@ async function probeServerContact() {
     updateUserUI();
     return { ok: false, code: _reason };
   }
+  /* Sonde bornée : état « en cours » visible avant l'appel, puis get() serveur
+     plafonné à 20 s via Promise.race — un get() qui ne se règle jamais ne fige
+     plus l'écran, il se règle en erreur « délai dépassé (20 s) ». */
+  saveLastProbe({ status: "checking", at: _now(), count: null, code: null });
+  updateUserUI();
+  let _timeoutId = null;
   try {
-    const _snap = await window.firebaseDb.collection("users").doc(userSession.uid).collection("cheptel").get({ source: "server" });
+    const _serverPromise = window.firebaseDb.collection("users").doc(userSession.uid).collection("cheptel").get({ source: "server" });
+    const _timeoutPromise = new Promise((_, reject) => { _timeoutId = setTimeout(() => { const _err = new Error("délai dépassé (20 s)"); _err.code = "délai dépassé (20 s)"; reject(_err); }, 20000); });
+    const _snap = await Promise.race([_serverPromise, _timeoutPromise]);
+    if (_timeoutId) clearTimeout(_timeoutId);
     const _count = (_snap && _snap.docs) ? _snap.docs.length : 0;
     const _state = { status: "ok", at: _now(), count: _count, code: null };
     saveLastProbe(_state);
     updateUserUI();
     return { ok: true, count: _count };
   } catch (err) {
+    if (_timeoutId) clearTimeout(_timeoutId);
     const _code = (err && err.code) || (err && err.message) || "erreur inconnue";
     const _state = { status: "error", at: _now(), count: null, code: _code };
     saveLastProbe(_state);
@@ -1302,7 +1369,7 @@ function ensureCloudSyncListener(uid) {
       /* Audit synchro : ignorer les instantanés venant du cache local, sinon l'appli
          fusionne ses propres fiches locales en croyant que c'est le cloud, et peut
          même supprimer une fiche locale absente du cache. Seul le serveur fait foi. */
-      if (snap.metadata && snap.metadata.fromCache) { listenerCacheCount += 1; listenerCacheLastAt = Date.now(); return; }
+      if (snap.metadata && snap.metadata.fromCache) { listenerCacheCount += 1; listenerCacheLastAt = Date.now(); updateUserUI(); return; }
       cloudSyncActive = true;
       cloudSnapshotEver = true;
       listenerLastServerAt = Date.now();
@@ -1641,6 +1708,14 @@ function updateUserUI() {
 
   if (syncEl) syncEl.innerHTML = statusHtml;
   if (mobSub) mobSub.textContent = subText;
+  /* Correctif cosmétique (2026-11-04) : la ligne « Écoute cloud » de l'accueil
+     vit dans #main, que updateUserUI() ne re-rendait jamais — elle restait figée
+     au premier render(). Mise à jour par textContent uniquement (listenerStatusText
+     ne retourne que du texte brut), sans render() : ni fermeture de modale, ni
+     perte de défilement. Les deux branches d'accueil sont exclusives, donc cet
+     identifiant n'existe qu'une fois dans le DOM à la fois. */
+  const homeListenerEl = $("#homeListenerStatus");
+  if (homeListenerEl) homeListenerEl.textContent = `Écoute cloud : ${listenerStatusText()}`;
 }
 
 /* ---------- Google & Email Authentication Layer ---------- */
@@ -2607,7 +2682,7 @@ VIEWS.accueil = () => {
         <span class="chip">0 lapin enregistré</span>
         <span class="chip">${userSession.isLoggedIn ? "Compte Google Cloud actif" : "Stockage local sécurisé"}</span>
       </div>
-      <p class="hint">Écoute cloud : ${esc(listenerStatusText())}</p>
+      <p class="hint" id="homeListenerStatus">Écoute cloud : ${esc(listenerStatusText())}</p>
       ${earsSvg()}
     </section>
     <div class="grid g3">
@@ -2621,7 +2696,7 @@ VIEWS.accueil = () => {
   <section class="hero"><div class="head" style="align-items:flex-start"><div><span class="eyebrow" style="color:inherit;opacity:.8">${esc(fmtDate(today()))}</span><h1>${hello} !</h1>
     <p>${al.length ? `${al.length} action${al.length > 1 ? "s" : ""} en attente dans l'élevage (dont les retards).` : "Toutes les tâches de l'élevage sont à jour."}</p></div>
     <div class="actions"><button class="btn" data-act="newrabbit">${ICON.plus}Lapin</button><button class="btn" data-act="newmating">${ICON.heart}Saillie</button><button class="btn" data-act="exportpdf">${ICON.fileText}Inventaire PDF</button></div></div>
-    <div class="meta"><span class="chip">${act.length} lapins actifs</span><span class="chip">${gest.length} gestation${gest.length > 1 ? "s" : ""}</span><span class="chip">${fat} en engraissement</span></div><p class="hint">Écoute cloud : ${esc(listenerStatusText())}</p>${earsSvg()}</section>
+    <div class="meta"><span class="chip">${act.length} lapins actifs</span><span class="chip">${gest.length} gestation${gest.length > 1 ? "s" : ""}</span><span class="chip">${fat} en engraissement</span></div><p class="hint" id="homeListenerStatus">Écoute cloud : ${esc(listenerStatusText())}</p>${earsSvg()}</section>
   <div class="tiles">
     <div class="tile"><span class="l">Lapins actifs</span><span class="v">${act.length}</span><span class="s">${males} ♂ · ${fem} ♀</span></div>
     <div class="tile"><span class="l">Reproducteurs</span><span class="v">${mature}</span><span class="s">âgés de 5 mois et plus</span></div>
@@ -3180,7 +3255,7 @@ VIEWS.donnees = () => {
       <button class="btn sm" data-act="accountModal">${ICON.cloud}${(userSession.isLoggedIn && window.firebaseAuth && window.firebaseAuth.currentUser) ? (() => { const _s = getSyncStatus(); return _s.conflicts ? `Compte · ${_s.conflicts} conflit(s)` : (_s.pending ? `Compte · ${_s.pending} en attente` : (_s.lastError ? "Compte · erreur" : "Compte Synchronisé")); })() : (userSession.isLoggedIn ? "Compte local · non synchronisé" : "Connexion Compte (Email / Google)")}</button>
     </div>
     <p>Vos données sont protégées et enregistrées instantanément sur cet appareil pour vous garantir un fonctionnement continu avec ou sans connexion Internet. Connectez votre compte par Email ou Google pour une sauvegarde automatique et permanente dans le Cloud Firebase.</p>
-    <p>${(() => { const _st = getSyncStatus(); return (_st.pending ? `⚠️ ${_st.pending} fiche(s) en attente de synchronisation.` : "Aucune fiche en attente de synchronisation.") + (_st.conflicts ? ` ⚠️ ${_st.conflicts} conflit(s) : une version cloud plus récente existe pour ces fiches — votre version locale n'a PAS écrasé le cloud.` : "") + (_st.lastError ? ` <span class="hint">Dernière erreur : ${esc(_st.lastError)}</span>` : ""); })()} <button class="btn sm" data-act="retrySync">Renvoyer maintenant</button>${(() => { const _c = getSyncConflicts(); return _c.length ? ` <button class="btn sm" data-act="resolveConflictsLocal">Garder mes versions locales (${_c.length})</button> <button class="btn sm" data-act="resolveConflictsCloud">Garder les versions cloud (${_c.length})</button>` : ""; })()}</p>
+    <p>${(() => { const _st = getSyncStatus(); return (_st.pending ? `⚠️ ${_st.pending} fiche(s) en attente de synchronisation.` : "Aucune fiche en attente de synchronisation.") + (_st.sending ? ` ⏳ ${_st.sending} fiche(s) en cours d'envoi.` : "") + (_st.conflicts ? ` ⚠️ ${_st.conflicts} conflit(s) : une version cloud plus récente existe pour ces fiches — votre version locale n'a PAS écrasé le cloud.` : "") + (_st.lastError ? ` <span class="hint">Dernière erreur : ${esc(_st.lastError)}</span>` : ""); })()} <button class="btn sm" data-act="retrySync">Renvoyer maintenant</button>${(() => { const _c = getSyncConflicts(); return _c.length ? ` <button class="btn sm" data-act="resolveConflictsLocal">Garder mes versions locales (${_c.length})</button> <button class="btn sm" data-act="resolveConflictsCloud">Garder les versions cloud (${_c.length})</button>` : ""; })()}</p>
     <p>${esc(probeLineText())} <button class="btn sm" data-act="probeServer">Vérifier le contact serveur</button></p>
     <p>Écoute cloud : ${esc(listenerStatusText())} <button class="btn sm" data-act="retryListener">Réessayer l'écoute</button></p>
     <p class="hint">${(() => { const _le = listenerLastError; const _er = listenerLastEarlyReturn; return `Dernière erreur d'écoute : ${_le ? `${esc(_le.text)} à ${fmtHHMM(_le.at)}` : "aucune"} · Dernier snapshot serveur : ${listenerLastServerAt ? fmtHHMM(listenerLastServerAt) : "jamais"} · Tentatives : ${listenerAttempts} · Dernier early-return : ${_er ? `${esc(_er.reason)} à ${fmtHHMM(_er.at)}` : "aucun"} · Instantanés cache jetés : ${listenerCacheCount}${listenerCacheLastAt ? ` (dernier à ${fmtHHMM(listenerCacheLastAt)})` : ""}${listenerPersistenceError ? ` · ⚠️ Persistance : ${esc(listenerPersistenceError)}` : ""}`; })()}</p>
@@ -4879,7 +4954,7 @@ const A = {
   newitem: () => itemForm(), edititem: (el) => { const i = byId(S.inventory, el.dataset.id); if (i) itemForm(i); },
   newcage: () => cageForm(), editcage: (el) => { const c = byId(S.cages || [], el.dataset.id); if (c) cageForm(c); },
   retrySync: async () => { await retryPendingSync(); const _rsUid = (userSession.isLoggedIn && userSession.uid) || (window.firebaseAuth && window.firebaseAuth.currentUser && window.firebaseAuth.currentUser.uid); if (_rsUid && canReinstallListener(_rsUid)) ensureCloudSyncListener(_rsUid); toast("Synchronisation relancée"); render(); },
-  probeServer: async () => { await probeServerContact(); render(); },
+  probeServer: async () => { try { await probeServerContact(); } finally { render(); } },
   retryListener: () => { const _cu = window.firebaseAuth && window.firebaseAuth.currentUser; if (!_cu || !_cu.uid) return; if (listenerUid && _cu.uid !== listenerUid) return; cancelListenerTimers(); listenerStopped = false; listenerAttempts = 0; ensureCloudSyncListener(_cu.uid); render(); },
   resolveConflictsLocal: () => confirmBox("Garder vos versions locales ? Cela ÉCRASERA les versions cloud plus récentes pour les fiches en conflit. Cette action est volontaire et irréversible côté cloud.", "Garder mes versions", async () => { await resolveSyncConflicts("local"); }),
   resolveConflictsCloud: () => confirmBox("Garder les versions cloud ? Vos modifications locales en conflit seront ABANDONNÉES pour ces fiches (le reste de vos données n'est pas touché).", "Garder les versions cloud", async () => { await resolveSyncConflicts("cloud"); }),

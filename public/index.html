@@ -648,6 +648,11 @@ let cloudSyncActive = false;
    que le premier snapshot SERVEUR n'est pas arrivé ; cloudLoginError porte le
    dernier échec de lecture serveur à la connexion, sans jamais effacer la file. */
 let cloudFirstSnapshotPending = false;
+/* Correctif pastille v2 (2026-11-04) : cloudSnapshotEver ne devient vrai que sur
+   un snapshot SERVEUR, et n'est remis à faux que lors d'une déconnexion explicite.
+   Contrairement à cloudFirstSnapshotPending, il ne peut donc pas repasser à vrai
+   lors d'une simple navigation, ce qui figeait la pastille sur « Fusion en attente ». */
+let cloudSnapshotEver = false;
 let cloudLoginError = "";
 /* Section 3 : verrou retryPendingSync (voir retryPendingSync ci-dessous). */
 let retryPendingSyncRunning = false;
@@ -1099,6 +1104,7 @@ function initFirebaseSync() {
           unsubscribeSnapshot = null;
         }
         cloudSyncActive = false;
+        cloudSnapshotEver = false;
         updateUserUI();
       }
     });
@@ -1122,6 +1128,7 @@ function ensureCloudSyncListener(uid) {
          même supprimer une fiche locale absente du cache. Seul le serveur fait foi. */
       if (snap.metadata && snap.metadata.fromCache) return;
       cloudSyncActive = true;
+      cloudSnapshotEver = true;
       /* Section 2 (S6) : premier snapshot serveur reçu — le jeu affiché n'est plus
          seulement local. Les snapshots cache sont déjà filtrés ci-dessus. */
       if (cloudFirstSnapshotPending) cloudFirstSnapshotPending = false;
@@ -1232,6 +1239,8 @@ async function handleUserAuthenticated(user, msg) {
      n'a pas encore eu lieu. L'indicateur reste visible jusqu'au premier snapshot
      serveur (voir ensureCloudSyncListener), il ne présente pas ce jeu comme définitif. */
   cloudFirstSnapshotPending = true;
+  cloudSnapshotEver = false;
+  cloudSyncActive = false;
   cloudLoginError = "";
   ingest(Object.values(userLocalData));
   updateUserUI();
@@ -1375,13 +1384,13 @@ function updateUserUI() {
     if (userSession.isLocalProfile) {
       statusHtml = `<span class="dot local"></span><span>Profil local (${esc(userSession.email || "actif")})</span>`;
       subText = "Mode local • Enregistré";
-    } else if (cloudFirstSnapshotPending && !cloudSyncActive) {
+    } else if (!cloudSnapshotEver) {
       /* Section 2 (S6) : tant que le premier snapshot serveur n'est pas arrivé, le
          jeu affiché est le jeu local seul — il ne doit pas s'afficher « Synchronisé ».
-         Branche placée AVANT le cas en ligne, y compris hors-ligne à la connexion.
-         Correctif indicateur latéral (2026-11-04) : la garde !cloudSyncActive évite
-         que la pastille reste figée sur « Fusion cloud en attente » après qu'un
-         snapshot serveur est déjà arrivé ; dans ce cas on retombe sur le statut
+         Plan B (2026-11-04) : la pastille utilise cloudSnapshotEver, vrai uniquement
+         après un snapshot serveur et jamais remis à faux par une navigation, au lieu
+         de cloudFirstSnapshotPending qui repassait à vrai après navigation et figeait
+         la pastille. Une fois le premier snapshot reçu, on retombe sur le statut
          honnête getSyncStatus() ci-dessous, comme l'écran Compte et la vue Données. */
       statusHtml = `<span class="dot offline"></span><span style="color:var(--warn)">Fusion cloud en attente${cloudLoginError ? " — échec de lecture cloud" : ""}</span>`;
       subText = cloudLoginError ? "Données locales affichées • Envoi cloud en attente" : "Données locales affichées • Fusion cloud en attente";
@@ -3250,7 +3259,7 @@ async function deleteAccount() {
     if (window.firebaseAuth) { await window.firebaseAuth.signOut().catch(() => {}); }
     userSession = { isLoggedIn: false, farmName: "ABV Farm", email: "", managerName: "Éleveur ABV", photoUrl: null, uid: null, isLocalProfile: false, authProvider: null, lastSync: null };
     try { localStorage.removeItem(LS_USER_KEY); } catch (e) {}
-    cloudSyncActive = false; ready = false; S = blank();
+    cloudSyncActive = false; cloudSnapshotEver = false; ready = false; S = blank();
     const guestData = getLocalData(); ingest(Object.values(guestData));
     closeModal(); render();
     if (authErr) toast("Compte et données supprimés, sauf l'identifiant de connexion (connexion trop ancienne) : reconnectez-vous puis supprimez à nouveau pour le supprimer." + (profileErr ? " Profil cloud non supprimé : règle Firestore à déployer." : ""));
@@ -3644,6 +3653,7 @@ function accountModal() {
       try { localStorage.setItem(LS_USER_KEY, JSON.stringify(userSession)); } catch (e) {}
       if (_prevUid) { try { localStorage.removeItem(lastSyncErrorKey(_prevUid)); } catch (e) {} }
       cloudSyncActive = false;
+      cloudSnapshotEver = false;
       ready = false;
       S = blank();
       const guestData = getLocalData();

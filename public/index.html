@@ -1794,6 +1794,7 @@ let ui = { q: "", gq: "", rpage: 1, txpage: 1, spage: 1, feedFrom: "", feedTo: "
 function route() {
   const h = decodeURIComponent(location.hash.slice(1));
   if (h.startsWith("lapin-")) return { name: "lapin", id: h.slice(6) };
+  if (h.startsWith("portee-")) return { name: "portee", id: h.slice(7) };
   return { name: NAV.some((n) => n.id === h) ? h : "accueil" };
 }
 function go(h) { if (location.hash.slice(1) === h) render(); else location.hash = h; }
@@ -2376,6 +2377,7 @@ VIEWS.lapin = ({ id }) => {
   const mts = S.matings.filter((m) => m.male === id || m.female === id).sort((x, y) => y.date.localeCompare(x.date));
   const kids = S.rabbits.filter((k) => k.father === id || k.mother === id);
   const done = mts.filter((m) => m.status === "Mise bas"), failed = mts.filter((m) => m.status === "Échoué");
+  const litters = done.slice().sort((x, y) => (y.birthDate || y.date || "").localeCompare(x.birthDate || x.date || ""));
   const born = done.reduce((s, m) => s + (Number(m.alive) || 0), 0);
   const rate = done.length + failed.length ? Math.round((done.length / (done.length + failed.length)) * 100) : null;
   const matur = r.status === "Externe" ? ["info", "Externe — utilisable en reproduction", "Animal extérieur au cheptel : il ne compte pas dans la ration ni dans les cages, mais il peut être choisi comme reproducteur."] : isExited(r) ? ["", "Sorti", r.exitDate ? `Âge figé à ${ageLabel(a, r.birth, r.exitDate)} (sortie le ${fmtDate(r.exitDate)}).` : `Âge figé à ${ageLabel(a, r.birth, today())}.`] : a >= MATURE_DAYS ? ["ok", "Apte à la reproduction", `Âge ≥ 5 mois (${ageLabel(a, r.birth, today())}).`] : a >= 90 ? ["warn", "Sub-adulte", `Maturité dans ${MATURE_DAYS - a} jours.`] : ["info", "Jeune en croissance", `Reproduction possible à partir de 5 mois.`];
@@ -2408,7 +2410,10 @@ VIEWS.lapin = ({ id }) => {
       <div class="list">${mts.map((m) => `<div class="li"><span class="ico ${m.status === "Mise bas" ? "ok" : m.status === "Échoué" ? "bad" : "clay"}">${ICON.heart}</span><div class="grow"><div class="t">× ${esc(rname(m.male === id ? m.female : m.male))}</div><div class="d">Saillie ${fmtDate(m.date)}${m.status === "Mise bas" ? ` · ${Number(m.alive) || 0} vivants, ${Number(m.dead) || 0} morts-nés` : ` · prévue ${fmtShort(m.due)}`}</div></div>${mstChip(m.status)}<button class="btn sm ghost danger" data-act="del" data-kind="mating" data-id="${m.id}" title="Supprimer la saillie" aria-label="Supprimer la saillie">${ICON.trash}</button></div>`).join("")}</div>` : emptyBox("heart", "Aucune saillie", "L'historique de reproduction apparaîtra ici.")}
       ${kids.length ? `<h3 style="margin:14px 0 6px">Descendants (${kids.length})</h3><div class="actions">${kids.map((k) => `<a class="chip ${sexCls(k) === "u" ? "" : sexCls(k)}" href="#lapin-${k.id}" style="text-decoration:none">${sexSym(k)} ${esc(k.name)}</a>`).join("")}</div>` : ""}
     </section>
-  </div>`;
+  </div>
+  ${r.sex === "Female" ? `<section class="card"><div class="row-h"><h2>Portées (${litters.length})</h2></div>
+    ${litters.length ? `<div class="list">${litters.map((m) => { const _kits = S.rabbits.filter((k) => k.matingId === m.id).length; const _lot = S.batches.find((b) => b.mating === m.id); const _age = m.birthDate ? diff(m.birthDate, today()) : null; return `<a class="li" href="#portee-${m.id}"><span class="ico ok">${ICON.baby}</span><div class="grow"><div class="t">Portée du ${fmtDate(m.birthDate || m.date)} · × ${esc(rname(m.male))}</div><div class="d">${Number(m.alive) || 0} vivants, ${Number(m.dead) || 0} morts-nés${_age != null ? ` · ${_age} j` : ""}${_kits ? ` · ${_kits} fiche(s) individuelle(s)` : ""}${_lot ? ` · lot ${esc(_lot.code)}` : ""}</div></div><span class="chip ok">Voir</span></a>`; }).join("")}</div>` : emptyBox("baby", "Aucune portée", "Les portées de cette lapine apparaîtront ici après chaque mise bas enregistrée.")}
+  </section>` : ""}`;
 };
 function pb(id, role) {
   const r = id ? rab(id) : null;
@@ -2448,6 +2453,34 @@ function treatRow(x) {
     ${wEnd ? `<div class="d ${active ? "neg" : "pos"}">${active ? `Délai d'attente jusqu'au ${fmtDate(wEnd)}` : `Délai d'attente terminé (${x.withdrawal} j)`}</div>` : ""}</div>
     <button class="btn sm ghost" data-act="edittreat" data-id="${x.id}" aria-label="Modifier le soin">${ICON.edit}</button><button class="btn sm ghost" data-act="del" data-kind="treatment" data-id="${x.id}" aria-label="Supprimer le soin">${ICON.trash}</button></div>`;
 }
+
+/* Portée : détail d'une mise bas, accessible depuis la fiche d'une lapine (#portee-<id saillie>).
+   Une portée = une saillie au statut "Mise bas" : ses lapereaux individuels (matingId)
+   et son lot d'engraissement éventuel (b.mating) y sont regroupés. */
+VIEWS.portee = ({ id }) => {
+  const m = byId(S.matings, id);
+  if (!m) return `<a class="btn ghost" href="#saillies">${ICON.back}Reproduction</a><div class="card">${emptyBox("baby", "Cette portée n'existe plus", "La saillie a peut-être été supprimée.")}</div>`;
+  if (m.status !== "Mise bas") return `<div class="head"><a class="btn ghost" href="#lapin-${m.female}">${ICON.back}Fiche de ${esc(rname(m.female))}</a></div><div class="card">${emptyBox("baby", "Pas encore une portée", `Cette saillie est au statut « ${esc(m.status)} » : la portée n'apparaîtra ici qu'après l'enregistrement de la mise bas.`)}</div>`;
+  const kits = S.rabbits.filter((k) => k.matingId === m.id);
+  const lots = S.batches.filter((b) => b.mating === m.id);
+  const birth = m.birthDate || "";
+  const ageDays = birth ? diff(birth, today()) : null;
+  return `<div class="head"><a class="btn ghost" href="#lapin-${m.female}">${ICON.back}Fiche de ${esc(rname(m.female))}</a>
+    <div class="actions">${(Number(m.alive) || 0) > kits.length ? `<button class="btn" data-act="kits" data-id="${m.id}">Fiches lapereaux</button>` : ""}${!lots.length ? `<button class="btn" data-act="newbatch" data-id="${m.id}">${ICON.plus}Créer un lot</button>` : ""}<button class="btn ghost" data-act="editmating" data-id="${m.id}" aria-label="Modifier la portée">${ICON.edit}Modifier</button></div></div>
+  <section class="card"><div class="row-h"><h2>Portée du ${fmtDate(birth)}</h2>${mstChip(m.status)}</div>
+    <dl class="kv" style="margin:0">
+      <div><dt>Mère</dt><dd><a href="#lapin-${m.female}">${esc(rname(m.female))}</a></dd></div><div><dt>Père</dt><dd><a href="#lapin-${m.male}">${esc(rname(m.male))}</a></dd></div>
+      <div><dt>Saillie</dt><dd>${fmtDate(m.date)}</dd></div><div><dt>Mise bas</dt><dd>${fmtDate(birth)}</dd></div>
+      <div><dt>Nés vivants</dt><dd>${Number(m.alive) || 0}</dd></div><div><dt>Morts-nés</dt><dd>${Number(m.dead) || 0}</dd></div>
+      <div><dt>Âge des lapereaux</dt><dd>${ageDays == null ? "—" : ageDays + " j"}</dd></div><div><dt>Sevrage prévu</dt><dd>${birth ? fmtDate(addDays(birth, WEANING)) + ` (J${WEANING})` : "—"}</dd></div>
+    </dl>${m.notes ? `<p class="hint" style="margin-top:12px">${esc(m.notes)}</p>` : ""}</section>
+  <div class="grid g2">
+    <section class="card"><div class="row-h"><h2>Lapereaux individuels (${kits.length})</h2></div>
+      ${kits.length ? `<div class="actions">${kits.map((k) => `<a class="chip ${sexCls(k) === "u" ? "" : sexCls(k)}" href="#lapin-${k.id}" style="text-decoration:none">${sexSym(k)} ${esc(k.name)}</a>`).join("")}</div>` : emptyBox("baby", "Aucune fiche individuelle", "Créez une fiche par lapereau vivant pour suivre chacun séparément.", (Number(m.alive) || 0) > 0 ? `<button class="btn pri" data-act="kits" data-id="${m.id}">Fiches lapereaux</button>` : "")}</section>
+    <section class="card"><div class="row-h"><h2>Lot d'engraissement</h2></div>
+      ${lots.length ? `<div class="list">${lots.map((b) => `<a class="li" href="#engraissement"><span class="ico">${ICON.layers}</span><div class="grow"><div class="t">${esc(b.code)}</div><div class="d">${b.current} / ${b.initial} · ${b.deaths || 0} perte(s) · ${esc(b.status)}${b.weaning ? ` · sevré le ${fmtDate(b.weaning)}` : ""}</div></div></a>`).join("")}</div>` : emptyBox("layers", "Aucun lot pour cette portée", "Créez un lot au sevrage pour suivre l'engraissement.", `<button class="btn pri" data-act="newbatch" data-id="${m.id}">${ICON.plus}Créer un lot</button>`)}</section>
+  </div>`;
+};
 
 VIEWS.saillies = () => {
   const cur = S.matings.filter((m) => ["Accouplé", "Gestation confirmée"].includes(m.status)).sort((a, b) => a.due.localeCompare(b.due));

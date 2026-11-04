@@ -16,3 +16,16 @@
   from = "/*"
   to = "/index.html"
   status = 200
+
+# En-têtes de sécurité (section 12) : sans CSP — l'application est entièrement
+# en scripts inline + onclick inline, une CSP sans 'unsafe-inline' la casserait
+# et avec 'unsafe-inline' elle n'apporterait presque rien. À réévaluer seulement
+# après externalisation du JS. Pas de SRI : les CDN (gstatic, cdnjs, Google)
+# ne sont pas versionnés par hash ici et un hash erroné casserait le chargement.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "SAMEORIGIN"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=()"

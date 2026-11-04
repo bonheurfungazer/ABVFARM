@@ -1,4 +1,4 @@
-const CACHE_NAME = "abv-farm-pwa-v18";
+const CACHE_NAME = "abv-farm-pwa-v19";
 const ASSETS_TO_CACHE = [
   "./",
   "./index.html",
@@ -12,7 +12,13 @@ const ASSETS_TO_CACHE = [
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(ASSETS_TO_CACHE);
+      return Promise.all(ASSETS_TO_CACHE.map((url) => cache.add(url).catch((err) => {
+        console.warn("PWA install: asset non mis en cache:", url, err);
+        return null;
+      }))).then((results) => {
+        const failed = results.filter((r) => r === null).length;
+        if (failed) console.warn(`PWA install: ${failed}/${ASSETS_TO_CACHE.length} asset(s) non mis en cache, installation poursuivie.`);
+      });
     }).then(() => self.skipWaiting())
   );
 });

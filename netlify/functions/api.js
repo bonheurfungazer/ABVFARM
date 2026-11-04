@@ -274,14 +274,27 @@ function auditData(payload) {
   return { counts, totals, totalIssues: issues.length, issues };
 }
 
+// CORS (section 12) : seule l'origine du site déployé peut lire les réponses
+// depuis un navigateur. Les méthodes annoncées sont exactement celles servies
+// (GET, POST, OPTIONS) : PUT/DELETE ne sont pas servis et répondent 405.
+// ATTENTION : le CORS n'est PAS un contrôle d'accès — l'endpoint reste public
+// et sans authentification, et ne stocke rien ; un appel curl direct n'est pas
+// bloqué par ces en-têtes, seuls les navigateurs d'autres origines le sont.
+const ALLOWED_ORIGIN = 'https://abv-farm.netlify.app';
+function corsHeaders(event) {
+  const origin = (event.headers && (event.headers.origin || event.headers.Origin)) || '';
+  const base = { 'Content-Type': 'application/json', 'Vary': 'Origin' };
+  if (origin === ALLOWED_ORIGIN) {
+    return { ...base, 'Access-Control-Allow-Origin': ALLOWED_ORIGIN, 'Access-Control-Allow-Headers': 'Content-Type', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' };
+  }
+  return base;
+}
+
 exports.handler = async (event, context) => {
-  const headers = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-    'Content-Type': 'application/json'
-  };
+  const headers = corsHeaders(event);
   if (event.httpMethod === 'OPTIONS') {
+    // Pré-vol : sans origine autorisée, pas d'en-tête CORS -> le navigateur bloque.
+    if (!headers['Access-Control-Allow-Origin']) return { statusCode: 403, headers, body: JSON.stringify({ error: 'Origine non autorisée' }) };
     return { statusCode: 200, headers, body: '' };
   }
 
@@ -340,7 +353,12 @@ exports.handler = async (event, context) => {
     }
 
     if (event.httpMethod === 'POST') {
-      const payload = event.body ? JSON.parse(event.body) : {};
+      if (event.body && event.body.length > 6 * 1024 * 1024) {
+        return { statusCode: 413, headers, body: JSON.stringify({ success: false, error: 'PAYLOAD_TOO_LARGE', message: 'Corps trop volumineux (limite 6 Mo).' }) };
+      }
+      let payload;
+      try { payload = event.body ? JSON.parse(event.body) : {}; }
+      catch (e) { return { statusCode: 400, headers, body: JSON.stringify({ success: false, error: 'INVALID_JSON', message: 'Corps JSON invalide.' }) }; }
       if (isAudit || payload.action === 'audit' || Array.isArray(payload.docs) || payload.data || payload.S) {
         if (!Array.isArray(payload.docs) && !payload.data && !payload.S) {
           return { statusCode: 400, headers, body: JSON.stringify({ success: false, error: 'NO_DATA', message: 'Envoyez { docs: [...] } (format export) ou { data: { rabbits: [...], ... } }.' }) };
@@ -385,7 +403,7 @@ exports.handler = async (event, context) => {
 
     return { statusCode: 405, headers, body: JSON.stringify({ error: 'Méthode non autorisée' }) };
   } catch (error) {
-    return { statusCode: 500, headers, body: JSON.stringify({ error: error.message }) };
+    return { statusCode: 500, headers, body: JSON.stringify({ error: 'Erreur interne' }) };
   }
 };
 

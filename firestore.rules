@@ -1,4 +1,16 @@
 rules_version = '2';
+// SEC1 — VERIFICATION CONSOLE OBLIGATOIRE AVANT TOUT PUSH / DEPLOIEMENT :
+// ce fichier seul ne prouve PAS les regles reellement deployees.
+// Comparer ligne a ligne, dans la console Firebase, les regles de la base
+// nommee "ai-studio-android-abvfarm-2867a79a-d782-4ee4-a962-662ea47d3af4"
+// ET celles de la base par defaut "(default)" avec ce fichier, et les
+// aligner sur ce fichier avant tout push. Raison : firebase.json ne
+// deploie ces regles que vers la base nommee ; le client ne bascule plus
+// vers la base par defaut (voir index.html, SEC1), mais une base par
+// defaut restee en regles ouvertes / mode test resterait un risque si un
+// autre client ou un ancien build l'utilisait encore. Ne pas deployer ce
+// fichier vers "(default)" sans avoir d'abord confirme en console que
+// cette base existe dans le meme projet.
 
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -35,6 +47,45 @@ service cloud.firestore {
              (!('displayName' in data) || data.displayName == null || (data.displayName is string && data.displayName.size() <= 200)) &&
              (!('farmName' in data) || data.farmName == null || (data.farmName is string && data.farmName.size() <= 200)) &&
              (!('updatedAt' in data) || data.updatedAt == null || (data.updatedAt is timestamp && data.updatedAt <= request.time));
+    }
+
+    // Validation cheptel (SEC, compatible import) : les documents d'export
+    // n'ont ni userId ni createdAt, et updatedAt est une chaine ISO, pas un
+    // timestamp. On ne peut donc PAS appliquer ici isValidRabbit,
+    // isValidMating, etc., ni exiger createdAt, sans casser l'import et la
+    // synchronisation existants. Ce qui est verifie, sans casser l'import :
+    // kind dans la liste des 10 kinds du client, docId prefixe par ce kind,
+    // id present (chaine 1..128 ou entier, cas des imports anciens), type
+    // d'updatedAt, et nombre de champs <= 200. Limites documentees (voir
+    // rapport section 11) : pas de plafond d'octets par document (borne
+    // Firestore 1 Mio), pas de validation par champ et par kind, pas de
+    // controle du contenu des chaines ; la validation stricte par champ
+    // reste cote client dans les formulaires.
+    function isValidCheptelKind(kind) {
+      return kind in ['rabbit', 'mating', 'weight', 'treatment', 'item', 'feed', 'tx', 'batch', 'reminder', 'cage'];
+    }
+
+    function isCheptelDocId(kind, docId) {
+      return (kind == 'rabbit' && docId.matches('^rabbit-.+')) ||
+             (kind == 'mating' && docId.matches('^mating-.+')) ||
+             (kind == 'weight' && docId.matches('^weight-.+')) ||
+             (kind == 'treatment' && docId.matches('^treatment-.+')) ||
+             (kind == 'item' && docId.matches('^item-.+')) ||
+             (kind == 'feed' && docId.matches('^feed-.+')) ||
+             (kind == 'tx' && docId.matches('^tx-.+')) ||
+             (kind == 'batch' && docId.matches('^batch-.+')) ||
+             (kind == 'reminder' && docId.matches('^reminder-.+')) ||
+             (kind == 'cage' && docId.matches('^cage-.+'));
+    }
+
+    function isValidCheptel(data, docId) {
+      return ('kind' in data) && isValidCheptelKind(data.kind) &&
+             isCheptelDocId(data.kind, docId) &&
+             ('id' in data) &&
+             ((data.id is string && data.id.size() > 0 && data.id.size() <= 128 && docId == data.kind + '-' + data.id) ||
+              (data.id is int && docId.matches('^' + data.kind + '-[0-9]+$'))) &&
+             (!('updatedAt' in data) || data.updatedAt is string) &&
+             data.keys().size() <= 200;
     }
 
     // Validation helper for rabbits
@@ -168,11 +219,18 @@ service cloud.firestore {
     // User Profile
     match /users/{userId} {
       allow get, list: if isOwner(userId);
-      allow create, update: if isOwner(userId) && isValidId(userId);
+      allow create, update: if isOwner(userId) && isValidId(userId) && isValidUserProfile(incoming());
+      allow delete: if isOwner(userId);
 
       // Cheptel documents subcollection used by Web App
+      // SEC : validation compatible import (voir isValidCheptel). La lecture
+      // et la suppression restent reservees au proprietaire, sans validation
+      // de contenu : une suppression ne doit pas etre bloquee par un
+      // document ancien mal forme.
       match /cheptel/{docId} {
-        allow read, write: if isOwner(userId);
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId) && isValidCheptel(incoming(), docId);
+        allow delete: if isOwner(userId);
       }
 
       // Rabbits subcollection

@@ -2686,8 +2686,8 @@ const isExited = (r) => r && (r.status || "Actif") !== "Actif";
 /* Correctif externe : « Externe » n'est pas une sortie. Un reproducteur externe
    (ex. Elise le Sniper) reste utilisable en reproduction, sans compter dans le
    cheptel (ration, cages, effectifs). Seuls Vendu / Mort / Abattu / Donné sont
-   vraiment partis et figent les données. C'est aussi la règle déjà utilisée par
-   l'API d'audit, l'application ne l'appliquait pas. */
+   vraiment partis et figent les données. C'était aussi la règle de l'ancienne API d'audit
+   (retirée depuis), que l'application n'appliquait pas. */
 const isDeparted = (r) => r && ["Vendu", "Mort", "Abattu", "Donné"].includes(r.status);
 const age = (r) => r?.birth ? diff(r.birth, (isDeparted(r) && r.exitDate ? r.exitDate : today())) : -1; /* M15 : âge figé seulement pour les vrais partis (isDeparted), pas pour « Externe ». */
 const sexCls = (r) => r?.sex === "Male" ? "m" : r?.sex === "Female" ? "f" : "u";
@@ -3898,7 +3898,6 @@ VIEWS.donnees = () => {
     <p>Écoute cloud : ${esc(listenerStatusText())} <button class="btn sm" data-act="retryListener">Réessayer l'écoute</button></p>
     <p class="hint">${(() => { const _le = listenerLastError; const _er = listenerLastEarlyReturn; return `Dernière erreur d'écoute : ${_le ? `${esc(_le.text)} à ${fmtHHMM(_le.at)}` : "aucune"} · Dernier snapshot serveur : ${listenerLastServerAt ? fmtHHMM(listenerLastServerAt) : "jamais"} · Tentatives : ${listenerAttempts} · Dernier early-return : ${_er ? `${esc(_er.reason)} à ${fmtHHMM(_er.at)}` : "aucun"} · Instantanés cache jetés : ${listenerCacheCount}${listenerCacheLastAt ? ` (dernier à ${fmtHHMM(listenerCacheLastAt)})` : ""}${listenerPersistenceError ? ` · ⚠️ Persistance : ${esc(listenerPersistenceError)}` : ""}`; })()}</p>
   </section>
-  <section class="card full"><h2>Audit API — Toutes les données</h2><p class="hint" style="margin:6px 0 12px">L'API Netlify reçoit toutes les données de l'élevage (lapins, saillies, lots, pesées, soins, stocks, distributions, finances, rappels, cages) et renvoie la liste complète des incohérences de logique, sans rien stocker : l'analyse est renvoyée dans la réponse, puis oubliée. En local (fichier ouvert sans déploiement Netlify), l'API n'est pas joignable : déployez le site pour l'utiliser.</p><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn pri" data-act="auditApi">Auditer mes données actuelles (toutes)</button><button class="btn" data-act="auditApiFile">Auditer un fichier exporté</button></div><div id="auditApiResult" style="margin-top:12px">${lastAuditReportHtml}</div> <!-- M38 : rapport ré-affiché après un re-rendu. --></section>
   <div class="grid g2">
     <section class="card"><h2>Application Téléphone (PWA)</h2><p class="hint" style="margin:6px 0 12px">Installez ABV Farm directement sur l'écran d'accueil de votre smartphone ou tablette pour l'ouvrir comme une application native sans ouvrir le navigateur.</p>${isPwaStandalone() ? `<p class="hint">✅ Application déjà installée sur cet appareil.</p>` : `<button class="btn pri" onclick="installPWA()">${ICON.phone}Installer sur mon téléphone</button>`}</section> <!-- m89 : bouton masqué si déjà installée/standalone. -->
     <section class="card"><h2>Rapport officiel PDF</h2><p class="hint" style="margin:6px 0 12px">Document PDF complet prêt à l'impression : synthèse d'élevage, liste détaillée des lapins, gestations et indicateurs clés.</p><button class="btn pri" data-act="exportpdf">${ICON.fileText}Télécharger l'inventaire PDF</button></section>
@@ -5758,12 +5757,6 @@ async function bulk(docs, label) {
   return _unique.length;
 }
 
-/* ---------- Audit API : toutes les donnees vers Netlify, rapport en retour, rien n'est stocke ---------- */
-function auditDocsFromState() {
-  const docs = [];
-  for (const [kind, key] of Object.entries(KIND)) (S[key] || []).forEach((x) => { const { kind: _k, ...rest } = x; docs.push({ kind, ...rest }); });
-  return docs;
-}
 function backupSettings() {
   /* M39 : la « sauvegarde complète » ne contenait que les fiches — paramètres,
      budgets, préférences de notification et thème étaient perdus à la
@@ -5781,33 +5774,6 @@ function restoreBackupSettings(s) {
     if (s.theme && typeof s.theme === "string") { try { localStorage.setItem("abv_theme", s.theme); } catch (e) {} document.documentElement.setAttribute("data-theme", s.theme); }
   } catch (e) { console.warn("Restauration des réglages impossible :", e); }
 }
-let lastAuditReportHtml = ""; /* M38 : le rapport survit aux re-rendus (avant, il ne vivait que dans le DOM de la vue Données). */
-function showAuditReport(report) {
-  const el = document.getElementById("auditApiResult");
-  /* M26 : forme validée avant tout déréférencement — avant, un rapport sans
-     totals (erreur 500, corps partiel) faisait planter l'affichage. */
-  const _okAudit = !!(report && report.success && report.totals && typeof report.totals.errors === "number" && typeof report.totals.warnings === "number");
-  const html = _okAudit
-    ? `<div class="card" style="margin:0"><h3>Audit API — ${report.totals.errors} erreur(s), ${report.totals.warnings} avertissement(s)</h3><p class="hint">Fiches analysees : ${Object.entries(report.counts || {}).map(([k, v]) => `${k} ${v}`).join(" · ")}${report.ignored ? ` · ${report.ignored} entrée(s) ignorée(s) (format non reconnu)` : ""} · L'API n'a rien stocke.</p>${report.issues && report.issues.length ? `<div class="list">${report.issues.map((i) => `<div class="li"><div class="grow"><div class="t">${i.severity === "error" ? "⛔" : "⚠️"} [${esc(i.code)}] ${esc(i.label || "")}</div><div class="d">${esc(i.detail || "")} — ${esc(i.suggestion || "")}</div></div></div>`).join("")}</div>` : `<p class="hint">✅ Aucune incoherence detectee par l'API.</p>`}</div>`
-    : `<p class="hint">❌ Audit impossible : ${esc((report && (report.error || report.message)) || "réponse invalide ou incomplète (totaux manquants)")}.</p>`;
-  lastAuditReportHtml = html;
-  if (el) el.innerHTML = html;
-  else toast(_okAudit ? `Audit API : ${report.totals.errors} erreur(s), ${report.totals.warnings} avertissement(s)` : "Audit API impossible");
-}
-async function runAuditApi(payload) {
-  const el = document.getElementById("auditApiResult");
-  if (el) el.innerHTML = `<p class="hint">Audit en cours via l'API…</p>`;
-  try {
-    const res = await fetch("/api/audit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-    const report = await res.json();
-    showAuditReport(report);
-    toast(report && report.success && report.totals ? `Audit API termine : ${report.totals.errors} erreur(s), ${report.totals.warnings} avertissement(s)` : "Audit API impossible"); /* M26 */
-  } catch (e) {
-    if (el) el.innerHTML = `<p class="hint">❌ API inaccessible (site non deploie sur Netlify, ou hors ligne). L'audit API necessite le site deploie : ouvrez l'application via son URL Netlify, pas en fichier local.</p>`;
-    toast("API inaccessible : site non deploie sur Netlify ?");
-  }
-}
-
 const A = {
   close: closeModal,
   overlay: (el, e) => { if (e.target === el) closeModal(); },
@@ -5994,8 +5960,6 @@ const A = {
     toast("Fichier de sauvegarde exporté");
   },
   import: () => $("#importFile").click(),
-  auditApi: async () => { await runAuditApi({ docs: auditDocsFromState(), params: { gestation: GESTATION, weaning: WEANING }, today: today() }); },
-  auditApiFile: () => { const inp = document.createElement("input"); inp.type = "file"; inp.accept = ".json,application/json"; inp.style.display = "none"; document.body.appendChild(inp); /* m41 : input RATTACHÉ au DOM avant le clic — détaché, le sélecteur de fichier restait inopérant sur certains navigateurs mobiles. */ inp.onchange = async () => { const f = inp.files[0]; inp.remove(); if (!f) return; try { const j = JSON.parse(await f.text()); const docs = Array.isArray(j.docs) ? j.docs : (j.data ? [] : []); if (!docs.length && !j.data && !j.S) { toast("Fichier exporte non reconnu : il faut un export ABV Farm (docs)."); return; } await runAuditApi({ docs, data: j.data, S: j.S, params: { gestation: GESTATION, weaning: WEANING }, today: today() }); } catch (e) { toast("Fichier JSON illisible."); } }; inp.click(); },
 };
 
 let lastImportGuessedDates = 0;

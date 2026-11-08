@@ -3,6 +3,10 @@
     {
       "database": "ai-studio-android-abvfarm-2867a79a-d782-4ee4-a962-662ea47d3af4",
       "rules": "firestore.rules"
+    },
+    {
+      "database": "(default)",
+      "rules": "firestore.rules"
     }
   ],
   "emulators": {

@@ -29,6 +29,34 @@ const KINDMAP = {
   cage: 'cages', cages: 'cages'
 };
 
+// C12 — Garde-fous compatibles avec l'usage actuel de l'app (POST /api/audit
+// same-site, sans jeton : un jeton partage exige par le rapport casserait
+// l'appel existant, qui n'en envoie aucun — sous-point ECARTE, voir journal).
+// Plafond de corps abaisse a 1 Mo, nombre de fiches borne, frein simple par
+// IP/fenetre en memoire (best-effort : une instance Netlify froide repart a
+// zero, ce n'est pas un quota dur) et index Map dans les boucles chaudes.
+const MAX_BODY_BYTES = 1024 * 1024;
+const MAX_AUDIT_RECORDS = 2000;
+const RATE_WINDOW_MS = 5 * 60 * 1000;
+const RATE_MAX_AUDITS = 30;
+const auditHitsByIp = new Map();
+function countPayloadRecords(payload) {
+  let n = 0;
+  if (Array.isArray(payload.docs)) n += payload.docs.length;
+  const src = payload.data || payload.S || payload.export || null;
+  if (src && typeof src === 'object') for (const arr of Object.values(src)) if (Array.isArray(arr)) n += arr.length;
+  return n;
+}
+function auditRateLimited(event) {
+  const h = event.headers || {};
+  const ip = str(h['x-forwarded-for'] || h['X-Forwarded-For'] || h['client-ip'] || h['Client-Ip'] || 'inconnue').split(',')[0].trim() || 'inconnue';
+  const now = Date.now();
+  const cur = auditHitsByIp.get(ip);
+  if (!cur || now - cur.start >= RATE_WINDOW_MS) { auditHitsByIp.set(ip, { start: now, count: 1 }); return false; }
+  cur.count += 1;
+  return cur.count > RATE_MAX_AUDITS;
+}
+
 function str(v) { return v === null || v === undefined ? '' : String(v); }
 function num(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }
 function isDate(s) { return typeof s === 'string' && /^\d{4}-\d{2}-\d{2}/.test(s); }
@@ -40,22 +68,54 @@ function addDays(dateStr, n) {
   return d.toISOString().slice(0, 10);
 }
 
-function normalizeData(payload) {
-  const data = { rabbits: [], matings: [], weights: [], treatments: [], inventory: [], feed: [], tx: [], batches: [], reminders: [], cages: [] };
-  const put = (kind, obj) => {
-    const key = KINDMAP[kind];
-    if (key && obj && typeof obj === 'object') data[key].push(obj);
-  };
+/* M29 : statistiques de la derniere normalisation (entrees ignorees).
+   Lecture sure : auditData appelle normalizeData puis lit ceci dans le meme
+   tour synchrone. */
+let _normalizeStats = { ignored: 0 };
+function validateAuditPayload(payload) {
+  /* M28 : types explicites — avant, des docs non-tableau ou des entrees
+     primitives traversaient puis faisaient lever auditData (500 au lieu de 400). */
+  if (payload.docs !== undefined && !Array.isArray(payload.docs)) return 'Le champ « docs » doit être un tableau de fiches.';
   if (Array.isArray(payload.docs)) {
-    for (const d of payload.docs) put(d.kind, d);
+    for (let i = 0; i < payload.docs.length; i++) {
+      const d = payload.docs[i];
+      if (!d || typeof d !== 'object' || Array.isArray(d)) return `L'entrée docs[${i}] doit être un objet (fiche), pas une valeur primitive.`;
+      if (typeof d.kind !== 'string' || !d.kind) return `L'entrée docs[${i}] n'a pas de « kind » valide.`;
+    }
   }
   const src = payload.data || payload.S || payload.export || null;
-  if (src && typeof src === 'object') {
+  if (src !== null && src !== undefined) {
+    if (typeof src !== 'object' || Array.isArray(src)) return 'Le champ « data »/« S » doit être un objet de tableaux.';
+    for (const [k, arr] of Object.entries(src)) {
+      if (!Array.isArray(arr)) return `Le champ « ${k} » doit être un tableau.`;
+      for (let i = 0; i < arr.length; i++) {
+        if (!arr[i] || typeof arr[i] !== 'object' || Array.isArray(arr[i])) return `L'entrée ${k}[${i}] doit être un objet (fiche).`;
+      }
+    }
+  }
+  return null;
+}
+function normalizeData(payload) {
+  const data = { rabbits: [], matings: [], weights: [], treatments: [], inventory: [], feed: [], tx: [], batches: [], reminders: [], cages: [] };
+  let ignored = 0;
+  const put = (kind, obj) => {
+    const key = KINDMAP[kind];
+    /* M29 : kind inconnu ou entree non-objet = ignore COMPTE, pas silencieux. */
+    if (!key || !obj || typeof obj !== 'object' || Array.isArray(obj)) { ignored++; return; }
+    data[key].push(obj);
+  };
+  if (Array.isArray(payload.docs)) {
+    for (const d of payload.docs) put(d && d.kind, d);
+  }
+  const src = payload.data || payload.S || payload.export || null;
+  if (src && typeof src === 'object' && !Array.isArray(src)) {
     for (const [k, arr] of Object.entries(src)) {
       if (Array.isArray(arr)) for (const d of arr) put(k, d);
+      else ignored++;
     }
   }
   // Un corps qui est directement un export { docs } est deja traite ci-dessus.
+  _normalizeStats = { ignored };
   return data;
 }
 
@@ -118,6 +178,9 @@ function auditData(payload) {
   }
 
   // ---- Saillies ----
+  // C12 : index des lapereaux par saillie (remplace un rabbits.filter par saillie).
+  const kitsByMating = new Map();
+  for (const r of rabbits) if (r && r.matingId !== undefined && r.matingId !== null && r.matingId !== '') { const k = str(r.matingId); kitsByMating.set(k, (kitsByMating.get(k) || 0) + 1); }
   const openByFemale = new Map();
   for (const m of data.matings) {
     const label = `${rname(m.female)} x ${rname(m.male)} (${day(m.date) || 'sans date'})`;
@@ -137,9 +200,9 @@ function auditData(payload) {
     if (num(m.alive) < 0 || num(m.dead) < 0) push('error', 'MATING_COUNT_NEGATIVE', 'mating', m.id, label, 'Nombre de lapereaux vivants ou morts-negatif.', 'Corriger les nombres.');
     if (m.status === 'Mise bas' && (!m.birthDate || m.alive === null || m.alive === undefined || m.alive === '')) push('warning', 'MATING_BIRTH_INCOMPLETE', 'mating', m.id, label, 'Mise bas sans date de mise bas ou sans nombre de nes vivants.', 'Renseigner la date et le nombre de nes vivants (la taille est souvent seulement dans les notes).');
     if (m.status === 'Mise bas') {
-      const kits = rabbits.filter((r) => str(r.matingId) === str(m.id));
-      if (kits.length < num(m.alive)) push('warning', 'KITS_COUNT_MISMATCH', 'mating', m.id, label, `${num(m.alive)} lapereaux vivants declares, mais seulement ${kits.length} fiche(s) individuelle(s) de lapereau(x).`, 'Creer les fiches manquantes depuis la saillie.');
-      if (kits.length > num(m.alive)) push('error', 'KITS_COUNT_MISMATCH', 'mating', m.id, label, `${kits.length} fiche(s) de lapereau(x) pour seulement ${num(m.alive)} vivant(s) declare(s).`, 'Verifier les fiches de lapereaux ou le nombre declare.');
+      const kitsCount = kitsByMating.get(str(m.id)) || 0;
+      if (kitsCount < num(m.alive)) push('warning', 'KITS_COUNT_MISMATCH', 'mating', m.id, label, `${num(m.alive)} lapereaux vivants declares, mais seulement ${kitsCount} fiche(s) individuelle(s) de lapereau(x).`, 'Creer les fiches manquantes depuis la saillie.');
+      if (kitsCount > num(m.alive)) push('error', 'KITS_COUNT_MISMATCH', 'mating', m.id, label, `${kitsCount} fiche(s) de lapereau(x) pour seulement ${num(m.alive)} vivant(s) declare(s).`, 'Verifier les fiches de lapereaux ou le nombre declare.');
     }
     // Consanguinite directe : parent/enfant ou freres et soeurs pleins
     const f = rabById.get(str(m.female)); const mm = rabById.get(str(m.male));
@@ -156,6 +219,9 @@ function auditData(payload) {
   }
 
   // ---- Lots ----
+  // C12 : index des transactions par lot + libelles de recettes (remplace un data.tx.some par lot).
+  const txBatchIds = new Set(data.tx.map((x) => str(x.batchId)));
+  const saleTxLabels = data.tx.filter((x) => x.type === 'in').map((x) => str(x.label || ''));
   const batchCodes = new Map();
   for (const b of data.batches) {
     const label = b.code || b.id || '(sans code)';
@@ -169,7 +235,11 @@ function auditData(payload) {
     if (num(b.initial) > 0 && num(b.current) > num(b.initial)) push('error', 'BATCH_CURRENT_GT_INITIAL', 'batch', b.id, label, `Effectif actuel (${num(b.current)}) superieur a l\'effectif initial (${num(b.initial)}).`, 'Corriger l\'effectif initial ou actuel.');
     if (num(b.deaths) < 0) push('error', 'BATCH_COUNT_NEGATIVE', 'batch', b.id, label, 'Nombre de pertes negatif.', 'Corriger les pertes.');
     if (num(b.initial) > 0 && num(b.current) + num(b.deaths) > num(b.initial)) push('error', 'BATCH_COUNT_INCOHERENT', 'batch', b.id, label, `Effectif actuel (${num(b.current)}) + pertes (${num(b.deaths)}) superieur a l\'initial (${num(b.initial)}) : des ventes ou pertes ont ete sur-declarees.`, 'Corriger l\'effectif, les pertes ou l\'initial.');
-    if (b.status === 'Vendu' && !data.tx.some((x) => str(x.batchId) === str(b.id) || (x.type === 'in' && (x.label || '').includes(b.code)))) push('warning', 'BATCH_SALE_NO_TX', 'batch', b.id, label, 'Lot vendu sans recette financiere liee.', 'Renseigner la vente avec son prix, ou recreer la recette liee au lot.');
+    if (b.status === 'Vendu' && !txBatchIds.has(str(b.id)) && !(b.code && saleTxLabels.some((l) => l.includes(b.code)))) push('warning', 'BATCH_SALE_NO_TX', 'batch', b.id, label, 'Lot vendu sans recette financiere liee.', 'Renseigner la vente avec son prix, ou recreer la recette liee au lot.');
+    /* m28 : le parametre weaning (envoye par le client, documente) n'etait
+       JAMAIS lu : on controle maintenant le sevrage precoce des lots. */
+    const _bm = b.mating ? matById.get(str(b.mating)) : null;
+    if (_bm && day(_bm.birthDate) && day(b.weaning) && day(b.weaning) < addDays(day(_bm.birthDate), weaning)) push('warning', 'BATCH_WEANING_EARLY', 'batch', b.id, label, `Sevrage le ${day(b.weaning)}, avant les ${weaning} jours prevus apres la mise bas du ${day(_bm.birthDate)}.`, 'Verifier la date de sevrage ou le parametre de sevrage.');
   }
 
   // ---- Pesees / Soins ----
@@ -233,8 +303,9 @@ function auditData(payload) {
     if (bought - used < 0) push('error', 'STOCK_NEGATIVE', 'inventory', '', 'Stock global', `Stock d'aliment negatif : ${bought.toFixed(1)} kg achetes pour ${used.toFixed(1)} kg distribues.`, 'Verifier les achats manquants, le stock de depart ou les distributions en trop.');
     const unlinked = data.feed.filter((f) => !f.item).length;
     if (unlinked > 0) push('warning', 'FEED_UNLINKED', 'feed', '', `${unlinked} distribution(s) sans article`, `${unlinked} distribution(s) sur ${data.feed.length} sans article lie : le restant par article ne peut pas etre suivi.`, 'Lier les distributions a un article, ou laisser l\'application les repartir en FIFO.');
+    const txRabbitIds = new Set(data.tx.map((x) => str(x.rabbitId)));
     for (const r of rabbits) {
-      if (r.status === 'Vendu' && !data.tx.some((x) => str(x.rabbitId) === str(r.id))) {
+      if (r.status === 'Vendu' && !txRabbitIds.has(str(r.id))) {
         push('warning', 'TX_MISSING_SALE', 'rabbit', r.id, r.name || r.id, 'Animal vendu sans recette financiere liee.', 'Renseigner le prix de vente pour creer la recette liee.');
       }
     }
@@ -258,8 +329,11 @@ function auditData(payload) {
     if (cageNames.has(k)) push('error', 'CAGE_DUP_NAME', 'cage', c.id, c.name, 'Nom de cage en double.', 'Renommer l\'une des deux cages.');
     else cageNames.set(k, c.id);
   }
+  // C12 : occupation active par cage calculee en un seul passage.
+  const activeByCage = new Map();
+  for (const r of rabbits) if (active(r) && r.cage) { const k = str(r.cage).trim().toLowerCase(); activeByCage.set(k, (activeByCage.get(k) || 0) + 1); }
   for (const [nameKey, cage] of cageByName) {
-    const occ = rabbits.filter((r) => active(r) && str(r.cage || '').trim().toLowerCase() === nameKey).length;
+    const occ = activeByCage.get(nameKey) || 0;
     if (num(cage.capacity) > 0 && occ > num(cage.capacity)) {
       push('error', 'CAGE_OVER_CAPACITY', 'cage', cage.id, cage.name, `${occ} occupant(s) actif(s) pour une capacite de ${num(cage.capacity)}.`, 'Deplacer des lapins vers une autre cage.');
     }
@@ -267,11 +341,12 @@ function auditData(payload) {
 
   const counts = {};
   for (const [k, v] of Object.entries(data)) counts[k] = v.length;
+  const ignored = _normalizeStats.ignored || 0; /* M29 */
   const totals = {
     errors: issues.filter((i) => i.severity === 'error').length,
     warnings: issues.filter((i) => i.severity === 'warning').length
   };
-  return { counts, totals, totalIssues: issues.length, issues };
+  return { counts, totals, totalIssues: issues.length, issues, ignored };
 }
 
 // CORS (section 12) : seule l'origine du site déployé peut lire les réponses
@@ -280,12 +355,19 @@ function auditData(payload) {
 // ATTENTION : le CORS n'est PAS un contrôle d'accès — l'endpoint reste public
 // et sans authentification, et ne stocke rien ; un appel curl direct n'est pas
 // bloqué par ces en-têtes, seuls les navigateurs d'autres origines le sont.
-const ALLOWED_ORIGIN = 'https://abv-farm.netlify.app';
+// C12 : la protection ajoutee est donc un frein (plafond de corps, borne de
+// fiches, limite par IP/fenetre), pas une authentification — un jeton partage
+// casserait l'appel /api/audit actuel de l'app, qui n'en envoie aucun.
+/* m25 : origines autorisees CONFIGURABLES (variable d'environnement
+   ABV_ALLOWED_ORIGINS, liste separee par des virgules) — avant, une seule
+   origine etait codee en dur : tout autre deploiement (preprod, domaine
+   personnalise) etait bloque sans toucher au code. Defaut inchange. */
+const ALLOWED_ORIGINS = (process.env.ABV_ALLOWED_ORIGINS || 'https://abv-farm.netlify.app').split(',').map((s) => s.trim()).filter(Boolean);
 function corsHeaders(event) {
   const origin = (event.headers && (event.headers.origin || event.headers.Origin)) || '';
   const base = { 'Content-Type': 'application/json', 'Vary': 'Origin' };
-  if (origin === ALLOWED_ORIGIN) {
-    return { ...base, 'Access-Control-Allow-Origin': ALLOWED_ORIGIN, 'Access-Control-Allow-Headers': 'Content-Type', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' };
+  if (origin && ALLOWED_ORIGINS.includes(origin)) {
+    return { ...base, 'Access-Control-Allow-Origin': origin, 'Access-Control-Allow-Headers': 'Content-Type', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' };
   }
   return base;
 }
@@ -294,14 +376,19 @@ exports.handler = async (event, context) => {
   const headers = corsHeaders(event);
   if (event.httpMethod === 'OPTIONS') {
     // Pré-vol : sans origine autorisée, pas d'en-tête CORS -> le navigateur bloque.
-    if (!headers['Access-Control-Allow-Origin']) return { statusCode: 403, headers, body: JSON.stringify({ error: 'Origine non autorisée' }) };
+    if (!headers['Access-Control-Allow-Origin']) return { statusCode: 403, headers, body: JSON.stringify({ success: false, error: 'ORIGIN_NOT_ALLOWED', message: 'Origine non autorisée' }) };
     return { statusCode: 200, headers, body: '' };
   }
 
-  const rawPath = (event.path || '') + ' ' + (event.rawUrl || '');
+  /* M30 : routage sur le DERNIER segment exact du chemin uniquement — avant,
+     rawPath = path + ' ' + rawUrl et includes('audit') : un paramètre ou un
+     segment contenant « audit » détournait la route. */
+  const _segments = (event.path || '').split('/').filter(Boolean);
+  const _lastSeg = (_segments[_segments.length - 1] || '').toLowerCase();
+  const rawPath = event.path || '';
   const query = event.queryStringParameters || {};
-  const isAudit = rawPath.includes('audit') || query.audit === '1' || query.audit === 'true';
-  const isAlerts = rawPath.includes('alerts');
+  const isAudit = _lastSeg === 'audit' || query.audit === '1' || query.audit === 'true';
+  const isAlerts = _lastSeg === 'alerts';
 
   try {
     if (event.httpMethod === 'GET') {
@@ -347,23 +434,57 @@ exports.handler = async (event, context) => {
           app: 'ABV Farm Backend API',
           timestamp: new Date().toISOString(),
           route: rawPath.trim() || 'root',
-          features: { serverless: true, nodeVersion: process.version, authSupported: true, alertsSupported: true, auditSupported: true }
+          /* m26 : avant, la route racine annoncait authSupported: true (aucune
+             authentification n'existe sur cette API) et exposait la version
+             exacte de Node (process.version) — information inutile aux clients
+             et utile a un attaquant. */
+          features: { serverless: true, authSupported: false, alertsSupported: true, auditSupported: true }
         })
       };
     }
 
     if (event.httpMethod === 'POST') {
-      if (event.body && event.body.length > 6 * 1024 * 1024) {
-        return { statusCode: 413, headers, body: JSON.stringify({ success: false, error: 'PAYLOAD_TOO_LARGE', message: 'Corps trop volumineux (limite 6 Mo).' }) };
+      /* m29 : corps base64 (isBase64Encoded) decode AVANT mesure et parsing —
+         avant, il traversait tel quel (JSON illisible) ; et la taille etait
+         mesuree en CARACTERES, pas en octets : le plafond « 1 Mo » etait
+         approximatif pour tout contenu non-ASCII. */
+      let rawBody = event.body || '';
+      if (event.isBase64Encoded && rawBody) {
+        try { rawBody = Buffer.from(rawBody, 'base64').toString('utf8'); } catch (e) { rawBody = ''; }
+      }
+      if (Buffer.byteLength(rawBody, 'utf8') > MAX_BODY_BYTES) {
+        return { statusCode: 413, headers, body: JSON.stringify({ success: false, error: 'PAYLOAD_TOO_LARGE', message: 'Corps trop volumineux (limite 1 Mo).' }) };
       }
       let payload;
-      try { payload = event.body ? JSON.parse(event.body) : {}; }
+      try { payload = rawBody ? JSON.parse(rawBody) : {}; }
       catch (e) { return { statusCode: 400, headers, body: JSON.stringify({ success: false, error: 'INVALID_JSON', message: 'Corps JSON invalide.' }) }; }
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+        return { statusCode: 400, headers, body: JSON.stringify({ success: false, error: 'INVALID_PAYLOAD', message: 'Corps JSON invalide : un objet est attendu.' }) };
+      }
       if (isAudit || payload.action === 'audit' || Array.isArray(payload.docs) || payload.data || payload.S) {
         if (!Array.isArray(payload.docs) && !payload.data && !payload.S) {
           return { statusCode: 400, headers, body: JSON.stringify({ success: false, error: 'NO_DATA', message: 'Envoyez { docs: [...] } (format export) ou { data: { rabbits: [...], ... } }.' }) };
         }
+        /* M28 : validation de types AVANT l'audit (400 explicite, pas 500). */
+        const _badField = validateAuditPayload(payload);
+        if (_badField) {
+          return { statusCode: 400, headers, body: JSON.stringify({ success: false, error: 'INVALID_DATA', message: _badField }) };
+        }
+        // C12 : bornes de cout avant l'audit (le nombre de fiches borne le travail,
+        // le frein par IP borne la frequence des audits couteux).
+        if (countPayloadRecords(payload) > MAX_AUDIT_RECORDS) {
+          return { statusCode: 413, headers, body: JSON.stringify({ success: false, error: 'TOO_MANY_RECORDS', message: `Export trop volumineux pour l'audit en ligne (limite ${MAX_AUDIT_RECORDS} fiches).` }) };
+        }
+        if (auditRateLimited(event)) {
+          return { statusCode: 429, headers: { ...headers, 'Retry-After': String(Math.ceil(RATE_WINDOW_MS / 1000)) }, body: JSON.stringify({ success: false, error: 'RATE_LIMITED', message: 'Trop d\'audits recents : reessayez dans quelques minutes.' }) };
+        }
         const report = auditData(payload);
+        /* M29 : 0 fiche reconnue = donnees non analysees, pas un audit
+           « reussi a 0 incoherence ». Les entrees ignorees sont signalees. */
+        const _recognized = Object.values(report.counts || {}).reduce((s, n) => s + (Number(n) || 0), 0);
+        if (_recognized === 0) {
+          return { statusCode: 400, headers, body: JSON.stringify({ success: false, error: 'NO_RECOGNIZED_RECORDS', message: 'Aucune fiche reconnue dans les données envoyées : vérifiez le format (docs/data aux kinds attendus).', ignored: report.ignored || 0 }) };
+        }
         return {
           statusCode: 200, headers,
           body: JSON.stringify({
@@ -373,6 +494,7 @@ exports.handler = async (event, context) => {
             counts: report.counts,
             totals: report.totals,
             totalIssues: report.totalIssues,
+            ignored: report.ignored || 0,
             issues: report.issues
           })
         };
@@ -390,20 +512,25 @@ exports.handler = async (event, context) => {
           })
         };
       }
+      /* M27 : avant, toute action POST inconnue répondait 200 « succès »
+         alors que rien n'avait été traité. */
       return {
-        statusCode: 200, headers,
+        statusCode: 400, headers,
         body: JSON.stringify({
-          success: true,
-          message: 'Données traitées avec succès par le backend',
-          receivedAction: payload.action || 'default',
-          result: { processedAt: new Date().toISOString() }
+          success: false,
+          error: 'UNKNOWN_ACTION',
+          message: "Action POST non reconnue : utilisez POST /api/audit (ou l'action 'audit').",
+          receivedAction: payload.action || null
         })
       };
     }
 
-    return { statusCode: 405, headers, body: JSON.stringify({ error: 'Méthode non autorisée' }) };
+    /* m27 : 405 avec en-tete Allow (methodes reellement servies) et format
+       d'erreur coherent avec le reste de l'API ({ success, error, message }). */
+    return { statusCode: 405, headers: { ...headers, 'Allow': 'GET, POST, OPTIONS' }, body: JSON.stringify({ success: false, error: 'METHOD_NOT_ALLOWED', message: 'Méthode non autorisée : utilisez GET, POST ou OPTIONS.' }) };
   } catch (error) {
-    return { statusCode: 500, headers, body: JSON.stringify({ error: 'Erreur interne' }) };
+    console.error('ABV Farm API : erreur interne', error);
+    return { statusCode: 500, headers, body: JSON.stringify({ success: false, error: 'INTERNAL_ERROR', message: 'Erreur interne.' }) };
   }
 };
 
@@ -411,4 +538,5 @@ exports.handler = async (event, context) => {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports.auditData = auditData;
   module.exports.normalizeData = normalizeData;
+  module.exports.validateAuditPayload = validateAuditPayload;
 }

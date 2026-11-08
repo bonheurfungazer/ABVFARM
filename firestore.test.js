@@ -153,3 +153,37 @@ test("Authenticated user: can manage mating records, inventory and reminders", a
     })
   );
 });
+
+/* M22 : la collection web reelle (users/{uid}/cheptel) et le profil n'etaient
+   couverts par aucun test — seuls les schemas Android l'etaient. */
+test("Cheptel (web): owner can write a valid doc, invalid docs are rejected", async () => {
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const cheptel = aliceDb.collection("users").doc(ALICE_UID).collection("cheptel");
+  const good = { kind: "rabbit", id: "abc123", name: "Bella", updatedAt: new Date().toISOString() };
+
+  await assertSucceeds(cheptel.doc("rabbit-abc123").set(good));
+  // docId non prefixe par le kind
+  await assertFails(cheptel.doc("mating-abc123").set(good));
+  // updatedAt manquant (M21 : requis)
+  const noTs = { ...good };
+  delete noTs.updatedAt;
+  await assertFails(cheptel.doc("rabbit-def456").set(noTs));
+  // updatedAt non-chaine
+  await assertFails(cheptel.doc("rabbit-ghi789").set({ ...good, id: "ghi789", updatedAt: 123 }));
+  // kind inconnu
+  await assertFails(cheptel.doc("rabbit-jkl012").set({ ...good, id: "jkl012", kind: "inconnu" }));
+  // un autre utilisateur ne peut ni lire ni ecrire
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  await assertFails(bobDb.collection("users").doc(ALICE_UID).collection("cheptel").doc("rabbit-abc123").get());
+  await assertFails(bobDb.collection("users").doc(ALICE_UID).collection("cheptel").doc("rabbit-zz9999").set({ ...good, id: "zz9999" }));
+});
+
+test("Profil: owner can write their profile, userId mismatch is rejected", async () => {
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const profileRef = aliceDb.collection("users").doc(ALICE_UID);
+  await assertSucceeds(profileRef.set({ userId: ALICE_UID, email: "alice@example.com", farmName: "Ferme Alice", updatedAt: new Date() }));
+  await assertFails(profileRef.set({ userId: BOB_UID, farmName: "Usurpation" }));
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  await assertFails(bobDb.collection("users").doc(ALICE_UID).set({ userId: BOB_UID }));
+  await assertFails(bobDb.collection("users").doc(ALICE_UID).get());
+});

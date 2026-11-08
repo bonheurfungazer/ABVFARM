@@ -4,13 +4,12 @@ rules_version = '2';
 // Comparer ligne a ligne, dans la console Firebase, les regles de la base
 // nommee "ai-studio-android-abvfarm-2867a79a-d782-4ee4-a962-662ea47d3af4"
 // ET celles de la base par defaut "(default)" avec ce fichier, et les
-// aligner sur ce fichier avant tout push. Raison : firebase.json ne
-// deploie ces regles que vers la base nommee ; le client ne bascule plus
-// vers la base par defaut (voir index.html, SEC1), mais une base par
-// defaut restee en regles ouvertes / mode test resterait un risque si un
-// autre client ou un ancien build l'utilisait encore. Ne pas deployer ce
-// fichier vers "(default)" sans avoir d'abord confirme en console que
-// cette base existe dans le meme projet.
+// aligner sur ce fichier avant tout push. Raison : une base par defaut
+// restee en regles ouvertes / mode test resterait un risque si un autre
+// client ou un ancien build l'utilisait encore. Correctif C9 : firebase.json
+// deploie desormais ces regles vers les DEUX bases (nommee ET "(default)") ;
+// la verification en console reste obligatoire avant le deploiement pour
+// confirmer que la base "(default)" existe bien dans le meme projet.
 
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -41,11 +40,16 @@ service cloud.firestore {
     }
 
     // Validation helper for user profile
+    // m17 : plafond du nombre de champs (avant : champs supplementaires
+    // illimites, un profil pouvait embarquer n'importe quel contenu).
+    // m15 : createdAt, quand il est present, doit etre un timestamp passe.
     function isValidUserProfile(data) {
       return data.userId is string && data.userId == request.auth.uid &&
+             data.keys().size() <= 20 &&
              (!('email' in data) || data.email == null || (data.email is string && data.email.size() <= 200)) &&
              (!('displayName' in data) || data.displayName == null || (data.displayName is string && data.displayName.size() <= 200)) &&
              (!('farmName' in data) || data.farmName == null || (data.farmName is string && data.farmName.size() <= 200)) &&
+             (!('createdAt' in data) || data.createdAt == null || (data.createdAt is timestamp && data.createdAt <= request.time)) &&
              (!('updatedAt' in data) || data.updatedAt == null || data.updatedAt is timestamp);
     }
 
@@ -84,13 +88,21 @@ service cloud.firestore {
              ('id' in data) &&
              ((data.id is string && data.id.size() > 0 && data.id.size() <= 128 && docId == data.kind + '-' + data.id) ||
               (data.id is int && docId.matches('^' + data.kind + '-[0-9]+$'))) &&
-             (!('updatedAt' in data) || data.updatedAt is string) &&
+             /* M21 (durcissement progressif) : updatedAt desormais REQUIS
+                (chaine ISO non vide, <= 64 car. — le client web l'ecrit a
+                chaque save) et plafonds de taille sur les champs texte
+                principaux quand ils sont des chaines. */
+             ('updatedAt' in data) && data.updatedAt is string && data.updatedAt.size() > 0 && data.updatedAt.size() <= 64 &&
+             (!('name' in data) || !(data.name is string) || data.name.size() <= 300) &&
+             (!('title' in data) || !(data.title is string) || data.title.size() <= 300) &&
+             (!('label' in data) || !(data.label is string) || data.label.size() <= 300) &&
+             (!('code' in data) || !(data.code is string) || data.code.size() <= 100) &&
              data.keys().size() <= 200;
     }
 
     // Validation helper for rabbits
     function isValidRabbit(data) {
-      return data.userId is string && data.userId == request.auth.uid &&
+      return data.keys().size() <= 50 && data.userId is string && data.userId == request.auth.uid &&
              data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
              data.sex is string && data.sex.size() > 0 && data.sex.size() <= 50 &&
              (!('localId' in data) || data.localId is int) &&
@@ -109,7 +121,7 @@ service cloud.firestore {
 
     // Validation helper for mating records
     function isValidMating(data) {
-      return data.userId is string && data.userId == request.auth.uid &&
+      return data.keys().size() <= 50 && data.userId is string && data.userId == request.auth.uid &&
              data.maleId is int &&
              data.femaleId is int &&
              data.matingDate is int &&
@@ -122,7 +134,7 @@ service cloud.firestore {
 
     // Validation helper for inventory items
     function isValidInventory(data) {
-      return data.userId is string && data.userId == request.auth.uid &&
+      return data.keys().size() <= 50 && data.userId is string && data.userId == request.auth.uid &&
              data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
              data.category is string && data.category.size() > 0 && data.category.size() <= 50 &&
              (!('localId' in data) || data.localId is int) &&
@@ -138,7 +150,7 @@ service cloud.firestore {
 
     // Validation helper for reminders
     function isValidReminder(data) {
-      return data.userId is string && data.userId == request.auth.uid &&
+      return data.keys().size() <= 50 && data.userId is string && data.userId == request.auth.uid &&
              data.title is string && data.title.size() > 0 && data.title.size() <= 150 &&
              data.dueDate is int &&
              (!('localId' in data) || data.localId is int) &&
@@ -150,7 +162,7 @@ service cloud.firestore {
 
     // Validation helper for treatments
     function isValidTreatment(data) {
-      return data.userId is string && data.userId == request.auth.uid &&
+      return data.keys().size() <= 50 && data.userId is string && data.userId == request.auth.uid &&
              data.rabbitId is int &&
              data.date is int &&
              (!('localId' in data) || data.localId is int) &&
@@ -166,7 +178,7 @@ service cloud.firestore {
 
     // Validation helper for weights
     function isValidWeight(data) {
-      return data.userId is string && data.userId == request.auth.uid &&
+      return data.keys().size() <= 50 && data.userId is string && data.userId == request.auth.uid &&
              data.rabbitId is int &&
              data.weight is number &&
              data.recordDate is int &&
@@ -177,7 +189,7 @@ service cloud.firestore {
 
     // Validation helper for daily feed logs
     function isValidFeedLog(data) {
-      return data.userId is string && data.userId == request.auth.uid &&
+      return data.keys().size() <= 50 && data.userId is string && data.userId == request.auth.uid &&
              data.feedDate is int &&
              data.quantityGrams is number &&
              (!('localId' in data) || data.localId is int) &&
@@ -187,7 +199,7 @@ service cloud.firestore {
 
     // Validation helper for fattening batches
     function isValidFatteningBatch(data) {
-      return data.userId is string && data.userId == request.auth.uid &&
+      return data.keys().size() <= 50 && data.userId is string && data.userId == request.auth.uid &&
              data.batchCode is string && data.batchCode.size() > 0 && data.batchCode.size() <= 100 &&
              (!('localId' in data) || data.localId is int) &&
              (!('matingRecordId' in data) || data.matingRecordId == null || data.matingRecordId is int) &&
@@ -204,7 +216,7 @@ service cloud.firestore {
 
     // Validation helper for financial transactions
     function isValidFinancialTransaction(data) {
-      return data.userId is string && data.userId == request.auth.uid &&
+      return data.keys().size() <= 50 && data.userId is string && data.userId == request.auth.uid &&
              (!('localId' in data) || data.localId is int) &&
              (!('date' in data) || data.date is int) &&
              (!('type' in data) || (data.type is string && data.type.size() <= 50)) &&
@@ -219,7 +231,14 @@ service cloud.firestore {
     // User Profile
     match /users/{userId} {
       allow get, list: if isOwner(userId);
-      allow create, update: if isOwner(userId) && isValidId(userId) && isValidUserProfile(incoming());
+      allow create: if isOwner(userId) && isValidId(userId) && isValidUserProfile(incoming());
+      // m15 : createdAt IMMUABLE a la mise a jour quand il existe deja —
+      // avant, rien n'empechait de le reecrire a chaque connexion. Non requis
+      // a la creation : l'app Android ne l'envoie jamais, l'exiger casserait
+      // ses creations de profil.
+      allow update: if isOwner(userId) && isValidId(userId) && isValidUserProfile(incoming()) &&
+                       (!('createdAt' in existing()) || existing().createdAt == null ||
+                        !('createdAt' in incoming()) || incoming().createdAt == existing().createdAt);
       allow delete: if isOwner(userId);
 
       // Cheptel documents subcollection used by Web App

@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.tasks.await
+import java.util.UUID
 
 class FirestoreFarmRepository(private val db: FirebaseFirestore) {
 
@@ -23,7 +24,11 @@ class FirestoreFarmRepository(private val db: FirebaseFirestore) {
         FirebaseFirestore.getInstance(
             context.applicationContext.getString(R.string.firestore_database_id)
         )
-    )
+    ) {
+        // C19 : initialise le préfixe d'installation persistant utilisé
+        // pour les identifiants de documents (voir FirestoreDocIds).
+        FirestoreDocIds.init(context)
+    }
 
     private val auth = com.google.firebase.auth.FirebaseAuth.getInstance()
 
@@ -72,7 +77,7 @@ class FirestoreFarmRepository(private val db: FirebaseFirestore) {
     suspend fun saveRabbit(rabbit: FirestoreRabbit, docId: String? = null): String {
         val uid = requireUserId()
         val col = db.collection("users").document(uid).collection("rabbits")
-        val targetId = if (!docId.isNullOrBlank()) docId else if (rabbit.id.isNotBlank()) rabbit.id else "rabbit_${System.currentTimeMillis()}"
+        val targetId = if (!docId.isNullOrBlank()) docId else if (rabbit.id.isNotBlank()) rabbit.id else "rabbit_" + UUID.randomUUID().toString()
         val docRef = col.document(targetId)
 
         val payload = mutableMapOf<String, Any?>(
@@ -94,7 +99,8 @@ class FirestoreFarmRepository(private val db: FirebaseFirestore) {
         if (!rabbit.imageUri.isNullOrBlank()) payload["imageUri"] = rabbit.imageUri
 
         try {
-            val exists = try { docRef.get().await().exists() } catch (e: Exception) { false }
+            /* M19 : un echec de lecture d'existence ne doit PAS etre traite comme « n'existe pas » : reemettre createdAt ferait refuser la mise a jour par les regles (createdAt immuable). Sans try/catch local, l'exception remonte au catch exterieur qui abandonne l'ecriture. */
+            val exists = docRef.get().await().exists()
             if (!exists) {
                 payload["createdAt"] = FieldValue.serverTimestamp()
             }
@@ -139,7 +145,7 @@ class FirestoreFarmRepository(private val db: FirebaseFirestore) {
     suspend fun saveMatingRecord(record: FirestoreMatingRecord, docId: String? = null): String {
         val uid = requireUserId()
         val col = db.collection("users").document(uid).collection("mating_records")
-        val targetId = if (!docId.isNullOrBlank()) docId else if (record.id.isNotBlank()) record.id else "mating_${System.currentTimeMillis()}"
+        val targetId = if (!docId.isNullOrBlank()) docId else if (record.id.isNotBlank()) record.id else "mating_" + UUID.randomUUID().toString()
         val docRef = col.document(targetId)
 
         val payload = mutableMapOf<String, Any?>(
@@ -154,7 +160,8 @@ class FirestoreFarmRepository(private val db: FirebaseFirestore) {
             "updatedAt" to FieldValue.serverTimestamp()
         )
         try {
-            val exists = try { docRef.get().await().exists() } catch (e: Exception) { false }
+            /* M19 : un echec de lecture d'existence ne doit PAS etre traite comme « n'existe pas » : reemettre createdAt ferait refuser la mise a jour par les regles (createdAt immuable). Sans try/catch local, l'exception remonte au catch exterieur qui abandonne l'ecriture. */
+            val exists = docRef.get().await().exists()
             if (!exists) {
                 payload["createdAt"] = FieldValue.serverTimestamp()
             }
@@ -199,7 +206,7 @@ class FirestoreFarmRepository(private val db: FirebaseFirestore) {
     suspend fun saveInventoryItem(item: FirestoreInventoryItem, docId: String? = null): String {
         val uid = requireUserId()
         val col = db.collection("users").document(uid).collection("inventory_items")
-        val targetId = if (!docId.isNullOrBlank()) docId else if (item.id.isNotBlank()) item.id else "item_${System.currentTimeMillis()}"
+        val targetId = if (!docId.isNullOrBlank()) docId else if (item.id.isNotBlank()) item.id else "item_" + UUID.randomUUID().toString()
         val docRef = col.document(targetId)
 
         val payload = mutableMapOf<String, Any?>(
@@ -217,7 +224,8 @@ class FirestoreFarmRepository(private val db: FirebaseFirestore) {
             "updatedAt" to FieldValue.serverTimestamp()
         )
         try {
-            val exists = try { docRef.get().await().exists() } catch (e: Exception) { false }
+            /* M19 : un echec de lecture d'existence ne doit PAS etre traite comme « n'existe pas » : reemettre createdAt ferait refuser la mise a jour par les regles (createdAt immuable). Sans try/catch local, l'exception remonte au catch exterieur qui abandonne l'ecriture. */
+            val exists = docRef.get().await().exists()
             if (!exists) {
                 payload["createdAt"] = FieldValue.serverTimestamp()
             }
@@ -262,7 +270,7 @@ class FirestoreFarmRepository(private val db: FirebaseFirestore) {
     suspend fun saveReminder(reminder: FirestoreReminder, docId: String? = null): String {
         val uid = requireUserId()
         val col = db.collection("users").document(uid).collection("reminders")
-        val targetId = if (!docId.isNullOrBlank()) docId else if (reminder.id.isNotBlank()) reminder.id else "rem_${System.currentTimeMillis()}"
+        val targetId = if (!docId.isNullOrBlank()) docId else if (reminder.id.isNotBlank()) reminder.id else "rem_" + UUID.randomUUID().toString()
         val docRef = col.document(targetId)
 
         val payload = mutableMapOf<String, Any?>(
@@ -277,7 +285,8 @@ class FirestoreFarmRepository(private val db: FirebaseFirestore) {
         )
 
         try {
-            val exists = try { docRef.get().await().exists() } catch (e: Exception) { false }
+            /* M19 : un echec de lecture d'existence ne doit PAS etre traite comme « n'existe pas » : reemettre createdAt ferait refuser la mise a jour par les regles (createdAt immuable). Sans try/catch local, l'exception remonte au catch exterieur qui abandonne l'ecriture. */
+            val exists = docRef.get().await().exists()
             if (!exists) {
                 payload["createdAt"] = FieldValue.serverTimestamp()
             }
@@ -322,7 +331,7 @@ class FirestoreFarmRepository(private val db: FirebaseFirestore) {
     suspend fun saveTreatment(treatment: FirestoreTreatmentRecord, docId: String? = null): String {
         val uid = requireUserId()
         val col = db.collection("users").document(uid).collection("treatments")
-        val targetId = if (!docId.isNullOrBlank()) docId else if (treatment.id.isNotBlank()) treatment.id else "treat_${System.currentTimeMillis()}"
+        val targetId = if (!docId.isNullOrBlank()) docId else if (treatment.id.isNotBlank()) treatment.id else "treat_" + UUID.randomUUID().toString()
         val docRef = col.document(targetId)
 
         val payload = mutableMapOf<String, Any?>(
@@ -339,7 +348,8 @@ class FirestoreFarmRepository(private val db: FirebaseFirestore) {
         if (treatment.nextDueDate != null) payload["nextDueDate"] = treatment.nextDueDate
 
         try {
-            val exists = try { docRef.get().await().exists() } catch (e: Exception) { false }
+            /* M19 : un echec de lecture d'existence ne doit PAS etre traite comme « n'existe pas » : reemettre createdAt ferait refuser la mise a jour par les regles (createdAt immuable). Sans try/catch local, l'exception remonte au catch exterieur qui abandonne l'ecriture. */
+            val exists = docRef.get().await().exists()
             if (!exists) {
                 payload["createdAt"] = FieldValue.serverTimestamp()
             }
@@ -384,7 +394,7 @@ class FirestoreFarmRepository(private val db: FirebaseFirestore) {
     suspend fun saveWeight(weight: FirestoreWeightRecord, docId: String? = null): String {
         val uid = requireUserId()
         val col = db.collection("users").document(uid).collection("weights")
-        val targetId = if (!docId.isNullOrBlank()) docId else if (weight.id.isNotBlank()) weight.id else "wt_${System.currentTimeMillis()}"
+        val targetId = if (!docId.isNullOrBlank()) docId else if (weight.id.isNotBlank()) weight.id else "wt_" + UUID.randomUUID().toString()
         val docRef = col.document(targetId)
 
         val payload = mutableMapOf<String, Any?>(
@@ -397,7 +407,8 @@ class FirestoreFarmRepository(private val db: FirebaseFirestore) {
             "updatedAt" to FieldValue.serverTimestamp()
         )
         try {
-            val exists = try { docRef.get().await().exists() } catch (e: Exception) { false }
+            /* M19 : un echec de lecture d'existence ne doit PAS etre traite comme « n'existe pas » : reemettre createdAt ferait refuser la mise a jour par les regles (createdAt immuable). Sans try/catch local, l'exception remonte au catch exterieur qui abandonne l'ecriture. */
+            val exists = docRef.get().await().exists()
             if (!exists) {
                 payload["createdAt"] = FieldValue.serverTimestamp()
             }
@@ -442,7 +453,7 @@ class FirestoreFarmRepository(private val db: FirebaseFirestore) {
     suspend fun saveFeedLog(feedLog: FirestoreDailyFeedLog, docId: String? = null): String {
         val uid = requireUserId()
         val col = db.collection("users").document(uid).collection("feed_logs")
-        val targetId = if (!docId.isNullOrBlank()) docId else if (feedLog.id.isNotBlank()) feedLog.id else "feed_${System.currentTimeMillis()}"
+        val targetId = if (!docId.isNullOrBlank()) docId else if (feedLog.id.isNotBlank()) feedLog.id else "feed_" + UUID.randomUUID().toString()
         val docRef = col.document(targetId)
 
         val payload = mutableMapOf<String, Any?>(
@@ -454,7 +465,8 @@ class FirestoreFarmRepository(private val db: FirebaseFirestore) {
             "updatedAt" to FieldValue.serverTimestamp()
         )
         try {
-            val exists = try { docRef.get().await().exists() } catch (e: Exception) { false }
+            /* M19 : un echec de lecture d'existence ne doit PAS etre traite comme « n'existe pas » : reemettre createdAt ferait refuser la mise a jour par les regles (createdAt immuable). Sans try/catch local, l'exception remonte au catch exterieur qui abandonne l'ecriture. */
+            val exists = docRef.get().await().exists()
             if (!exists) {
                 payload["createdAt"] = FieldValue.serverTimestamp()
             }
@@ -499,7 +511,7 @@ class FirestoreFarmRepository(private val db: FirebaseFirestore) {
     suspend fun saveFatteningBatch(batch: FirestoreFatteningBatch, docId: String? = null): String {
         val uid = requireUserId()
         val col = db.collection("users").document(uid).collection("fattening_batches")
-        val targetId = if (!docId.isNullOrBlank()) docId else if (batch.id.isNotBlank()) batch.id else "batch_${System.currentTimeMillis()}"
+        val targetId = if (!docId.isNullOrBlank()) docId else if (batch.id.isNotBlank()) batch.id else "batch_" + UUID.randomUUID().toString()
         val docRef = col.document(targetId)
 
         val payload = mutableMapOf<String, Any?>(
@@ -519,7 +531,8 @@ class FirestoreFarmRepository(private val db: FirebaseFirestore) {
         if (batch.matingRecordId != null) payload["matingRecordId"] = batch.matingRecordId
 
         try {
-            val exists = try { docRef.get().await().exists() } catch (e: Exception) { false }
+            /* M19 : un echec de lecture d'existence ne doit PAS etre traite comme « n'existe pas » : reemettre createdAt ferait refuser la mise a jour par les regles (createdAt immuable). Sans try/catch local, l'exception remonte au catch exterieur qui abandonne l'ecriture. */
+            val exists = docRef.get().await().exists()
             if (!exists) {
                 payload["createdAt"] = FieldValue.serverTimestamp()
             }
@@ -564,7 +577,7 @@ class FirestoreFarmRepository(private val db: FirebaseFirestore) {
     suspend fun saveFinancialTransaction(tx: FirestoreFinancialTransaction, docId: String? = null): String {
         val uid = requireUserId()
         val col = db.collection("users").document(uid).collection("financial_transactions")
-        val targetId = if (!docId.isNullOrBlank()) docId else if (tx.id.isNotBlank()) tx.id else "tx_${System.currentTimeMillis()}"
+        val targetId = if (!docId.isNullOrBlank()) docId else if (tx.id.isNotBlank()) tx.id else "tx_" + UUID.randomUUID().toString()
         val docRef = col.document(targetId)
 
         val payload = mutableMapOf<String, Any?>(
@@ -581,7 +594,8 @@ class FirestoreFarmRepository(private val db: FirebaseFirestore) {
         if (tx.relatedRabbitId != null) payload["relatedRabbitId"] = tx.relatedRabbitId
 
         try {
-            val exists = try { docRef.get().await().exists() } catch (e: Exception) { false }
+            /* M19 : un echec de lecture d'existence ne doit PAS etre traite comme « n'existe pas » : reemettre createdAt ferait refuser la mise a jour par les regles (createdAt immuable). Sans try/catch local, l'exception remonte au catch exterieur qui abandonne l'ecriture. */
+            val exists = docRef.get().await().exists()
             if (!exists) {
                 payload["createdAt"] = FieldValue.serverTimestamp()
             }

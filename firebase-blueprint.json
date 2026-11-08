@@ -9,8 +9,8 @@
         "email": { "type": "string" },
         "displayName": { "type": "string" },
         "farmName": { "type": "string" },
-        "createdAt": { "type": "string", "format": "date-time" },
-        "updatedAt": { "type": "string", "format": "date-time" }
+        "createdAt": { "type": "string", "format": "date-time", "description": "Firestore timestamp (les regles exigent le type timestamp ; representation JSON date-time a l export)." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Firestore timestamp (les regles exigent le type timestamp ; representation JSON date-time a l export)." }
       },
       "required": ["userId", "createdAt"]
     },
@@ -21,21 +21,21 @@
       "properties": {
         "id": { "type": "string" },
         "userId": { "type": "string" },
-        "localId": { "type": "number" },
+        "localId": { "type": "integer" },
         "name": { "type": "string" },
         "sex": { "type": "string" },
-        "dateOfBirth": { "type": "number" },
+        "dateOfBirth": { "type": "integer" },
         "breed": { "type": "string" },
         "cageNumber": { "type": "string" },
         "weight": { "type": "number" },
-        "fatherId": { "type": "number" },
-        "motherId": { "type": "number" },
+        "fatherId": { "type": "integer" },
+        "motherId": { "type": "integer" },
         "notes": { "type": "string" },
         "isActive": { "type": "boolean" },
         "status": { "type": "string" },
         "imageUri": { "type": "string" },
-        "createdAt": { "type": "string", "format": "date-time" },
-        "updatedAt": { "type": "string", "format": "date-time" }
+        "createdAt": { "type": "string", "format": "date-time", "description": "Firestore timestamp (les regles exigent le type timestamp ; representation JSON date-time a l export)." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Firestore timestamp (les regles exigent le type timestamp ; representation JSON date-time a l export)." }
       },
       "required": ["userId", "name", "sex", "createdAt"]
     },
@@ -46,15 +46,15 @@
       "properties": {
         "id": { "type": "string" },
         "userId": { "type": "string" },
-        "localId": { "type": "number" },
-        "maleId": { "type": "number" },
-        "femaleId": { "type": "number" },
-        "matingDate": { "type": "number" },
-        "expectedBirthDate": { "type": "number" },
+        "localId": { "type": "integer" },
+        "maleId": { "type": "integer" },
+        "femaleId": { "type": "integer" },
+        "matingDate": { "type": "integer" },
+        "expectedBirthDate": { "type": "integer" },
         "status": { "type": "string" },
         "notes": { "type": "string" },
-        "createdAt": { "type": "string", "format": "date-time" },
-        "updatedAt": { "type": "string", "format": "date-time" }
+        "createdAt": { "type": "string", "format": "date-time", "description": "Firestore timestamp (les regles exigent le type timestamp ; representation JSON date-time a l export)." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Firestore timestamp (les regles exigent le type timestamp ; representation JSON date-time a l export)." }
       },
       "required": ["userId", "maleId", "femaleId", "matingDate", "createdAt"]
     },
@@ -65,17 +65,17 @@
       "properties": {
         "id": { "type": "string" },
         "userId": { "type": "string" },
-        "localId": { "type": "number" },
+        "localId": { "type": "integer" },
         "name": { "type": "string" },
         "category": { "type": "string" },
         "quantity": { "type": "number" },
         "unit": { "type": "string" },
         "pricePerUnit": { "type": "number" },
         "totalPrice": { "type": "number" },
-        "purchaseDate": { "type": "number" },
+        "purchaseDate": { "type": "integer" },
         "notes": { "type": "string" },
-        "createdAt": { "type": "string", "format": "date-time" },
-        "updatedAt": { "type": "string", "format": "date-time" }
+        "createdAt": { "type": "string", "format": "date-time", "description": "Firestore timestamp (les regles exigent le type timestamp ; representation JSON date-time a l export)." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Firestore timestamp (les regles exigent le type timestamp ; representation JSON date-time a l export)." }
       },
       "required": ["userId", "name", "category", "createdAt"]
     },
@@ -86,14 +86,14 @@
       "properties": {
         "id": { "type": "string" },
         "userId": { "type": "string" },
-        "localId": { "type": "number" },
+        "localId": { "type": "integer" },
         "title": { "type": "string" },
         "description": { "type": "string" },
-        "dueDate": { "type": "number" },
+        "dueDate": { "type": "integer" },
         "priority": { "type": "string" },
         "isCompleted": { "type": "boolean" },
-        "createdAt": { "type": "string", "format": "date-time" },
-        "updatedAt": { "type": "string", "format": "date-time" }
+        "createdAt": { "type": "string", "format": "date-time", "description": "Firestore timestamp (les regles exigent le type timestamp ; representation JSON date-time a l export)." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Firestore timestamp (les regles exigent le type timestamp ; representation JSON date-time a l export)." }
       },
       "required": ["userId", "title", "dueDate", "createdAt"]
     },
@@ -104,18 +104,18 @@
       "properties": {
         "id": { "type": "string" },
         "userId": { "type": "string" },
-        "localId": { "type": "number" },
-        "rabbitId": { "type": "number" },
+        "localId": { "type": "integer" },
+        "rabbitId": { "type": "integer" },
         "type": { "type": "string" },
         "designation": { "type": "string" },
-        "date": { "type": "number" },
+        "date": { "type": "integer" },
         "dosage": { "type": "string" },
         "notes": { "type": "string" },
-        "nextDueDate": { "type": "number" },
-        "withdrawalDays": { "type": "number" },
-        "withdrawalEndDate": { "type": "number" },
-        "createdAt": { "type": "string", "format": "date-time" },
-        "updatedAt": { "type": "string", "format": "date-time" }
+        "nextDueDate": { "type": "integer" },
+        "withdrawalDays": { "type": "integer" },
+        "withdrawalEndDate": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Firestore timestamp (les regles exigent le type timestamp ; representation JSON date-time a l export)." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Firestore timestamp (les regles exigent le type timestamp ; representation JSON date-time a l export)." }
       },
       "required": ["userId", "rabbitId", "date", "createdAt"]
     },
@@ -126,13 +126,13 @@
       "properties": {
         "id": { "type": "string" },
         "userId": { "type": "string" },
-        "localId": { "type": "number" },
-        "rabbitId": { "type": "number" },
+        "localId": { "type": "integer" },
+        "rabbitId": { "type": "integer" },
         "weight": { "type": "number" },
-        "recordDate": { "type": "number" },
+        "recordDate": { "type": "integer" },
         "notes": { "type": "string" },
-        "createdAt": { "type": "string", "format": "date-time" },
-        "updatedAt": { "type": "string", "format": "date-time" }
+        "createdAt": { "type": "string", "format": "date-time", "description": "Firestore timestamp (les regles exigent le type timestamp ; representation JSON date-time a l export)." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Firestore timestamp (les regles exigent le type timestamp ; representation JSON date-time a l export)." }
       },
       "required": ["userId", "rabbitId", "weight", "recordDate", "createdAt"]
     },
@@ -143,12 +143,12 @@
       "properties": {
         "id": { "type": "string" },
         "userId": { "type": "string" },
-        "localId": { "type": "number" },
-        "feedDate": { "type": "number" },
+        "localId": { "type": "integer" },
+        "feedDate": { "type": "integer" },
         "quantityGrams": { "type": "number" },
         "notes": { "type": "string" },
-        "createdAt": { "type": "string", "format": "date-time" },
-        "updatedAt": { "type": "string", "format": "date-time" }
+        "createdAt": { "type": "string", "format": "date-time", "description": "Firestore timestamp (les regles exigent le type timestamp ; representation JSON date-time a l export)." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Firestore timestamp (les regles exigent le type timestamp ; representation JSON date-time a l export)." }
       },
       "required": ["userId", "feedDate", "quantityGrams", "createdAt"]
     },
@@ -159,19 +159,19 @@
       "properties": {
         "id": { "type": "string" },
         "userId": { "type": "string" },
-        "localId": { "type": "number" },
+        "localId": { "type": "integer" },
         "batchCode": { "type": "string" },
-        "matingRecordId": { "type": "number" },
-        "weaningDate": { "type": "number" },
-        "initialCount": { "type": "number" },
-        "currentCount": { "type": "number" },
-        "mortalityCount": { "type": "number" },
+        "matingRecordId": { "type": "integer" },
+        "weaningDate": { "type": "integer" },
+        "initialCount": { "type": "integer" },
+        "currentCount": { "type": "integer" },
+        "mortalityCount": { "type": "integer" },
         "cageLocation": { "type": "string" },
-        "averageWeightGrams": { "type": "number" },
-        "targetSaleDate": { "type": "number" },
+        "averageWeightGrams": { "type": "integer" },
+        "targetSaleDate": { "type": "integer" },
         "status": { "type": "string" },
-        "createdAt": { "type": "string", "format": "date-time" },
-        "updatedAt": { "type": "string", "format": "date-time" }
+        "createdAt": { "type": "string", "format": "date-time", "description": "Firestore timestamp (les regles exigent le type timestamp ; representation JSON date-time a l export)." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Firestore timestamp (les regles exigent le type timestamp ; representation JSON date-time a l export)." }
       },
       "required": ["userId", "batchCode", "createdAt"]
     },
@@ -182,16 +182,16 @@
       "properties": {
         "id": { "type": "string" },
         "userId": { "type": "string" },
-        "localId": { "type": "number" },
-        "date": { "type": "number" },
+        "localId": { "type": "integer" },
+        "date": { "type": "integer" },
         "type": { "type": "string" },
         "category": { "type": "string" },
         "amountFcfa": { "type": "number" },
         "description": { "type": "string" },
-        "relatedBatchId": { "type": "number" },
-        "relatedRabbitId": { "type": "number" },
-        "createdAt": { "type": "string", "format": "date-time" },
-        "updatedAt": { "type": "string", "format": "date-time" }
+        "relatedBatchId": { "type": "integer" },
+        "relatedRabbitId": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Firestore timestamp (les regles exigent le type timestamp ; representation JSON date-time a l export)." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Firestore timestamp (les regles exigent le type timestamp ; representation JSON date-time a l export)." }
       },
       "required": ["userId", "createdAt"]
     }

@@ -585,7 +585,7 @@ class FarmViewModel(application: Application) : AndroidViewModel(application) {
         val user = firebaseAuth.currentUser
         if (user != null && !isSyncingFromCloud) {
             try {
-                firestoreRepo.deleteRabbit("rabbit_${rabbit.id}")
+                firestoreRepo.deleteRabbit(FirestoreDocIds.docId("rabbit", rabbit.id))
             } catch (e: Exception) {
                 e.printStackTrace()
             }
@@ -704,7 +704,7 @@ class FarmViewModel(application: Application) : AndroidViewModel(application) {
         val user = firebaseAuth.currentUser
         if (user != null && !isSyncingFromCloud) {
             try {
-                firestoreRepo.deleteMatingRecord("mating_${record.id}")
+                firestoreRepo.deleteMatingRecord(FirestoreDocIds.docId("mating", record.id))
             } catch (e: Exception) {
                 e.printStackTrace()
             }
@@ -731,7 +731,7 @@ class FarmViewModel(application: Application) : AndroidViewModel(application) {
         val user = firebaseAuth.currentUser
         if (user != null && !isSyncingFromCloud) {
             try {
-                firestoreRepo.deleteTreatment("treat_${record.id}")
+                firestoreRepo.deleteTreatment(FirestoreDocIds.docId("treat", record.id))
             } catch (e: Exception) {
                 e.printStackTrace()
             }
@@ -756,7 +756,7 @@ class FarmViewModel(application: Application) : AndroidViewModel(application) {
         val user = firebaseAuth.currentUser
         if (user != null && !isSyncingFromCloud) {
             try {
-                firestoreRepo.deleteFeedLog("feed_${log.id}")
+                firestoreRepo.deleteFeedLog(FirestoreDocIds.docId("feed", log.id))
             } catch (e: Exception) {
                 e.printStackTrace()
             }
@@ -793,7 +793,7 @@ class FarmViewModel(application: Application) : AndroidViewModel(application) {
         val user = firebaseAuth.currentUser
         if (user != null && !isSyncingFromCloud) {
             try {
-                firestoreRepo.deleteFatteningBatch("batch_${batch.id}")
+                firestoreRepo.deleteFatteningBatch(FirestoreDocIds.docId("batch", batch.id))
             } catch (e: Exception) {
                 e.printStackTrace()
             }
@@ -830,7 +830,7 @@ class FarmViewModel(application: Application) : AndroidViewModel(application) {
         val user = firebaseAuth.currentUser
         if (user != null && !isSyncingFromCloud) {
             try {
-                firestoreRepo.deleteFinancialTransaction("tx_${tx.id}")
+                firestoreRepo.deleteFinancialTransaction(FirestoreDocIds.docId("tx", tx.id))
             } catch (e: Exception) {
                 e.printStackTrace()
             }
@@ -879,7 +879,7 @@ class FarmViewModel(application: Application) : AndroidViewModel(application) {
         val user = firebaseAuth.currentUser
         if (user != null && !isSyncingFromCloud) {
             try {
-                firestoreRepo.deleteInventoryItem("item_${item.id}")
+                firestoreRepo.deleteInventoryItem(FirestoreDocIds.docId("item", item.id))
             } catch (e: Exception) {
                 e.printStackTrace()
             }
@@ -923,7 +923,7 @@ class FarmViewModel(application: Application) : AndroidViewModel(application) {
         val user = firebaseAuth.currentUser
         if (user != null && !isSyncingFromCloud) {
             try {
-                firestoreRepo.deleteReminder("rem_${reminder.id}")
+                firestoreRepo.deleteReminder(FirestoreDocIds.docId("rem", reminder.id))
             } catch (e: Exception) {
                 e.printStackTrace()
             }

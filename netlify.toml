@@ -29,3 +29,35 @@
     X-Frame-Options = "SAMEORIGIN"
     Referrer-Policy = "strict-origin-when-cross-origin"
     Permissions-Policy = "camera=(), microphone=(), geolocation=()"
+
+# M102 : sw.js et manifest.json ne doivent JAMAIS être servis périmés par un
+# cache intermédiaire — avant, aucun en-tête dédié : un déploiement pouvait
+# rester invisible pour les clients. Revalidation obligatoire à chaque fois.
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache, must-revalidate"
+
+[[headers]]
+  for = "/manifest.json"
+  [headers.values]
+    Cache-Control = "no-cache, must-revalidate"
+
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "no-cache, must-revalidate"
+
+# m88 : les images (icônes, logo, écrans de démarrage) changent rarement —
+# cache HTTP d'une semaine pour éviter de re-télécharger tout le précache à
+# chaque changement de version du SW. Pas d'« immutable » : les noms de
+# fichiers ne portent pas d'empreinte de version.
+[[headers]]
+  for = "/*.png"
+  [headers.values]
+    Cache-Control = "public, max-age=604800"
+
+[[headers]]
+  for = "/*.jpg"
+  [headers.values]
+    Cache-Control = "public, max-age=604800"

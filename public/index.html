@@ -1581,6 +1581,16 @@ function initFirebaseSync() {
     try {
       db = firebase.app().firestore(namedDbId);
       console.log("Connecté à la base Firestore dédiée :", namedDbId);
+      /* TRANSPORT (2026-11-08, correctif synchro) : le canal temps réel par
+         défaut de Firestore (WebChannel/streaming) est bloqué sur le réseau
+         réel de l'utilisateur — constaté sur son téléphone : sonde en échec
+         « unavailable », écouteur sans aucun snapshot serveur, 167 fiches en
+         attente, alors que l'API Firestore classique répond en moins d'1 s.
+         On force donc le long-polling, qui passe par des requêtes HTTPS
+         ordinaires. Ce réglage doit être posé avant tout autre usage de
+         l'instance (persistance, écouteurs, lectures) : il l'est ici, juste
+         après la création. */
+      try { db.settings({ experimentalForceLongPolling: true, merge: true }); } catch (_se) { console.warn("Réglage long-polling Firestore non appliqué :", _se); }
     } catch (e) {
       // SEC1 : plus de basculement silencieux vers la base par défaut.
       // Ecrire dans la mauvaise base exposerait les fiches a des regles

@@ -1256,8 +1256,17 @@ async function retryPendingSyncLocked() {
          le cloud » SANS comparer le contenu : une édition de même milliseconde
          (ou horloges alignées) disparaissait. On ne jette que si le contenu est
          identique (hors serverUpdatedAt, temps serveur non comparable en local) ;
-         sinon conflit conservé en file. */
-      if (_it.action !== "delete" && _cloudMap[_key] && _it.doc && ((_it.doc.updatedAt && syncTs(_cloudMap[_key]) === syncTs(_it.doc.updatedAt)) || (_it.doc.serverUpdatedAt && syncTs(_cloudMap[_key]) === syncTs(_it.doc.serverUpdatedAt))) && _cloudMap[_key]) { const _cdEq = _cloudDocs[_key]; if (!_cdEq) continue; const _strip = (d) => { const _o = { ...(d || {}) }; delete _o.serverUpdatedAt; return JSON.stringify(cleanForCloud(_o)); }; if (_strip(_cdEq) === _strip(_it.doc)) continue; queueSyncConflict(_it.kind, _it.id, _it.doc.updatedAt || "", _cloudMap[_key], "set"); _conflicts.push(_it); continue; }
+         sinon conflit conservé en file.
+         Correctif 2026-11-08 (test coupure→reconnexion, diagnostic échantillonné) :
+         quand l'égalité vient de serverUpdatedAt, la base serveur du document
+         local EST la version actuelle du cloud — le cloud n'a pas bougé depuis
+         la base. Un contenu différent est alors l'édition locale elle-même
+         (cas normal d'une modification hors ligne), pas un conflit : on la
+         laisse passer en envoi (fast-forward). La classer « conflit » la
+         bloquait indéfiniment en file et la modification ne montait jamais.
+         Le conflit n'est conservé que si l'égalité ne vient que d'updatedAt
+         (aucune base serveur prouvable). */
+      if (_it.action !== "delete" && _cloudMap[_key] && _it.doc && ((_it.doc.updatedAt && syncTs(_cloudMap[_key]) === syncTs(_it.doc.updatedAt)) || (_it.doc.serverUpdatedAt && syncTs(_cloudMap[_key]) === syncTs(_it.doc.serverUpdatedAt))) && _cloudMap[_key]) { const _cdEq = _cloudDocs[_key]; if (!_cdEq) continue; const _strip = (d) => { const _o = { ...(d || {}) }; delete _o.serverUpdatedAt; return JSON.stringify(cleanForCloud(_o)); }; if (_strip(_cdEq) === _strip(_it.doc)) continue; if (_it.doc.serverUpdatedAt && syncTs(_cloudMap[_key]) === syncTs(_it.doc.serverUpdatedAt)) { /* base serveur inchangée : fast-forward, on laisse passer vers _todo */ } else { queueSyncConflict(_it.kind, _it.id, _it.doc.updatedAt || "", _cloudMap[_key], "set"); _conflicts.push(_it); continue; } }
     }
     _todo.push(_it);
   }

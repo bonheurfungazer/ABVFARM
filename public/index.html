@@ -1048,9 +1048,10 @@ function clearTombstone(kind, id, uid) { const _t = getTombstones(uid); const _n
    l'updatedAt historique en repli (documents anciens sans temps serveur). */
 function syncArbTs(doc) { return doc ? (syncTs(doc.serverUpdatedAt) || syncTs(doc.updatedAt)) : 0; }
 /* C16 : ajoute serverUpdatedAt (temps serveur) à une écriture cloud, sans
-   toucher au document local ni à la file : le FieldValue n'est pas
-   sérialisable en localStorage, il n'existe que dans l'appel set(). */
-function withServerTs(doc) { try { if (typeof firebase !== "undefined" && firebase.firestore && firebase.firestore.FieldValue) return { ...doc, serverUpdatedAt: firebase.firestore.FieldValue.serverTimestamp() }; } catch (e) {} return doc; }
+   toucher au document local ni à la file : il est posé comme Date JS dans
+   le seul appel d'écriture, et fsEncode (transport REST) le convertit en
+   timestampValue Firestore. Il n'existe jamais dans la file d'attente. */
+function withServerTs(doc) { return { ...doc, serverUpdatedAt: new Date() }; }
 /* C4 : migration unique des anciennes clés globales vers la clé namespacée du
    compte COURANT (appelée à la connexion et au démarrage pour la session
    restaurée). Fusion sans doublon exact, plafonds conservés (100 / 200 / 50),
@@ -1206,7 +1207,6 @@ async function retryPendingSyncLocked() {
      toute tentative, l'entrée restant relançable normalement. */
   for (const _it of _q) delete _it.sending;
   if (!_q.length) return;
-  const _col = window.firebaseDb.collection("users").doc(_uid).collection("cheptel");
   /* Correctif file en attente qui ne se vide jamais : d'abord, on enlève les fiches
      déjà dans le cloud (arrivées par une autre voie : connexion, import, bouton
      Synchroniser) au lieu de les renvoyer en boucle, et les suppressions déjà
@@ -1222,7 +1222,7 @@ async function retryPendingSyncLocked() {
      _cloudDocs conserve le contenu pour la comparaison à horodatages égaux (m92). */
   const _cloudDocs = {};
   const _withTimeout20 = (pr) => Promise.race([pr, new Promise((_, rej) => setTimeout(() => { const _e = new Error("délai dépassé (20 s)"); _e.code = "délai dépassé (20 s)"; rej(_e); }, 20000))]);
-  try { _cloudMap = {}; for (const _it of _q) { if (!_it.kind || _it.id == null) continue; const _ds = await _withTimeout20(_col.doc(_it.kind + "-" + _it.id).get({ source: "server" })); if (_ds && _ds.exists) { const _cd = _ds.data(); if (_cd && _cd.kind && _cd.id) { _cloudMap[_cd.kind + "-" + _cd.id] = _cd.serverUpdatedAt || _cd.updatedAt || ""; _cloudDocs[_cd.kind + "-" + _cd.id] = _cd; } } } } catch (e) { _cloudMap = null; }
+  try { _cloudMap = {}; for (const _it of _q) { if (!_it.kind || _it.id == null) continue; const _cd = await _withTimeout20(fsGetCheptelDoc(_uid, _it.kind + "-" + _it.id)); if (_cd && _cd.kind && _cd.id) { _cloudMap[_cd.kind + "-" + _cd.id] = _cd.serverUpdatedAt || _cd.updatedAt || ""; _cloudDocs[_cd.kind + "-" + _cd.id] = _cd; } } } catch (e) { _cloudMap = null; }
   /* C21 fail-closed : lecture serveur impossible = on ne renvoie RIEN. Avant,
      _cloudMap null laissait passer toutes les entrées en écriture aveugle,
      exactement quand le réseau est instable. Les entrées restent en file
@@ -1266,10 +1266,10 @@ async function retryPendingSyncLocked() {
   for (const _it of _todo) {
     /* S5 : deconnexion ou changement de compte pendant le rattrapage. On garde le
        reste en file sous l'ANCIEN uid (cle _uid) et on ne pousse plus rien : sans
-       ce garde, la collection _col (capturee au debut) recevrait encore des
-       ecritures apres la deconnexion. */
+       ce garde, des ecritures partiraient encore pour l'ANCIEN compte apres la
+       deconnexion. */
     if (userSession.uid !== _uid) { _left.push(_it); continue; }
-    try { if (_it.action === "delete") await _withTimeout20(_col.doc(_it.kind + "-" + _it.id).delete()); else await _withTimeout20(_col.doc(_it.kind + "-" + _it.id).set(withServerTs(cleanForCloud(_it.doc)))); } catch (e) { _left.push(_it); _lastErr = e.code || e.message || ""; }
+    try { if (_it.action === "delete") await _withTimeout20(fsDeleteCheptelDoc(_uid, _it.kind + "-" + _it.id)); else await _withTimeout20(fsSetCheptelDoc(_uid, _it.kind + "-" + _it.id, withServerTs(cleanForCloud(_it.doc)))); } catch (e) { _left.push(_it); _lastErr = e.code || e.message || ""; }
   }
   const _leftBeforeMerge = _left.length;
   /* Anti-perte (section 3) : une entree mise en file PENDANT ce rattrapage (sauvegarde
@@ -1329,9 +1329,9 @@ async function resolveSyncConflicts(choice) {
   for (const _c of _conf) {
     try {
       if (!window.firebaseDb || !userSession.uid) throw new Error("no-db");
-      const _snap = await window.firebaseDb.collection("users").doc(userSession.uid).collection("cheptel").doc(_c.kind + "-" + _c.id).get({ source: "server" });
+      const _cd = await fsGetCheptelDoc(userSession.uid, _c.kind + "-" + _c.id);
       const _all = getLocalData();
-      if (_snap.exists) { const _cd = _snap.data(); if (_cd && _cd.kind && _cd.id) _all[_c.kind + "-" + _c.id] = _cd; } else { delete _all[_c.kind + "-" + _c.id]; addTombstone(_c.kind, _c.id, new Date().toISOString()); /* C17 : la version cloud choisie est une suppression : on la mémorise pour qu'elle ne soit pas ressuscitée. */ }
+      if (_cd) { if (_cd.kind && _cd.id) _all[_c.kind + "-" + _c.id] = _cd; } else { delete _all[_c.kind + "-" + _c.id]; addTombstone(_c.kind, _c.id, new Date().toISOString()); /* C17 : la version cloud choisie est une suppression : on la mémorise pour qu'elle ne soit pas ressuscitée. */ }
       if (!setLocalData(_all)) throw new Error("setLocalData refuse (donnees corrompues ou stockage indisponible)"); /* C23 : pas d'ingestion ni d'acquittement si la persistance est bloquee par la garde. */ ingest(Object.values(_all)); clearPendingFor(_c.kind, _c.id); clearSyncConflict(_c.kind, _c.id);
     } catch (e) { _fail++; }
   }
@@ -1411,7 +1411,6 @@ function isValidCheptelDocForCloud(doc) {
    la nouvelle entrée, et sa propre tentative, qui gère le nettoyage). */
 async function pushToCloud(kind, id, doc, action) {
   if (!userSession.isLoggedIn || !isOnline || !window.firebaseDb || !userSession.uid) { queuePendingSync(action === "delete" ? { action: "delete", kind, id, deletedAt: doc && doc.deletedAt ? doc.deletedAt : undefined, serverUpdatedAt: doc && doc.serverUpdatedAt ? doc.serverUpdatedAt : undefined } : { action: "set", kind, id, doc }); return; }
-  const col = window.firebaseDb.collection("users").doc(userSession.uid).collection("cheptel");
   const clean = action === "delete" ? null : cleanForCloud(doc);
   if (action !== "delete" && !isValidCheptelDocForCloud(clean)) {
     console.warn("Cheptel cloud refuse (format incompatible, sauvegarde locale conservee) :", kind, id);
@@ -1440,9 +1439,8 @@ async function pushToCloud(kind, id, doc, action) {
        retry / listener suivant, jamais effacé silencieusement. */
     if (!_syncForceOnce.has(_forceKey)) {
       try {
-        const _srv = await col.doc(_forceKey).get({ source: "server" });
-        if (_srv.exists) {
-          const _sd = _srv.data() || {};
+        const _sd = await fsGetCheptelDoc(userSession.uid, _forceKey);
+        if (_sd) {
           /* C16/C18 : quand le cloud ET le document portent un temps serveur,
              l'arbitrage se fait dessus : si le cloud a été réécrit depuis la
              base lue par cet appareil (serverUpdatedAt du doc local), c'est un
@@ -1463,11 +1461,11 @@ async function pushToCloud(kind, id, doc, action) {
         }
       } catch (e) { /* C21 fail-closed : lecture serveur impossible = on N'ÉCRIT PAS. Avant, ce catch vide retombait sur une écriture aveugle, précisément quand le réseau est instable. L'échec remonte : l'entrée reste en file avec lastError et sera réessayée. La sauvegarde LOCALE, elle, est déjà faite et n'est jamais bloquée. */ const _ge = new Error("lecture serveur impossible"); _ge.code = "lecture serveur impossible"; throw _ge; }
     } else { _syncForceOnce.delete(_forceKey); }
-    const op = action === "delete" ? col.doc(kind + "-" + id).delete() : col.doc(kind + "-" + id).set(withServerTs(clean));
-    await op;
+    if (action === "delete") await fsDeleteCheptelDoc(userSession.uid, kind + "-" + id);
+    else await fsSetCheptelDoc(userSession.uid, kind + "-" + id, withServerTs(clean));
     return "envoyé";
   })();
-  /* Succès tardif après timeout : le SDK peut terminer l'envoi en arrière-plan ;
+  /* Succès tardif après timeout : l'envoi peut se terminer en arrière-plan ;
      ce succès doit toujours pouvoir nettoyer la file, jamais laisser une entrée
      ineffaçable. clearPendingFor est idempotent, donc un double nettoyage est sans risque. */
   _attempt.then((_r) => { if (_r === "envoyé" && _entryIsCurrent()) { clearPendingFor(kind, id); clearSyncConflict(kind, id); } }).catch(() => {});
@@ -1551,6 +1549,138 @@ async function removeDoc(kind, id) {
   return true;
 }
 
+/* ---------- Transport cloud REST Firestore (2026-11-08) ----------
+   Les données cheptel/profil ne passent PLUS par le canal temps réel du SDK
+   Firestore (WebChannel) : il est coupé par les intermédiaires réseau
+   (écouteur sans aucun snapshot serveur, erreur « unavailable »), alors que
+   l'API REST Firestore répond en moins d'1 s par les mêmes chemins réseau.
+   Toutes les lectures/écritures de DONNÉES passent donc par l'API REST,
+   authentifiées par le jeton d'identité du SDK Auth (qui, lui, fonctionne
+   et n'est pas touché). Le handle SDK (window.firebaseDb) ne sert plus que
+   de drapeau « cloud configuré ». Toute réponse non-200 ou erreur réseau
+   lève une erreur portant un code lisible (rest-<statut>, rest-reseau,
+   rest-jeton, rest-non-connecte) : les logiques fail-closed existantes
+   (carte cloud null, file d'attente, lastSyncError) s'appliquent comme avant. */
+const FS_REST_BASE = "https://firestore.googleapis.com/v1/projects/gen-lang-client-0349652531/databases/ai-studio-android-abvfarm-2867a79a-d782-4ee4-a962-662ea47d3af4/documents";
+function fsRestError(code) { const _e = new Error(code); _e.code = code; return _e; }
+async function fsRest(method, path, body) {
+  const _cu = window.firebaseAuth && window.firebaseAuth.currentUser;
+  if (!_cu) throw fsRestError("rest-non-connecte");
+  let _token = "";
+  try { _token = await _cu.getIdToken(); } catch (e) { throw fsRestError("rest-jeton"); }
+  let _res = null;
+  try {
+    _res = await fetch(FS_REST_BASE + path, { method, headers: { "Authorization": "Bearer " + _token, ...(body ? { "Content-Type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined });
+  } catch (e) { throw fsRestError("rest-reseau"); }
+  if (!_res.ok) { const _e = fsRestError("rest-" + _res.status); _e.status = _res.status; throw _e; }
+  return _res;
+}
+/* Conversion JS -> valeur Firestore (JSON REST). Entiers sûrs -> integerValue
+   (chaîne), autres nombres -> doubleValue, Date -> timestampValue. */
+function fsEncodeValue(v) {
+  if (v === null || v === undefined) return { nullValue: null };
+  if (v instanceof Date) return { timestampValue: v.toISOString() };
+  if (typeof v === "string") return { stringValue: v };
+  if (typeof v === "boolean") return { booleanValue: v };
+  if (typeof v === "number") {
+    if (!isFinite(v)) return { nullValue: null };
+    if (Number.isInteger(v) && Math.abs(v) <= Number.MAX_SAFE_INTEGER) return { integerValue: String(v) };
+    return { doubleValue: v };
+  }
+  if (Array.isArray(v)) return { arrayValue: { values: v.map(fsEncodeValue) } };
+  if (typeof v === "object") {
+    /* Sentinelle serverTimestamp résiduelle (ne devrait plus exister :
+       withServerTs pose une Date) — convertie en timestampValue courant. */
+    if (v._methodName === "FieldValue.serverTimestamp" || (v._delegate && v._delegate._methodName === "FieldValue.serverTimestamp")) return { timestampValue: new Date().toISOString() };
+    return { mapValue: { fields: fsEncode(v) } };
+  }
+  return { stringValue: String(v) };
+}
+function fsEncode(obj) {
+  const _fields = {};
+  for (const [k, v] of Object.entries(obj || {})) { if (v === undefined) continue; _fields[k] = fsEncodeValue(v); }
+  return _fields;
+}
+/* Conversion valeur Firestore -> JS. timestampValue est rendu en chaîne ISO :
+   toutes les comparaisons de l'appli passent par syncTs (Date.parse), et la
+   forme reste sérialisable en localStorage, contrairement à un objet Timestamp. */
+function fsDecodeValue(v) {
+  if (!v || typeof v !== "object") return null;
+  if ("stringValue" in v) return v.stringValue;
+  if ("integerValue" in v) return parseInt(v.integerValue, 10);
+  if ("doubleValue" in v) return typeof v.doubleValue === "number" ? v.doubleValue : parseFloat(v.doubleValue);
+  if ("booleanValue" in v) return v.booleanValue;
+  if ("nullValue" in v) return null;
+  if ("timestampValue" in v) return v.timestampValue;
+  if ("arrayValue" in v) return ((v.arrayValue && v.arrayValue.values) || []).map(fsDecodeValue);
+  if ("mapValue" in v) return fsDecode((v.mapValue && v.mapValue.fields) || {});
+  if ("referenceValue" in v) return v.referenceValue;
+  if ("geoPointValue" in v) return v.geoPointValue;
+  return null;
+}
+function fsDecode(fields) {
+  const _out = {};
+  for (const [k, v] of Object.entries(fields || {})) _out[k] = fsDecodeValue(v);
+  return _out;
+}
+/* Lecture complète de la collection cheptel (équivalent REST de l'ancienne
+   lecture de collection). Renvoie un tableau d'objets décodés, même forme que
+   les anciennes données reçues du serveur ; chaque objet porte en plus _docId
+   (NON énumérable : invisible pour JSON.stringify, les spreads et les
+   comparaisons d'égalité — il ne pollue ni le local ni les renvois cloud). */
+async function fsRunQueryCheptel(uid) {
+  const _res = await fsRest("POST", "/users/" + encodeURIComponent(uid) + ":runQuery", { structuredQuery: { from: [{ collectionId: "cheptel" }] } });
+  const _rows = await _res.json().catch(() => []);
+  const _docs = [];
+  for (const _row of (Array.isArray(_rows) ? _rows : [])) {
+    if (!_row || !_row.document || !_row.document.fields) continue;
+    const _obj = fsDecode(_row.document.fields);
+    try { Object.defineProperty(_obj, "_docId", { value: String(_row.document.name || "").split("/").pop(), enumerable: false }); } catch (e) {}
+    _docs.push(_obj);
+  }
+  return _docs;
+}
+/* Lecture unitaire d'une fiche : objet décodé, ou null si absente (404).
+   Toute autre erreur est levée (fail-closed des appelants préservé). */
+async function fsGetCheptelDoc(uid, docId) {
+  try {
+    const _res = await fsRest("GET", "/users/" + encodeURIComponent(uid) + "/cheptel/" + encodeURIComponent(docId));
+    const _doc = await _res.json().catch(() => null);
+    return _doc && _doc.fields ? fsDecode(_doc.fields) : null;
+  } catch (e) { if (e && e.status === 404) return null; throw e; }
+}
+/* Écriture complète d'une fiche (PATCH sans updateMask = remplacement :
+   l'appli construit déjà des documents complets via cleanForCloud). */
+async function fsSetCheptelDoc(uid, docId, obj) {
+  await fsRest("PATCH", "/users/" + encodeURIComponent(uid) + "/cheptel/" + encodeURIComponent(docId), { fields: fsEncode(obj) });
+}
+async function fsDeleteCheptelDoc(uid, docId) {
+  await fsRest("DELETE", "/users/" + encodeURIComponent(uid) + "/cheptel/" + encodeURIComponent(docId));
+}
+async function fsGetProfile(uid) {
+  try {
+    const _res = await fsRest("GET", "/users/" + encodeURIComponent(uid));
+    const _doc = await _res.json().catch(() => null);
+    return _doc && _doc.fields ? fsDecode(_doc.fields) : null;
+  } catch (e) { if (e && e.status === 404) return null; throw e; }
+}
+/* Profil : updatedAt/createdAt partent en timestampValue (les règles les
+   exigent comme timestamps). Une chaîne ISO est réémise VERBATIM : un
+   createdAt relu du serveur garde sa précision exacte, sinon le contrôle
+   d'immuabilité de createdAt des règles refuserait la mise à jour. */
+async function fsSetProfile(uid, obj) {
+  const _fields = fsEncode(obj);
+  for (const _k of ["updatedAt", "createdAt"]) {
+    const _v = obj && obj[_k];
+    if (typeof _v === "string" && _v) _fields[_k] = { timestampValue: _v };
+    else if (_v instanceof Date) _fields[_k] = { timestampValue: _v.toISOString() };
+  }
+  await fsRest("PATCH", "/users/" + encodeURIComponent(uid), { fields: _fields });
+}
+async function fsDeleteProfile(uid) {
+  await fsRest("DELETE", "/users/" + encodeURIComponent(uid));
+}
+
 /* ---------- Firebase Google Auth & Cloud Setup ---------- */
 let _firebaseSyncInited = false;
 function initFirebaseSync() {
@@ -1581,16 +1711,11 @@ function initFirebaseSync() {
     try {
       db = firebase.app().firestore(namedDbId);
       console.log("Connecté à la base Firestore dédiée :", namedDbId);
-      /* TRANSPORT (2026-11-08, correctif synchro) : le canal temps réel par
-         défaut de Firestore (WebChannel/streaming) est bloqué sur le réseau
-         réel de l'utilisateur — constaté sur son téléphone : sonde en échec
-         « unavailable », écouteur sans aucun snapshot serveur, 167 fiches en
-         attente, alors que l'API Firestore classique répond en moins d'1 s.
-         On force donc le long-polling, qui passe par des requêtes HTTPS
-         ordinaires. Ce réglage doit être posé avant tout autre usage de
-         l'instance (persistance, écouteurs, lectures) : il l'est ici, juste
-         après la création. */
-      try { db.settings({ experimentalForceLongPolling: true, merge: true }); } catch (_se) { console.warn("Réglage long-polling Firestore non appliqué :", _se); }
+      /* Transport REST (2026-11-08) : ce handle ne sert plus qu'à vérifier
+         que la base dédiée est joignable par le SDK et de drapeau « cloud
+         configuré » (window.firebaseDb). AUCUNE donnée ne transite par lui :
+         lectures/écritures passent par l'API REST (voir fsRest et suivants),
+         le canal temps réel du SDK étant coupé par les réseaux intermédiaires. */
     } catch (e) {
       // SEC1 : plus de basculement silencieux vers la base par défaut.
       // Ecrire dans la mauvaise base exposerait les fiches a des regles
@@ -1605,21 +1730,10 @@ function initFirebaseSync() {
     window.firebaseDb = db;
     window.firebaseAuth = firebase.auth();
 
-    // Enable offline persistence (uniquement si la base dediee a ete obtenue ;
-    // sans db, l'ecouteur d'authentification ci-dessous doit quand meme etre pose)
-    if (db) {
-      /* M97/M96 : la persistance est demandée ICI, avant l'écouteur d'auth et
-         tout accès cheptel de cette fonction. Son échec (failed-precondition /
-         unimplemented) n'était qu'un console.log : il est maintenant conservé
-         dans listenerPersistenceError (affiché dans le diagnostic Données),
-         signalé à l'utilisateur et l'interface est rafraîchie. */
-      db.enablePersistence({ synchronizeTabs: true }).then(() => { listenerPersistenceError = null; }).catch((err) => {
-        console.log("Firestore offline persistence notice:", err.code);
-        listenerPersistenceError = (err && (err.code || err.message)) || String(err);
-        try { toast("⚠️ Persistance hors-ligne Firestore indisponible sur ce navigateur : le hors-ligne repose sur le stockage local de l'application."); } catch (e) {}
-        try { updateUserUI(); } catch (e) {}
-      });
-    }
+    /* Transport REST (2026-11-08) : plus de persistance hors-ligne du SDK —
+       elle ne servait qu'au canal temps réel, abandonné. Le hors-ligne repose
+       sur le stockage local de l'application (localStorage), comme avant.
+       listenerPersistenceError reste donc à null en permanence. */
 
     // Check redirect auth result FIRST (for mobile browsers or redirect logins)
     /* m111 : accès sessionStorage protégés (un stockage bloqué faisait échouer
@@ -1705,12 +1819,13 @@ function initFirebaseSync() {
 let unsubscribeSnapshot = null;
 
 /* Volet A — sonde serveur (2026-11-04) : lecture SEULE, sans fusion ni envoi.
-   probeServerContact() lit users/{uid}/cheptel avec source:"server" et ne fait
-   rien d'autre : elle ne modifie aucune donnée locale, ne vide aucune file et
-   ne change aucun indicateur de snapshot. La pastille ne verdit donc jamais à
-   cause de la sonde. Résultat conservé en mémoire et dans localStorage sous
-   "abvfarm_last_probe" pour survivre à une navigation. Réutilisable telle
-   quelle par un futur chien de garde (promesse {ok, count} / {ok, code}). */
+   probeServerContact() lit users/{uid}/cheptel côté serveur (API REST,
+   fsRunQueryCheptel) et ne fait rien d'autre : elle ne modifie aucune donnée
+   locale, ne vide aucune file et ne change aucun indicateur de snapshot. La
+   pastille ne verdit donc jamais à cause de la sonde. Résultat conservé en
+   mémoire et dans localStorage sous "abvfarm_last_probe" pour survivre à une
+   navigation. Réutilisable telle quelle par un futur chien de garde
+   (promesse {ok, count} / {ok, code}). */
 const PROBE_STORAGE_KEY = "abvfarm_last_probe";
 let lastServerProbe = null;
 try { lastServerProbe = JSON.parse(localStorage.getItem(PROBE_STORAGE_KEY) || "null"); } catch (e) { lastServerProbe = null; }
@@ -1743,18 +1858,19 @@ async function probeServerContact() {
     updateUserUI();
     return { ok: false, code: _reason };
   }
-  /* Sonde bornée : état « en cours » visible avant l'appel, puis get() serveur
-     plafonné à 20 s via Promise.race — un get() qui ne se règle jamais ne fige
-     plus l'écran, il se règle en erreur « délai dépassé (20 s) ». */
+  /* Sonde bornée : état « en cours » visible avant l'appel, puis lecture
+     serveur (REST) plafonnée à 20 s via Promise.race — une lecture qui ne se
+     règle jamais ne fige plus l'écran, elle se règle en erreur
+     « délai dépassé (20 s) ». */
   saveLastProbe({ status: "checking", at: _now(), count: null, code: null });
   updateUserUI();
   let _timeoutId = null;
   try {
-    const _serverPromise = window.firebaseDb.collection("users").doc(userSession.uid).collection("cheptel").get({ source: "server" });
+    const _serverPromise = fsRunQueryCheptel(userSession.uid);
     const _timeoutPromise = new Promise((_, reject) => { _timeoutId = setTimeout(() => { const _err = new Error("délai dépassé (20 s)"); _err.code = "délai dépassé (20 s)"; reject(_err); }, 20000); });
-    const _snap = await Promise.race([_serverPromise, _timeoutPromise]);
+    const _docs = await Promise.race([_serverPromise, _timeoutPromise]);
     if (_timeoutId) clearTimeout(_timeoutId);
-    const _count = (_snap && _snap.docs) ? _snap.docs.length : 0;
+    const _count = (_docs && _docs.length) ? _docs.length : 0;
     const _state = { status: "ok", at: _now(), count: _count, code: null };
     saveLastProbe(_state);
     updateUserUI();
@@ -1767,6 +1883,96 @@ async function probeServerContact() {
     updateUserUI();
     return { ok: false, code: _code };
   }
+}
+
+/* Traitement d'un jeu de documents cloud reçu du serveur (sondage REST) :
+   indicateurs mis à jour exactement comme le faisait un snapshot serveur,
+   puis MÊME logique de fusion que l'ancien gestionnaire temps réel
+   (conflits, tombstones, cloudIds, persistance — rien n'est réécrit). */
+function processCloudSnapshotDocs(cloudDocs, uid) {
+  cloudSyncActive = true;
+  cloudSnapshotEver = true;
+  listenerLastServerAt = Date.now();
+  /* Volet C : le chien de garde n'est plus utile une fois le premier
+     snapshot serveur reçu pour cette installation (timer seul annulé). */
+  if (listenerWatchdogTimer) { clearTimeout(listenerWatchdogTimer); listenerWatchdogTimer = null; }
+  clearListenerLastError();
+  /* C24 : un snapshot serveur réussi remet le compteur d'erreurs à zéro :
+     seules des erreurs CONSÉCUTIVES comptent vers l'arrêt (avant, 5 erreurs
+     cumulées sur la session arrêtaient l'écoute pour de bon). */
+  listenerAttempts = 0;
+  /* Section 2 (S6) : premier snapshot serveur reçu — le jeu affiché n'est plus
+     seulement local. Le sondage REST ne lit que le serveur, jamais un cache. */
+  if (cloudFirstSnapshotPending) cloudFirstSnapshotPending = false;
+  if (cloudLoginError) cloudLoginError = "";
+  const all = getLocalData();
+  let updated = false;
+  let _seen = []; try { _seen = JSON.parse(localStorage.getItem(cloudIdsKey(uid)) || "[]"); } catch (e) {}
+  const _cur = new Set(cloudDocs.filter((d) => d && d.kind && d.id).map((d) => d.kind + "-" + d.id));
+  let _pend = []; try { _pend = JSON.parse(localStorage.getItem(pendingSyncKey(uid)) || "[]"); } catch (e) {}
+  const _pendKeys = new Set(_pend.map((x) => x.kind + "-" + x.id));
+  const _pendMap = {}; _pend.forEach((x) => { _pendMap[x.kind + "-" + x.id] = x; });
+  for (const _key of _seen) {
+    if (_cur.has(_key)) continue;
+    const _kKind = _key.slice(0, _key.indexOf("-")); const _kId = _key.slice(_key.indexOf("-") + 1);
+    if (_pendKeys.has(_key)) {
+      /* C17 : fiche supprimée dans le cloud pendant que cet appareil
+         éditait hors-ligne (entrée « set » en file) : tombstone + conflit,
+         pour que le retry / la garde ne la ressuscitent pas au rejeu. */
+      const _pl = _pendMap[_key];
+      if (_pl && _pl.action === "set") { addTombstone(_kKind, _kId, new Date().toISOString(), uid); queueSyncConflict(_kKind, _kId, (_pl.doc && _pl.doc.updatedAt) || "", "", "set"); }
+      continue;
+    }
+    if (all[_key]) { delete all[_key]; updated = true; addTombstone(_kKind, _kId, new Date().toISOString(), uid); }
+  }
+  /* C22 : cloudIds n'est PLUS écrit ici : il n'avance qu'après une
+     persistance locale réussie (voir le bloc de persistance ci-dessous). */
+  cloudDocs.forEach((d) => {
+    if (d && d.kind && d.id) {
+      const _key = d.kind + "-" + d.id;
+      /* S3 — avant, le listener écrasait le local par le cloud dès que le
+         cloud était plus récent, MÊME si une modification locale de cette
+         fiche attendait dans la file : la modification locale était ensuite
+         jetée par le retry (cloud >= local). Maintenant, une fiche en
+         attente n'est JAMAIS écrasée par le listener : si le cloud est
+         plus récent, c'est un conflit conservé + signalé, et la version
+         locale reste en place jusqu'à résolution explicite. */
+      if (_pendKeys.has(_key)) { const _pl = _pendMap[_key]; const _localTs = (_pl && ((_pl.doc && _pl.doc.updatedAt) || _pl.deletedAt)) || (all[_key] && all[_key].updatedAt) || ""; /* m94 : pour une suppression en attente, _pl.doc est absent et la fiche locale est déjà effacée : sans deletedAt, la comparaison était vide et le conflit suppression-vs-édition restait invisible. */ if (_localTs && d.updatedAt && syncArbTs(d) > syncTs(_localTs)) queueSyncConflict(d.kind, d.id, _localTs, d.updatedAt, (_pl && _pl.action) || "set"); return; }
+      /* C17 : un tombstone local plus récent que la version cloud reçue
+         signifie que la suppression connue ici gagne : on ne réinsère pas
+         la fiche, le conflit est signalé. */
+      const _tb = getTombstone(d.kind, d.id, uid);
+      if (_tb && syncArbTs(d) && syncTs(_tb.deletedAt) >= syncArbTs(d)) { queueSyncConflict(d.kind, d.id, _tb.deletedAt, d.updatedAt || "", "delete"); return; }
+      const _local = all[_key];
+      /* C20 : supériorité STRICTE du cloud exigée (arbitrage sur le temps
+         serveur quand il existe, C16) ; un horodatage absent d'un côté
+         n'est plus un blanc-seing pour le cloud : conflit signalé, la
+         version locale est conservée. */
+      if (!_local) { all[_key] = d; updated = true; }
+      else if (!syncTs(_local.updatedAt) || !syncArbTs(d)) { queueSyncConflict(d.kind, d.id, _local.updatedAt || "", d.updatedAt || "", "set"); }
+      else if (syncArbTs(d) > syncTs(_local.updatedAt)) { all[_key] = d; updated = true; }
+    }
+  });
+  /* C22 : cloudIds n'avance QU'APRÈS un setLocalData réussi. Avant, il
+     était réécrit avant la persistance, dont l'échec (quota) était
+     ignoré : l'état « déjà vu du cloud » avançait sans les données et
+     les suppressions cloud n'étaient plus ré-appliquées correctement. */
+  if (updated) { /* M91 : avant, tout snapshot (même sans changement) ré-ingérait et re-rendait tout le cheptel. Aucun changement effectif = on avance seulement cloudIds (branche else). */
+    if (setLocalData(all)) {
+      try { localStorage.setItem(cloudIdsKey(uid), JSON.stringify([..._cur])); } catch (e) {}
+      ingest(Object.values(all));
+    } else {
+      try { localStorage.setItem(lastSyncErrorKey(uid), "stockage local indisponible (quota)"); } catch (e) {}
+      console.warn("Listener : persistance locale impossible — cloudIds non avancé, le snapshot sera rejoué.");
+    }
+  } else {
+    try { localStorage.setItem(cloudIdsKey(uid), JSON.stringify([..._cur])); } catch (e) {}
+  }
+  /* m95 : avant, lastSync avançait sur TOUT snapshot serveur, même sans
+     changement et avec une file non vide (indicateur optimiste). Il
+     n'avance que si la file de ce compte est vide. */
+  if (!_pend.length) userSession.lastSync = new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+  updateUserUI();
 }
 
 function ensureCloudSyncListener(uid) {
@@ -1784,120 +1990,39 @@ function ensureCloudSyncListener(uid) {
   const _listenerGen = listenerGeneration;
   listenerUid = uid;
   try {
-    unsubscribeSnapshot = window.firebaseDb.collection("users").doc(uid).collection("cheptel").onSnapshot((snap) => {
+    let _pollTimer = null;
+    let _pollBusy = false;
+    /* Sondage REST (2026-11-08) : remplace l'ancien écouteur temps réel du
+       SDK, dont le canal est coupé par les réseaux intermédiaires. Cycle
+       immédiat à l'installation, puis toutes les 45 s tant que l'écoute est
+       installée. unsubscribeSnapshot conserve le contrat d'arrêt des
+       appelants : l'invoquer stoppe le sondage (clearInterval). */
+    const _poll = async () => {
       if (_listenerGen !== listenerGeneration) return;
-      /* Audit synchro : ignorer les instantanés venant du cache local, sinon l'appli
-         fusionne ses propres fiches locales en croyant que c'est le cloud, et peut
-         même supprimer une fiche locale absente du cache. Seul le serveur fait foi. */
-      if (snap.metadata && snap.metadata.fromCache) { listenerCacheCount += 1; listenerCacheLastAt = Date.now(); updateUserUI(); return; }
-      cloudSyncActive = true;
-      cloudSnapshotEver = true;
-      listenerLastServerAt = Date.now();
-      /* Volet C : le chien de garde n'est plus utile une fois le premier
-         snapshot serveur reçu pour cette installation (timer seul annulé). */
-      if (listenerWatchdogTimer) { clearTimeout(listenerWatchdogTimer); listenerWatchdogTimer = null; }
-      clearListenerLastError();
-      /* C24 : un snapshot serveur réussi remet le compteur d'erreurs à zéro :
-         seules des erreurs CONSÉCUTIVES comptent vers l'arrêt (avant, 5 erreurs
-         cumulées sur la session arrêtaient l'écoute pour de bon). */
-      listenerAttempts = 0;
-      /* Section 2 (S6) : premier snapshot serveur reçu — le jeu affiché n'est plus
-         seulement local. Les snapshots cache sont déjà filtrés ci-dessus. */
-      if (cloudFirstSnapshotPending) cloudFirstSnapshotPending = false;
-      if (cloudLoginError) cloudLoginError = "";
-      const cloudDocs = snap.docs.map((d) => d.data());
-      const all = getLocalData();
-      let updated = false;
-      let _seen = []; try { _seen = JSON.parse(localStorage.getItem(cloudIdsKey(uid)) || "[]"); } catch (e) {}
-      const _cur = new Set(cloudDocs.filter((d) => d && d.kind && d.id).map((d) => d.kind + "-" + d.id));
-      let _pend = []; try { _pend = JSON.parse(localStorage.getItem(pendingSyncKey(uid)) || "[]"); } catch (e) {}
-      const _pendKeys = new Set(_pend.map((x) => x.kind + "-" + x.id));
-      const _pendMap = {}; _pend.forEach((x) => { _pendMap[x.kind + "-" + x.id] = x; });
-      for (const _key of _seen) {
-        if (_cur.has(_key)) continue;
-        const _kKind = _key.slice(0, _key.indexOf("-")); const _kId = _key.slice(_key.indexOf("-") + 1);
-        if (_pendKeys.has(_key)) {
-          /* C17 : fiche supprimée dans le cloud pendant que cet appareil
-             éditait hors-ligne (entrée « set » en file) : tombstone + conflit,
-             pour que le retry / la garde ne la ressuscitent pas au rejeu. */
-          const _pl = _pendMap[_key];
-          if (_pl && _pl.action === "set") { addTombstone(_kKind, _kId, new Date().toISOString(), uid); queueSyncConflict(_kKind, _kId, (_pl.doc && _pl.doc.updatedAt) || "", "", "set"); }
-          continue;
-        }
-        if (all[_key]) { delete all[_key]; updated = true; addTombstone(_kKind, _kId, new Date().toISOString(), uid); }
-      }
-      /* C22 : cloudIds n'est PLUS écrit ici : il n'avance qu'après une
-         persistance locale réussie (voir le bloc de persistance ci-dessous). */
-      cloudDocs.forEach((d) => {
-        if (d && d.kind && d.id) {
-          const _key = d.kind + "-" + d.id;
-          /* S3 — avant, le listener écrasait le local par le cloud dès que le
-             cloud était plus récent, MÊME si une modification locale de cette
-             fiche attendait dans la file : la modification locale était ensuite
-             jetée par le retry (cloud >= local). Maintenant, une fiche en
-             attente n'est JAMAIS écrasée par le listener : si le cloud est
-             plus récent, c'est un conflit conservé + signalé, et la version
-             locale reste en place jusqu'à résolution explicite. */
-          if (_pendKeys.has(_key)) { const _pl = _pendMap[_key]; const _localTs = (_pl && ((_pl.doc && _pl.doc.updatedAt) || _pl.deletedAt)) || (all[_key] && all[_key].updatedAt) || ""; /* m94 : pour une suppression en attente, _pl.doc est absent et la fiche locale est déjà effacée : sans deletedAt, la comparaison était vide et le conflit suppression-vs-édition restait invisible. */ if (_localTs && d.updatedAt && syncArbTs(d) > syncTs(_localTs)) queueSyncConflict(d.kind, d.id, _localTs, d.updatedAt, (_pl && _pl.action) || "set"); return; }
-          /* C17 : un tombstone local plus récent que la version cloud reçue
-             signifie que la suppression connue ici gagne : on ne réinsère pas
-             la fiche, le conflit est signalé. */
-          const _tb = getTombstone(d.kind, d.id, uid);
-          if (_tb && syncArbTs(d) && syncTs(_tb.deletedAt) >= syncArbTs(d)) { queueSyncConflict(d.kind, d.id, _tb.deletedAt, d.updatedAt || "", "delete"); return; }
-          const _local = all[_key];
-          /* C20 : supériorité STRICTE du cloud exigée (arbitrage sur le temps
-             serveur quand il existe, C16) ; un horodatage absent d'un côté
-             n'est plus un blanc-seing pour le cloud : conflit signalé, la
-             version locale est conservée. */
-          if (!_local) { all[_key] = d; updated = true; }
-          else if (!syncTs(_local.updatedAt) || !syncArbTs(d)) { queueSyncConflict(d.kind, d.id, _local.updatedAt || "", d.updatedAt || "", "set"); }
-          else if (syncArbTs(d) > syncTs(_local.updatedAt)) { all[_key] = d; updated = true; }
-        }
-      });
-      /* C22 : cloudIds n'avance QU'APRÈS un setLocalData réussi. Avant, il
-         était réécrit avant la persistance, dont l'échec (quota) était
-         ignoré : l'état « déjà vu du cloud » avançait sans les données et
-         les suppressions cloud n'étaient plus ré-appliquées correctement. */
-      if (updated) { /* M91 : avant, tout snapshot (même sans changement) ré-ingérait et re-rendait tout le cheptel. Aucun changement effectif = on avance seulement cloudIds (branche else). */
-        if (setLocalData(all)) {
-          try { localStorage.setItem(cloudIdsKey(uid), JSON.stringify([..._cur])); } catch (e) {}
-          ingest(Object.values(all));
-        } else {
-          try { localStorage.setItem(lastSyncErrorKey(uid), "stockage local indisponible (quota)"); } catch (e) {}
-          console.warn("Listener : persistance locale impossible — cloudIds non avancé, le snapshot sera rejoué.");
-        }
-      } else {
-        try { localStorage.setItem(cloudIdsKey(uid), JSON.stringify([..._cur])); } catch (e) {}
-      }
-      /* m95 : avant, lastSync avançait sur TOUT snapshot serveur, même sans
-         changement et avec une file non vide (indicateur optimiste). Il
-         n'avance que si la file de ce compte est vide. */
-      if (!_pend.length) userSession.lastSync = new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
-      updateUserUI();
-    }, (err) => {
-      if (_listenerGen !== listenerGeneration) return;
-      console.warn("Cloud snapshot notice:", err);
-      /* Volet C — correction du verrou : désabonner puis REMETTRE
-         unsubscribeSnapshot à null, sinon l'early-return bloquait toute
-         réinstallation jusqu'au prochain login. */
-      try { if (unsubscribeSnapshot) unsubscribeSnapshot(); } catch (e) {}
-      unsubscribeSnapshot = null;
-      /* Section 2 (S2/S6) : une erreur du listener ne doit pas faire passer le jeu
-         local pour synchronisé ; l'indicateur reste en attente/erreur. */
-      cloudLoginError = err.code || err.message || "erreur de synchronisation cloud";
-      try { localStorage.setItem(lastSyncErrorKey(), cloudLoginError); } catch (e2) {}
-      setListenerLastError(cloudLoginError);
-      /* Volet C — backoff gardé, CAP IMPÉRATIF de 5 tentatives au total : chaque
-         réinstallation relit toute la collection, aucune boucle sans cap. */
-      listenerAttempts += 1;
-      if (listenerAttempts >= 5) {
-        listenerStopped = true;
+      if (_pollBusy) return;
+      _pollBusy = true;
+      try {
+        const _docs = await fsRunQueryCheptel(uid);
+        if (_listenerGen !== listenerGeneration) return;
+        processCloudSnapshotDocs(_docs, uid);
+      } catch (err) {
+        if (_listenerGen !== listenerGeneration) return;
+        console.warn("Cloud poll notice:", err);
+        /* Une erreur de sondage ne fait pas passer le jeu local pour
+           synchronisé ; l'indicateur reste en erreur, comme avec l'ancien
+           gestionnaire d'erreur de l'écouteur. Le sondage n'est PAS arrêté
+           pour autant : les erreurs réseau sont transitoires et le cycle
+           suivant réessaie. */
+        cloudLoginError = (err && (err.code || err.message)) || "erreur de synchronisation cloud";
+        try { localStorage.setItem(lastSyncErrorKey(), cloudLoginError); } catch (e2) {}
+        setListenerLastError(cloudLoginError);
+        listenerAttempts += 1;
         updateUserUI();
-      } else {
-        updateUserUI();
-        scheduleListenerRetry(uid);
-      }
-    });
+      } finally { _pollBusy = false; }
+    };
+    unsubscribeSnapshot = () => { if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; } };
+    _poll();
+    _pollTimer = setInterval(_poll, 45000);
     listenerInstalledAt = Date.now();
     /* Volet C : chien de garde à 30 s après cette installation réussie. */
     armListenerWatchdog(_listenerGen, listenerLastServerAt, listenerCacheCount);
@@ -2009,17 +2134,20 @@ async function handleUserAuthenticated(user, msg) {
        donc la « date de création » du compte changeait à chaque login. */
     (async () => {
       try {
-        const _profRef = window.firebaseDb.collection("users").doc(user.uid);
+        /* REST : pas d'équivalent direct de l'ancien set(merge) — on relit le
+           profil existant, on fusionne en JS (createdAt seulement s'il est
+           absent, comme avant), puis on réécrit le document complet. */
+        const _profEx = await fsGetProfile(user.uid);
         const _prof = {
+          ...(_profEx || {}),
           userId: user.uid,
           email: user.email || "",
           displayName: String(userSession.managerName || "").slice(0, 200),
           farmName: String(userSession.farmName || "ABV Farm").slice(0, 200),
-          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+          updatedAt: new Date().toISOString()
         };
-        const _profSnap = await _profRef.get();
-        if (!_profSnap.exists) _prof.createdAt = firebase.firestore.FieldValue.serverTimestamp();
-        await _profRef.set(_prof, { merge: true });
+        if (!_profEx) _prof.createdAt = new Date().toISOString();
+        await fsSetProfile(user.uid, _prof);
       } catch (err) { console.warn("UserProfile sync notice:", err); }
     })();
 
@@ -2027,7 +2155,7 @@ async function handleUserAuthenticated(user, msg) {
     const docsToPush = Object.values(userLocalData);
     if (docsToPush.length > 0) {
       let _cloudMap = null; let _cloudReadErr = null; let _seenSet = new Set();
-      try { const _snap = await window.firebaseDb.collection("users").doc(user.uid).collection("cheptel").get({ source: "server" }); _cloudMap = {}; _snap.docs.forEach((dc) => { const _cd = dc.data(); if (_cd && _cd.kind && _cd.id) _cloudMap[_cd.kind + "-" + _cd.id] = _cd.updatedAt || ""; }); } catch (e) { _cloudMap = null; _cloudReadErr = e; }
+      try { const _docs = await fsRunQueryCheptel(user.uid); _cloudMap = {}; _docs.forEach((_cd) => { if (_cd && _cd.kind && _cd.id) _cloudMap[_cd.kind + "-" + _cd.id] = _cd.updatedAt || ""; }); } catch (e) { _cloudMap = null; _cloudReadErr = e; }
       try { _seenSet = new Set(JSON.parse(localStorage.getItem(cloudIdsKey()) || "[]")); } catch (e) {}
       /* Fusion sections 2+3 : si la lecture serveur a échoué, _cloudMap est null et l'état
          du cloud est INCONNU. On ne pousse RIEN (version section 3 ci-dessous, en else) :
@@ -2056,7 +2184,7 @@ async function handleUserAuthenticated(user, msg) {
              il était réécrit à « maintenant » : une vieille copie locale
              devenait imbattable pour les autres appareils. Le temps serveur
              (withServerTs) porte l'arbitrage, pas un faux horodatage local. */
-          return window.firebaseDb.collection("users").doc(user.uid).collection("cheptel").doc(_key).set(withServerTs(cleanForCloud({ ...d })), { merge: true }).then(() => { clearPendingFor(d.kind, d.id); return "pushed"; }).catch((err) => { console.warn("Push doc notice:", err); queuePendingSync({ action: "set", kind: d.kind, id: d.id, doc: cleanForCloud({ ...d }) }); return "failed"; });
+          return fsSetCheptelDoc(user.uid, _key, withServerTs(cleanForCloud({ ...d }))).then(() => { clearPendingFor(d.kind, d.id); return "pushed"; }).catch((err) => { console.warn("Push doc notice:", err); queuePendingSync({ action: "set", kind: d.kind, id: d.id, doc: cleanForCloud({ ...d }) }); return "failed"; });
         }
         return Promise.resolve("skipped");
       });
@@ -4213,10 +4341,10 @@ async function deleteAccount() {
          et la suppression du document users/{uid} n'efface pas ses
          sous-collections. */
       try {
-        const _cloudSnap = await window.firebaseDb.collection("users").doc(userSession.uid).collection("cheptel").get();
-        for (const _cd of _cloudSnap.docs) { try { await _cd.ref.delete(); } catch (e) { if (!profileErr) profileErr = e.code || e.message || ""; } }
+        const _cloudDocs = await fsRunQueryCheptel(userSession.uid);
+        for (const _cd of _cloudDocs) { const _did = _cd._docId || (_cd.kind && _cd.id ? _cd.kind + "-" + _cd.id : null); if (!_did) continue; try { await fsDeleteCheptelDoc(userSession.uid, _did); } catch (e) { if (!profileErr) profileErr = e.code || e.message || ""; } }
       } catch (e) { if (!profileErr) profileErr = e.code || e.message || ""; }
-      try { await window.firebaseDb.collection("users").doc(userSession.uid).delete(); } catch (e) { profileErr = e.code || e.message || ""; }
+      try { await fsDeleteProfile(userSession.uid); } catch (e) { profileErr = e.code || e.message || ""; }
     }
     try { localStorage.removeItem(getUserDataKey()); localStorage.removeItem(trashKey()); localStorage.removeItem(activityKey()); localStorage.removeItem(pendingSyncKey()); localStorage.removeItem(cloudIdsKey()); localStorage.removeItem(lastSyncErrorKey()); localStorage.removeItem(conflictsKey()); localStorage.removeItem("abvfarm_cascade_log"); } catch (e) {}
     /* M95 : purge COMPLÈTE — avant, les tombstones du compte et les anciennes
@@ -4618,11 +4746,16 @@ function accountModal() {
       if (!_persisted) { toast("⛔ Paramètres NON enregistrés : stockage local indisponible sur cet appareil."); return; }
       if (userSession.isLoggedIn && !userSession.isLocalProfile && window.firebaseDb && userSession.uid) {
         try {
-          await window.firebaseDb.collection("users").doc(userSession.uid).set({
+          /* REST : relecture + fusion JS + réécriture complète (le document
+             fusionné conserve userId, exigé par les règles du profil). */
+          const _profEx = await fsGetProfile(userSession.uid);
+          await fsSetProfile(userSession.uid, {
+            ...(_profEx || {}),
+            userId: userSession.uid,
             displayName: String(m || "Éleveur ABV").slice(0, 200),
             farmName: String(f || "ABV Farm").slice(0, 200),
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-          }, { merge: true });
+            updatedAt: new Date().toISOString()
+          });
         } catch (e) { toast("⚠️ Paramètres enregistrés sur cet appareil, mais non poussés au cloud (réseau ?) : reconnectez-vous pour les synchroniser."); closeModal(); return; }
       }
       toast("Paramètres enregistrés");
@@ -4720,7 +4853,6 @@ function accountModal() {
            le cloud, fusionne les fiches cloud plus récentes en local, puis ne pousse
            que les fiches locales plus récentes ou absentes du cloud. */
         try {
-          const _col = window.firebaseDb.collection("users").doc(userSession.uid).collection("cheptel");
           /* S1 — 1) Envoyer les suppressions en attente AVANT le pull. Sans cela,
              le pull ci-dessous reinjecte en local chaque fiche supprimee (absente
              en local, donc reprise du cloud) et la suppression est perdue. Envois
@@ -4729,17 +4861,17 @@ function accountModal() {
              seul le succes appelle clearPendingFor, et l'echec compte dans _fail
              et _delFail, donc le toast final ne peut pas annoncer un succes. */
           for (const _d of _pendDel) {
-            try { await _col.doc(_d.kind + "-" + _d.id).delete(); clearPendingFor(_d.kind, _d.id); addTombstone(_d.kind, _d.id, _d.deletedAt || new Date().toISOString()); /* C17 : suppression propagée mémorisée. */ } catch (e) { _delFail++; _fail++; _pendDelKeys.add(_d.kind + "-" + _d.id); }
+            try { await fsDeleteCheptelDoc(userSession.uid, _d.kind + "-" + _d.id); clearPendingFor(_d.kind, _d.id); addTombstone(_d.kind, _d.id, _d.deletedAt || new Date().toISOString()); /* C17 : suppression propagée mémorisée. */ } catch (e) { _delFail++; _fail++; _pendDelKeys.add(_d.kind + "-" + _d.id); }
           }
           /* S1 — 2) Relecture de la file : une suppression mise en attente pendant
              les envois ci-dessus (autre declencheur) beneficie des memes gardes. */
           try { (JSON.parse(localStorage.getItem(pendingSyncKey()) || "[]") || []).filter((x) => x && x.action === "delete" && x.kind && x.id).forEach((x) => _pendDelKeys.add(x.kind + "-" + x.id)); } catch (e) {}
-          /* Correctif lecture cache : sans source:"server", get() pouvait renvoyer le
-             cache local (162 fiches locales) au lieu du cloud (159), d'où un message
-             "0 envoyée, 162 récupérée" alors que les fiches nouvelles n'étaient jamais
-             poussées, car l'appli croyait à tort qu'elles étaient déjà dans le cloud. */
-          const _snap = await _col.get({ source: "server" });
-          const _cloud = {}; _snap.docs.forEach((d) => { const _cd = d.data(); if (_cd && _cd.kind && _cd.id) _cloud[_cd.kind + "-" + _cd.id] = _cd; });
+          /* Lecture REST : toujours le serveur, jamais un cache local — avant,
+             une lecture servie depuis un cache local faisait croire à tort que
+             des fiches nouvelles étaient déjà dans le cloud, et elles n'étaient
+             jamais poussées. */
+          const _cloudDocs = await fsRunQueryCheptel(userSession.uid);
+          const _cloud = {}; _cloudDocs.forEach((_cd) => { if (_cd && _cd.kind && _cd.id) _cloud[_cd.kind + "-" + _cd.id] = _cd; });
           const _all2 = getLocalData();
           const _pendSet2 = new Set(getPendingSyncList().map((x) => x.kind + "-" + x.id));
           /* C17 : clés déjà vues dans le cloud (pour le push ci-dessous). */
@@ -4766,19 +4898,17 @@ function accountModal() {
           }
           for (let _i = 0; _i < _toPush.length; _i += 450) {
             const _chunk = _toPush.slice(_i, _i + 450);
-            try {
-              const _batch = window.firebaseDb.batch();
-              _chunk.forEach(([k, doc]) => { _batch.set(_col.doc(k), withServerTs(cleanForCloud(doc))); });
-              await _batch.commit();
-              _chunk.forEach(([k, doc]) => { _ok++; clearPendingFor(doc.kind, doc.id); });
-            } catch (e) {
-              for (const [k, doc] of _chunk) { try { await _col.doc(k).set(withServerTs(cleanForCloud(doc))); _ok++; clearPendingFor(doc.kind, doc.id); } catch (e2) { _fail++; queuePendingSync({ action: "set", kind: doc.kind, id: doc.id, doc: cleanForCloud(doc) }); } }
-            }
+            /* REST : pas d'écriture groupée atomique — les fiches du lot sont
+               envoyées en parallèle et comptées une à une, comme l'ancien
+               repli unitaire : succès confirmé = clearPendingFor, échec =
+               compté et remis en file d'attente. */
+            const _res = await Promise.allSettled(_chunk.map(([k, doc]) => fsSetCheptelDoc(userSession.uid, k, withServerTs(cleanForCloud(doc)))));
+            _res.forEach((_r, _j) => { const _docJ = _chunk[_j][1]; if (_r.status === "fulfilled") { _ok++; clearPendingFor(_docJ.kind, _docJ.id); } else { _fail++; queuePendingSync({ action: "set", kind: _docJ.kind, id: _docJ.id, doc: cleanForCloud(_docJ) }); } });
           }
         } catch (e) {
           for (const [k, doc] of Object.entries(all)) {
             if (_pendDelKeys.has(k)) continue;
-            try { await window.firebaseDb.collection("users").doc(userSession.uid).collection("cheptel").doc(k).set(withServerTs(cleanForCloud(doc))); _ok++; } catch (e2) { _fail++; queuePendingSync({ action: "set", kind: doc.kind, id: doc.id, doc: cleanForCloud(doc) }); }
+            try { await fsSetCheptelDoc(userSession.uid, k, withServerTs(cleanForCloud(doc))); _ok++; } catch (e2) { _fail++; queuePendingSync({ action: "set", kind: doc.kind, id: doc.id, doc: cleanForCloud(doc) }); }
           }
         }
       } else { _fail = Object.keys(all).length; }
@@ -5719,8 +5849,7 @@ async function bulk(docs, label) {
     all[kind + "-" + obj.id] = doc;
     if (userSession.isLoggedIn && isOnline && window.firebaseDb && userSession.uid) {
       // SEC import : un document mal forme reste en local mais ne part pas
-      // dans le lot cloud, sinon batch.commit() rejetterait les 450 documents
-      // du lot a cause de ce seul document.
+      // dans le lot cloud, sinon il compromettrait l'envoi de tout son lot.
       if (isValidCheptelDocForCloud(doc)) batchDocsToCloud.push(doc);
       else console.warn("Import local seul (document incompatible cloud, non envoye) :", kind, obj.id);
     }
@@ -5737,7 +5866,7 @@ async function bulk(docs, label) {
   if (batchDocsToCloud.length > 0 && window.firebaseDb && userSession.uid) {
     let _cloudMap = null;
     if (userSession.isLoggedIn && isOnline) {
-      try { const _snap = await window.firebaseDb.collection("users").doc(userSession.uid).collection("cheptel").get({ source: "server" }); _cloudMap = {}; _snap.docs.forEach((dc) => { const _cd = dc.data(); if (_cd && _cd.kind && _cd.id) _cloudMap[_cd.kind + "-" + _cd.id] = _cd; }); } catch (e) { _cloudMap = null; }
+      try { const _docs = await fsRunQueryCheptel(userSession.uid); _cloudMap = {}; _docs.forEach((_cd) => { if (_cd && _cd.kind && _cd.id) _cloudMap[_cd.kind + "-" + _cd.id] = _cd; }); } catch (e) { _cloudMap = null; }
     }
     if (_cloudMap) {
       const _toPush = batchDocsToCloud.filter((doc) => {
@@ -5749,12 +5878,12 @@ async function bulk(docs, label) {
       if (_toPush.length < batchDocsToCloud.length) toast(`⚠️ ${batchDocsToCloud.length - _toPush.length} fiche(s) importée(s) en local mais NON envoyée(s) au cloud (cloud plus récent, ou restauration sans horodatage d'origine) — elles seront comparées à la prochaine synchronisation.`);
       if (_toPush.length) {
         try {
-          const userRef = window.firebaseDb.collection("users").doc(userSession.uid).collection("cheptel");
           for (let i = 0; i < _toPush.length; i += 450) {
             const chunk = _toPush.slice(i, i + 450);
-            const batch = window.firebaseDb.batch();
-            chunk.forEach(doc => { batch.set(userRef.doc(doc.kind + "-" + doc.id), cleanForCloud(doc)); });
-            await batch.commit();
+            /* REST : envois du lot en parallèle (pas d'écriture groupée
+               atomique) ; un échec rejette dans le catch ci-dessous, qui met
+               tout le lot en file d'attente, comme avant. */
+            await Promise.all(chunk.map((doc) => fsSetCheptelDoc(userSession.uid, doc.kind + "-" + doc.id, cleanForCloud(doc))));
           }
           userSession.lastSync = new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
           saveUserSession();

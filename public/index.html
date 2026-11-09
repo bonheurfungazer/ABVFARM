@@ -2005,6 +2005,14 @@ function processCloudSnapshotDocs(cloudDocs, uid) {
      seules des erreurs CONSÉCUTIVES comptent vers l'arrêt (avant, 5 erreurs
      cumulées sur la session arrêtaient l'écoute pour de bon). */
   listenerAttempts = 0;
+  /* Correctif 2026-11-09 (capture de 08:59) : file d'attente vide + snapshot
+     serveur réussi = plus rien n'est en échec — on efface la « dernière
+     erreur » devenue périmée. Une coupure réseau passagère (ex. rest-reseau
+     à 2 Ko/s) la réinscrivait et elle restait affichée indéfiniment alors
+     que le même écran disait « Écoute cloud : serveur OK ». Si la file
+     n'est PAS vide, l'erreur reste affichée : elle décrit alors un envoi
+     réellement en attente. */
+  try { const _pendNow = JSON.parse(localStorage.getItem(pendingSyncKey(uid)) || "[]"); if (Array.isArray(_pendNow) && !_pendNow.length) localStorage.removeItem(lastSyncErrorKey(uid)); } catch (e) {}
   /* Section 2 (S6) : premier snapshot serveur reçu — le jeu affiché n'est plus
      seulement local. Le sondage REST ne lit que le serveur, jamais un cache. */
   if (cloudFirstSnapshotPending) cloudFirstSnapshotPending = false;

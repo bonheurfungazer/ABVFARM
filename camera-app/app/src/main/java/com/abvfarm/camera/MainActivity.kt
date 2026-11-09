@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.ContentValues
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.ColorStateList
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
@@ -27,6 +28,7 @@ import android.util.Log
 import android.view.MotionEvent
 import android.view.View
 import android.widget.Button
+import android.widget.ImageButton
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -64,16 +66,22 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 /**
- * ABV Farm Caméra — caméra dédiée à l'élevage ABV Farm.
+ * ABV Farm Caméra — caméra dédiée à l'élevage ABV Farm (v1.1).
  *
  * - Photo haute résolution (résolution maximale du capteur) avec filigrane
- *   ABV Farm incrusté dans le fichier JPEG enregistré.
- * - Vidéo haute résolution (UHD si disponible, sinon FHD/HD) avec le même
- *   filigrane incrusté dans chaque image de la vidéo via OverlayEffect.
+ *   ABV Farm incrusté dans le fichier JPEG enregistré + flash (Non/Auto/Oui).
+ * - Vidéo haute résolution (UHD si l'appareil le permet, sinon FHD/HD) avec
+ *   le même filigrane incrusté dans chaque image via OverlayEffect, et lampe
+ *   torche pour filmer dans les bâtiments sombres.
  * - Réduction de bruit activable : mode « haute qualité » du capteur
- *   (Camera2 NOISE_REDUCTION_MODE_HIGH_QUALITY + EDGE_MODE_HIGH_QUALITY)
- *   appliqué à l'aperçu, à la photo et à la vidéo, plus stabilisation vidéo
- *   quand le téléphone la propose.
+ *   (NOISE_REDUCTION_MODE_HIGH_QUALITY + EDGE_MODE_HIGH_QUALITY) et
+ *   stabilisation vidéo quand le téléphone la propose.
+ *
+ * Fiabilité (correctif v1.1) : un seul usage de capture est lié à la fois
+ * (photo OU vidéo selon le mode) au lieu des trois simultanément, et le débit
+ * vidéo n'est plus forcé — les téléphones d'entrée de gamme (ex. Galaxy A21s,
+ * vidéo 1080p max) négocient ainsi proprement leur meilleure qualité au lieu
+ * d'échouer à l'enregistrement.
  */
 class MainActivity : AppCompatActivity() {
 
@@ -81,10 +89,13 @@ class MainActivity : AppCompatActivity() {
     private lateinit var txtStatus: TextView
     private lateinit var txtRecording: TextView
     private lateinit var txtQuality: TextView
-    private lateinit var btnCapture: Button
-    private lateinit var btnNoise: Button
-    private lateinit var btnModePhoto: Button
-    private lateinit var btnModeVideo: Button
+    private lateinit var btnCapture: View
+    private lateinit var captureInner: View
+    private lateinit var btnNoise: ImageButton
+    private lateinit var lblNoise: TextView
+    private lateinit var btnFlash: Button
+    private lateinit var segPhoto: TextView
+    private lateinit var segVideo: TextView
 
     private var imageCapture: ImageCapture? = null
     private var videoCapture: VideoCapture<Recorder>? = null
@@ -95,6 +106,8 @@ class MainActivity : AppCompatActivity() {
     private var lensFacing = CameraSelector.LENS_FACING_BACK
     private var videoMode = false
     private var noiseReductionOn = true
+    private var flashMode = ImageCapture.FLASH_MODE_OFF
+    private var torchOn = false
     private var lastMediaUri: Uri? = null
 
     private lateinit var cameraExecutor: ExecutorService
@@ -134,29 +147,35 @@ class MainActivity : AppCompatActivity() {
         txtRecording = findViewById(R.id.txtRecording)
         txtQuality = findViewById(R.id.txtQuality)
         btnCapture = findViewById(R.id.btnCapture)
+        captureInner = findViewById(R.id.captureInner)
         btnNoise = findViewById(R.id.btnNoise)
-        btnModePhoto = findViewById(R.id.btnModePhoto)
-        btnModeVideo = findViewById(R.id.btnModeVideo)
+        lblNoise = findViewById(R.id.lblNoise)
+        btnFlash = findViewById(R.id.btnFlash)
+        segPhoto = findViewById(R.id.btnModePhoto)
+        segVideo = findViewById(R.id.btnModeVideo)
 
         cameraExecutor = Executors.newSingleThreadExecutor()
 
-        findViewById<Button>(R.id.btnSwitchCamera).setOnClickListener {
+        findViewById<ImageButton>(R.id.btnSwitchCamera).setOnClickListener {
+            if (recording != null) return@setOnClickListener
             lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK)
                 CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK
             startCamera()
         }
         btnNoise.setOnClickListener {
+            if (recording != null) return@setOnClickListener
             noiseReductionOn = !noiseReductionOn
             updateNoiseButton()
             startCamera()
             toast(if (noiseReductionOn) "Réduction de bruit activée (haute qualité)" else "Réduction de bruit désactivée")
         }
-        btnModePhoto.setOnClickListener { setMode(video = false) }
-        btnModeVideo.setOnClickListener { setMode(video = true) }
+        btnFlash.setOnClickListener { onFlashPressed() }
+        segPhoto.setOnClickListener { setMode(video = false) }
+        segVideo.setOnClickListener { setMode(video = true) }
         btnCapture.setOnClickListener {
             if (videoMode) toggleRecording() else takePhoto()
         }
-        findViewById<Button>(R.id.btnGallery).setOnClickListener { openGallery() }
+        findViewById<ImageButton>(R.id.btnGallery).setOnClickListener { openGallery() }
 
         // Mise au point au toucher
         previewView.setOnTouchListener { v, event ->
@@ -171,6 +190,8 @@ class MainActivity : AppCompatActivity() {
         }
 
         updateNoiseButton()
+        updateModeUi()
+        updateFlashChip()
         if (hasPermissions()) startCamera()
         else permissionLauncher.launch(
             arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)
@@ -188,23 +209,93 @@ class MainActivity : AppCompatActivity() {
         ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) ==
             PackageManager.PERMISSION_GRANTED
 
+    // ------------------------------------------------------------- interface
+
     private fun updateNoiseButton() {
-        btnNoise.text = if (noiseReductionOn) "Anti-bruit : OUI" else "Anti-bruit : NON"
-        btnNoise.setBackgroundColor(if (noiseReductionOn) 0xFF2E7D32.toInt() else 0xFF616161.toInt())
+        if (noiseReductionOn) {
+            btnNoise.setBackgroundResource(R.drawable.bg_gold_circle)
+            btnNoise.imageTintList = ColorStateList.valueOf(0xFF0B2E21.toInt())
+            lblNoise.setTextColor(0xFFF5D98B.toInt())
+        } else {
+            btnNoise.setBackgroundResource(R.drawable.bg_glass_circle)
+            btnNoise.imageTintList = ColorStateList.valueOf(Color.WHITE)
+            lblNoise.setTextColor(Color.WHITE)
+        }
+    }
+
+    /** Bouton flash : en photo, cycle Non → Auto → Oui ; en vidéo, lampe torche. */
+    private fun onFlashPressed() {
+        val hasFlash = camera?.cameraInfo?.hasFlashUnit() == true
+        if (!hasFlash) {
+            toast("Pas de flash sur cette caméra.")
+            return
+        }
+        if (videoMode) {
+            torchOn = !torchOn
+            camera?.cameraControl?.enableTorch(torchOn)
+            updateFlashChip()
+            toast(if (torchOn) "Lampe allumée" else "Lampe éteinte")
+        } else {
+            flashMode = when (flashMode) {
+                ImageCapture.FLASH_MODE_OFF -> ImageCapture.FLASH_MODE_AUTO
+                ImageCapture.FLASH_MODE_AUTO -> ImageCapture.FLASH_MODE_ON
+                else -> ImageCapture.FLASH_MODE_OFF
+            }
+            imageCapture?.flashMode = flashMode
+            updateFlashChip()
+        }
+    }
+
+    private fun updateFlashChip() {
+        val hasFlash = camera?.cameraInfo?.hasFlashUnit() != false
+        btnFlash.alpha = if (hasFlash) 1f else 0.45f
+        if (videoMode) {
+            btnFlash.text = if (torchOn) "Lampe : Oui" else "Lampe : Non"
+            val active = torchOn
+            btnFlash.setBackgroundResource(
+                if (active) R.drawable.bg_flash_chip_active else R.drawable.bg_flash_chip
+            )
+            btnFlash.setTextColor(if (active) 0xFF0B2E21.toInt() else Color.WHITE)
+        } else {
+            btnFlash.text = when (flashMode) {
+                ImageCapture.FLASH_MODE_AUTO -> "Flash : Auto"
+                ImageCapture.FLASH_MODE_ON -> "Flash : Oui"
+                else -> "Flash : Non"
+            }
+            val active = flashMode != ImageCapture.FLASH_MODE_OFF
+            btnFlash.setBackgroundResource(
+                if (active) R.drawable.bg_flash_chip_active else R.drawable.bg_flash_chip
+            )
+            btnFlash.setTextColor(if (active) 0xFF0B2E21.toInt() else Color.WHITE)
+        }
     }
 
     private fun setMode(video: Boolean) {
-        if (recording != null) return
+        if (recording != null || video == videoMode) return
         videoMode = video
-        btnModePhoto.setBackgroundColor(if (!video) 0xFFF5D98B.toInt() else 0x33FFFFFF)
-        btnModePhoto.setTextColor(if (!video) 0xFF0B2E21.toInt() else Color.WHITE)
-        btnModeVideo.setBackgroundColor(if (video) 0xFFF5D98B.toInt() else 0x33FFFFFF)
-        btnModeVideo.setTextColor(if (video) 0xFF0B2E21.toInt() else Color.WHITE)
-        btnCapture.text = if (video) "●" else "📸"
-        txtStatus.text = if (video)
-            "Mode vidéo — filigrane + anti-bruit incrustés dans l'enregistrement"
-        else
-            "Mode photo — filigrane ABV Farm ajouté automatiquement"
+        updateModeUi()
+        startCamera()
+    }
+
+    private fun updateModeUi() {
+        if (videoMode) {
+            segVideo.setBackgroundResource(R.drawable.bg_mode_selected)
+            segVideo.setTextColor(0xFF0B2E21.toInt())
+            segPhoto.background = null
+            segPhoto.setTextColor(Color.WHITE)
+            captureInner.setBackgroundResource(R.drawable.bg_shutter_inner_red)
+            txtStatus.text = "Mode vidéo — filigrane incrusté dans l'enregistrement"
+            txtQuality.text = "Vidéo haute résolution (UHD / FHD selon l'appareil)"
+        } else {
+            segPhoto.setBackgroundResource(R.drawable.bg_mode_selected)
+            segPhoto.setTextColor(0xFF0B2E21.toInt())
+            segVideo.background = null
+            segVideo.setTextColor(Color.WHITE)
+            captureInner.setBackgroundResource(R.drawable.bg_shutter_inner_white)
+            txtStatus.text = "Mode photo — filigrane ABV Farm ajouté automatiquement"
+            txtQuality.text = "Photo résolution maximale du capteur"
+        }
+        updateFlashChip()
     }
 
     // ---------------------------------------------------------------- caméra
@@ -231,92 +322,96 @@ class MainActivity : AppCompatActivity() {
                 it.surfaceProvider = previewView.surfaceProvider
             }
 
-            // --- Photo : résolution maximale du capteur, qualité maximale ---
-            val photoSelector = ResolutionSelector.Builder()
-                .setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY)
-                .setResolutionStrategy(ResolutionStrategy.HIGHEST_AVAILABLE_STRATEGY)
-                .build()
-            val imageBuilder = ImageCapture.Builder()
-                .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
-                .setResolutionSelector(photoSelector)
-                .setJpegQuality(100)
-            Camera2Interop.Extender(imageBuilder)
-                .setCaptureRequestOption(CaptureRequest.NOISE_REDUCTION_MODE, nrMode())
-                .setCaptureRequestOption(
-                    CaptureRequest.EDGE_MODE,
-                    if (noiseReductionOn) CameraMetadata.EDGE_MODE_HIGH_QUALITY
-                    else CameraMetadata.EDGE_MODE_OFF
+            // --- Un seul usage de capture selon le mode (fiabilité) ---
+            imageCapture = null
+            videoCapture = null
+            if (!videoMode) {
+                val photoSelector = ResolutionSelector.Builder()
+                    .setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY)
+                    .setResolutionStrategy(ResolutionStrategy.HIGHEST_AVAILABLE_STRATEGY)
+                    .build()
+                val imageBuilder = ImageCapture.Builder()
+                    .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
+                    .setResolutionSelector(photoSelector)
+                    .setJpegQuality(100)
+                    .setFlashMode(flashMode)
+                Camera2Interop.Extender(imageBuilder)
+                    .setCaptureRequestOption(CaptureRequest.NOISE_REDUCTION_MODE, nrMode())
+                    .setCaptureRequestOption(
+                        CaptureRequest.EDGE_MODE,
+                        if (noiseReductionOn) CameraMetadata.EDGE_MODE_HIGH_QUALITY
+                        else CameraMetadata.EDGE_MODE_OFF
+                    )
+                imageCapture = imageBuilder.build()
+            } else {
+                val qualitySelector = QualitySelector.fromOrderedList(
+                    listOf(Quality.UHD, Quality.FHD, Quality.HD, Quality.SD),
+                    FallbackStrategy.lowerQualityOrHigherThan(Quality.SD)
                 )
-            imageCapture = imageBuilder.build()
+                val recorder = Recorder.Builder()
+                    .setQualitySelector(qualitySelector)
+                    .build()
+                val videoBuilder = VideoCapture.Builder(recorder)
+                Camera2Interop.Extender(videoBuilder)
+                    .setCaptureRequestOption(CaptureRequest.NOISE_REDUCTION_MODE, nrMode())
+                    .setCaptureRequestOption(
+                        CaptureRequest.EDGE_MODE,
+                        if (noiseReductionOn) CameraMetadata.EDGE_MODE_HIGH_QUALITY
+                        else CameraMetadata.EDGE_MODE_OFF
+                    )
+                    .setCaptureRequestOption(
+                        CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
+                        if (noiseReductionOn) CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_ON
+                        else CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_OFF
+                    )
+                videoCapture = videoBuilder.build()
+            }
 
-            // --- Vidéo : UHD > FHD > HD, gros débit pour la netteté ---
-            val qualitySelector = QualitySelector.fromOrderedList(
-                listOf(Quality.UHD, Quality.FHD, Quality.HD, Quality.SD),
-                FallbackStrategy.lowerQualityOrHigherThan(Quality.SD)
-            )
-            val recorder = Recorder.Builder()
-                .setQualitySelector(qualitySelector)
-                .setTargetVideoEncodingBitRate(24_000_000)
-                .build()
-            val videoBuilder = VideoCapture.Builder(recorder)
-            Camera2Interop.Extender(videoBuilder)
-                .setCaptureRequestOption(CaptureRequest.NOISE_REDUCTION_MODE, nrMode())
-                .setCaptureRequestOption(
-                    CaptureRequest.EDGE_MODE,
-                    if (noiseReductionOn) CameraMetadata.EDGE_MODE_HIGH_QUALITY
-                    else CameraMetadata.EDGE_MODE_OFF
-                )
-                .setCaptureRequestOption(
-                    CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
-                    if (noiseReductionOn) CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_ON
-                    else CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_OFF
-                )
-            videoCapture = videoBuilder.build()
-
-            // --- Filigrane incrusté (aperçu + photo + vidéo) ---
+            // --- Filigrane incrusté (aperçu + usage actif) ---
             overlayEffect?.close()
+            val targets = if (videoMode)
+                CameraEffect.PREVIEW or CameraEffect.VIDEO_CAPTURE
+            else
+                CameraEffect.PREVIEW or CameraEffect.IMAGE_CAPTURE
             overlayEffect = OverlayEffect(
-                CameraEffect.PREVIEW or CameraEffect.VIDEO_CAPTURE or CameraEffect.IMAGE_CAPTURE,
-                0,
-                Handler(Looper.getMainLooper())
+                targets, 0, Handler(Looper.getMainLooper())
             ) { e -> Log.w(TAG, "Effet filigrane en erreur: $e") }
             overlayEffect?.setOnDrawListener { frame ->
                 drawWatermark(frame.overlayCanvas)
                 true
             }
 
-            val groupBuilder = UseCaseGroup.Builder()
-                .addUseCase(preview)
-                .addUseCase(imageCapture!!)
-                .addUseCase(videoCapture!!)
+            val groupBuilder = UseCaseGroup.Builder().addUseCase(preview)
+            imageCapture?.let { groupBuilder.addUseCase(it) }
+            videoCapture?.let { groupBuilder.addUseCase(it) }
             overlayEffect?.let { groupBuilder.addEffect(it) }
 
             val selector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
+            torchOn = false
             try {
                 provider.unbindAll()
                 camera = provider.bindToLifecycle(this, selector, groupBuilder.build())
-                txtQuality.text = "Photo max • Vidéo UHD/FHD • Anti-bruit " +
-                    if (noiseReductionOn) "HQ" else "off"
             } catch (e: Exception) {
                 // Repli sans l'effet (certains téléphones anciens) : la photo garde
                 // son filigrane grâce à l'incrustation après capture ci-dessous.
                 Log.e(TAG, "Liaison avec effet impossible, repli sans effet", e)
                 try {
                     provider.unbindAll()
-                    camera = provider.bindToLifecycle(
-                        this, selector, preview, imageCapture!!, videoCapture!!
-                    )
+                    val plain = UseCaseGroup.Builder().addUseCase(preview)
+                    imageCapture?.let { plain.addUseCase(it) }
+                    videoCapture?.let { plain.addUseCase(it) }
+                    camera = provider.bindToLifecycle(this, selector, plain.build())
                 } catch (e2: Exception) {
                     Log.e(TAG, "Impossible de démarrer la caméra", e2)
                     toast("Caméra indisponible sur cet appareil.")
                 }
             }
+            updateFlashChip()
         }, ContextCompat.getMainExecutor(this))
     }
 
     /**
-     * Dessine le filigrane ABV Farm sur une image (canvas d'effet vidéo/photo
-     * ou bitmap photo après capture) : badge circulaire en bas à droite +
+     * Dessine le filigrane ABV Farm : badge circulaire en bas à droite +
      * signature dorée en bas à gauche.
      */
     private fun drawWatermark(canvas: Canvas) {
@@ -369,7 +464,7 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread {
                     if (uri != null) {
                         lastMediaUri = uri
-                        txtStatus.text = "📷 Photo enregistrée avec filigrane — Galerie / ABV Farm Caméra"
+                        txtStatus.text = "📷 Photo enregistrée avec filigrane — Galerie / ABV Farm Camera"
                         toast("Photo enregistrée avec le filigrane ABV Farm ✅")
                     } else {
                         txtStatus.text = "Échec de l'enregistrement de la photo"
@@ -505,20 +600,20 @@ class MainActivity : AppCompatActivity() {
                     recordStartMs = System.currentTimeMillis()
                     txtRecording.visibility = View.VISIBLE
                     mainHandler.post(tickRunnable)
-                    btnCapture.text = "⏹"
+                    captureInner.setBackgroundResource(R.drawable.bg_shutter_inner_rec)
                     txtStatus.text = "Enregistrement… filigrane + anti-bruit actifs"
                 }
                 is VideoRecordEvent.Finalize -> {
                     mainHandler.removeCallbacks(tickRunnable)
                     txtRecording.visibility = View.GONE
-                    btnCapture.text = "●"
+                    captureInner.setBackgroundResource(R.drawable.bg_shutter_inner_red)
                     if (event.hasError()) {
                         Log.e(TAG, "Erreur vidéo: ${event.error}")
                         txtStatus.text = "Erreur d'enregistrement vidéo"
                         toast("Erreur d'enregistrement vidéo.")
                     } else {
                         lastMediaUri = event.outputResults.outputUri
-                        txtStatus.text = "🎥 Vidéo enregistrée avec filigrane — Galerie / ABV Farm Caméra"
+                        txtStatus.text = "🎥 Vidéo enregistrée avec filigrane — Galerie / ABV Farm Camera"
                         toast("Vidéo enregistrée avec le filigrane ABV Farm ✅")
                     }
                 }

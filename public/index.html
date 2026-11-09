@@ -1279,19 +1279,48 @@ async function retryPendingSyncLocked() {
      _cloudDocs conserve le contenu pour la comparaison à horodatages égaux (m92). */
   const _cloudDocs = {};
   const _withTimeout20 = (pr) => Promise.race([pr, new Promise((_, rej) => setTimeout(() => { const _e = new Error("délai dépassé (20 s)"); _e.code = "délai dépassé (20 s)"; rej(_e); }, 20000))]);
-  try { _cloudMap = {}; for (const _it of _q) { if (!_it.kind || _it.id == null) continue; const _cd = await _withTimeout20(fsGetCheptelDoc(_uid, _it.kind + "-" + _it.id)); if (_cd && _cd.kind && _cd.id) { _cloudMap[_cd.kind + "-" + _cd.id] = _cd.serverUpdatedAt || _cd.updatedAt || ""; _cloudDocs[_cd.kind + "-" + _cd.id] = _cd; } } } catch (e) { _cloudMap = null; }
-  /* C21 fail-closed : lecture serveur impossible = on ne renvoie RIEN. Avant,
-     _cloudMap null laissait passer toutes les entrées en écriture aveugle,
-     exactement quand le réseau est instable. Les entrées restent en file
-     (le fichier n'est pas touché), l'erreur est enregistrée, on réessaiera. */
-  if (_cloudMap === null) { try { localStorage.setItem(lastSyncErrorKey(_uid), "lecture serveur impossible"); } catch (e) {} return; }
+  /* Correctif 2026-11-09 (file bloquée à 117 fiches sur réseau très lent,
+     captures de Mr Robot : tout le reste contactait le serveur, seule la file
+     ne se vidait jamais) : avant, cette boucle lisait les documents UN PAR UN
+     et le moindre échec — un seul délai dépassé parmi ~117 lectures
+     séquentielles — annulait TOUT le rattrapage. Maintenant : lectures par
+     lots de 6 en parallèle, et isolation PAR fiche — une fiche illisible
+     reste en file pour le prochain essai (fail-closed par fiche : jamais
+     d'écriture aveugle sur celle-là), les autres poursuivent leur arbitrage
+     et leur envoi. fsGetCheptelDoc renvoie null si le document est absent
+     (404) et ne rejette que sur vrai échec réseau : « absent » et
+     « illisible » restent donc bien distingués. */
+  const _readFailed = new Set();
+  _cloudMap = {};
+  let _readOk = 0;
+  const _readable = _q.filter((_it) => _it.kind && _it.id != null);
+  for (let _bi = 0; _bi < _readable.length; _bi += 6) {
+    const _batch = _readable.slice(_bi, _bi + 6);
+    const _res = await Promise.allSettled(_batch.map((_it) => _withTimeout20(fsGetCheptelDoc(_uid, _it.kind + "-" + _it.id))));
+    _res.forEach((_r, _ix) => {
+      const _it = _batch[_ix];
+      const _key = _it.kind + "-" + _it.id;
+      if (_r.status !== "fulfilled") { _readFailed.add(_key); return; }
+      _readOk++;
+      const _cd = _r.value;
+      if (_cd && _cd.kind && _cd.id) { _cloudMap[_key] = _cd.serverUpdatedAt || _cd.updatedAt || ""; _cloudDocs[_key] = _cd; }
+    });
+  }
+  /* C21 fail-closed : si AUCUNE lecture serveur n'a abouti, on ne renvoie
+     RIEN (pas d'écriture aveugle). Les entrées restent en file (le fichier
+     n'est pas touché), l'erreur est enregistrée, on réessaiera. En revanche,
+     des échecs PARTIELS ne bloquent plus les fiches lisibles : les fiches
+     illisibles restent en file via _readFailed (boucle d'arbitrage). */
+  if (_readable.length && !_readOk) { try { localStorage.setItem(lastSyncErrorKey(_uid), "lecture serveur impossible"); } catch (e) {} return; }
   /* C17 : clés déjà vues dans le cloud pour ce compte (cloudIds) : une fiche
      « set » en file, absente du cloud mais déjà vue, y a été supprimée. */
   let _seenCloud = new Set(); try { _seenCloud = new Set(JSON.parse(localStorage.getItem(cloudIdsKey(_uid)) || "[]")); } catch (e) {}
   const _todo = [];
+  const _unread = []; /* fiches illisibles ce tour-ci : conservées en file telles quelles. */
   const _auto = []; /* LWW : entrées abandonnées au profit de la version la plus récente (cloud), journalisées. */
   for (const _it of _q) {
     const _key = _it.kind + "-" + _it.id;
+    if (_readFailed.has(_key)) { _unread.push(_it); continue; }
     if (_cloudMap) {
       if (_it.action === "delete" && !_cloudMap[_key]) continue;
       /* S3 — avant, une entrée en attente face à un cloud plus récent était
@@ -1329,15 +1358,25 @@ async function retryPendingSyncLocked() {
   }
   const _left = [];
   let _lastErr = "";
-  for (const _it of _todo) {
-    /* S5 : deconnexion ou changement de compte pendant le rattrapage. On garde le
-       reste en file sous l'ANCIEN uid (cle _uid) et on ne pousse plus rien : sans
-       ce garde, des ecritures partiraient encore pour l'ANCIEN compte apres la
-       deconnexion. */
-    if (userSession.uid !== _uid) { _left.push(_it); continue; }
-    try { if (_it.action === "delete") await _withTimeout20(fsDeleteCheptelDoc(_uid, _it.kind + "-" + _it.id)); else await _withTimeout20(fsSetCheptelDoc(_uid, _it.kind + "-" + _it.id, withServerTs(cleanForCloud(_it.doc)))); } catch (e) { _left.push(_it); _lastErr = e.code || e.message || ""; }
+  /* Envois par lots de 4 en parallèle (correctif 2026-11-09) : sur un réseau
+     à forte latence, l'envoi strictement séquentiel rendait le rattrapage
+     interminable ; les documents sont indépendants, l'ordre n'a pas
+     d'importance. Un échec ne retient que sa propre fiche. */
+  for (let _si = 0; _si < _todo.length; _si += 4) {
+    const _sBatch = _todo.slice(_si, _si + 4);
+    const _sRes = await Promise.allSettled(_sBatch.map((_it) => {
+      /* S5 : deconnexion ou changement de compte pendant le rattrapage. On
+         garde le reste en file sous l'ANCIEN uid (cle _uid) et on ne pousse
+         plus rien pour l'ancien compte. */
+      if (userSession.uid !== _uid) { const _se = new Error("session changée"); _se.code = "session"; return Promise.reject(_se); }
+      return _it.action === "delete" ? _withTimeout20(fsDeleteCheptelDoc(_uid, _it.kind + "-" + _it.id)) : _withTimeout20(fsSetCheptelDoc(_uid, _it.kind + "-" + _it.id, withServerTs(cleanForCloud(_it.doc))));
+    }));
+    _sRes.forEach((_r, _ix) => { if (_r.status !== "fulfilled") { _left.push(_sBatch[_ix]); const _e = _r.reason || {}; if (_e.code !== "session") _lastErr = _e.code || _e.message || _lastErr; } });
   }
-  const _leftBeforeMerge = _left.length;
+  /* Fiches illisibles ce tour-ci : elles restent en file, et l'erreur
+     affichée doit le dire si aucun autre échec ne l'explique déjà. */
+  if (_unread.length) { _left.push(..._unread); if (!_lastErr) _lastErr = "lecture serveur impossible"; }
+  const _leftBeforeMerge = _left.length; /* après fusion des illisibles : le toast « N fiche(s) envoyée(s) » compte juste. */
   /* Anti-perte (section 3) : une entree mise en file PENDANT ce rattrapage (sauvegarde
      concurrente) etait ecrasee par la reecriture finale. On refusionne toute
      entree presente dans le fichier mais absente de la lecture initiale. */
@@ -1351,7 +1390,7 @@ async function retryPendingSyncLocked() {
   /* Conflits (section 4) fusionnés DANS le retry verrouillé (section 3) : un conflit
      n'est jamais jeté, il reste en file (via _kept) et signalé, même si _left est vide. */
   const _kept = _left; /* LWW : les entrées résolues automatiquement ne restent plus en file (avant, elles y étaient conservées en attente d'un choix manuel). */
-  try { localStorage.setItem(pendingSyncKey(_uid), JSON.stringify(_kept)); if (_left.length) localStorage.setItem(lastSyncErrorKey(_uid), _lastErr); else if (!_auto.length) localStorage.removeItem(lastSyncErrorKey(_uid)); if (_auto.length) toast(`Synchro automatique : ${_auto.length} fiche(s) alignée(s) sur la version la plus récente (la plus récente gagne) — détail dans le Journal d'activité.`); else if (_leftBeforeMerge < _q.length) toast(`Synchronisation rattrapée : ${_q.length - _leftBeforeMerge} fiche(s) envoyée(s).`); } catch (e) {}
+  try { localStorage.setItem(pendingSyncKey(_uid), JSON.stringify(_kept)); if (_left.length) localStorage.setItem(lastSyncErrorKey(_uid), _lastErr); else localStorage.removeItem(lastSyncErrorKey(_uid)); /* correctif 2026-11-09 : avant, quand la file se vidait via des alignements automatiques (_auto), l'ancienne erreur n'était JAMAIS effacée — l'en-tête affichait « dernière erreur : lecture serveur impossible » en permanence, même serveur OK. File vide = erreur effacée, sans condition. */ if (_auto.length) toast(`✅ Synchro : ${_auto.length} fiche(s) alignée(s) sur la plus récente — détail dans le Journal.`); else if (_leftBeforeMerge < _q.length) toast(`Synchronisation rattrapée : ${_q.length - _leftBeforeMerge} fiche(s) envoyée(s).`); } catch (e) {}
 }/* Correctif formulaires figés : la sauvegarde locale répond tout de suite, la synchro cloud
    part en arrière-plan avec un délai limite. Avant, save() attendait Firestore sans timeout,
    donc un réseau lent/bloqué laissait le bouton sur "Enregistrement…" pour toujours, alors

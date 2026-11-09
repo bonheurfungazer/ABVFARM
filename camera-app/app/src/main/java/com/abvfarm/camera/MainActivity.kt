@@ -132,6 +132,16 @@ class MainActivity : AppCompatActivity() {
     private var recNoAudio = false
     private var interruptedRecording = false
     private var bindGeneration = 0
+
+    /**
+     * Palier de compatibilité vidéo (persisté) : 0 = tout activé (options
+     * capteur + effet filigrane), 1 = sans options capteur avancées,
+     * 2 = vidéo simple sans effet. Descendu automatiquement après chaque
+     * erreur d'enregistrement jusqu'à trouver le réglage accepté par
+     * l'appareil (certains téléphones d'entrée de gamme rejettent les
+     * options avancées ou l'effet dans la chaîne d'encodage).
+     */
+    private var videoCompatLevel = 0
     private var lastMediaUri: Uri? = null
     private var lastMediaMime: String? = null
     private var crashDialog: AlertDialog? = null
@@ -182,11 +192,42 @@ class MainActivity : AppCompatActivity() {
     // Le handler est installé une seule fois pour tout le processus, sans
     // capturer l'Activity ; il écrit la cause dans le stockage interne privé.
 
-    private fun showPreviousCrashIfAny() {
+    private fun incidentFile(): File = File(filesDir, "abv_incident.txt")
+
+    private fun recordIncident(detail: String) {
+        try {
+            incidentFile().writeText(
+                "ABV Farm Caméra $VERSION_LABEL — souci vidéo\n$detail\n" +
+                    "(étape : $startupStep, thread : ${Thread.currentThread().name})"
+            )
+        } catch (_: Throwable) {
+        }
+    }
+
+    private fun showIncidentIfAny() {
         if (isFinishing || isDestroyed) return
         try {
-            val f = crashFileFor(applicationContext)
+            val f = incidentFile()
             if (!f.exists()) return
+            val text = f.readText()
+            AlertDialog.Builder(this)
+                .setTitle("Détail du dernier souci vidéo")
+                .setMessage(
+                    "Faites une capture d'écran de ce message et envoyez-la pour correction.\n\n" + text
+                )
+                .setPositiveButton("J'ai envoyé la capture") { _, _ -> }
+                .setNegativeButton("Fermer") { _, _ -> }
+                .setOnDismissListener { try { f.delete() } catch (_: Throwable) {} }
+                .show()
+        } catch (_: Throwable) {
+        }
+    }
+
+    private fun showPreviousCrashIfAny(): Boolean {
+        if (isFinishing || isDestroyed) return false
+        try {
+            val f = crashFileFor(applicationContext)
+            if (!f.exists()) return false
             val text = f.readText()
             val scroll = android.widget.ScrollView(this)
             val tv = TextView(this).apply {
@@ -206,7 +247,9 @@ class MainActivity : AppCompatActivity() {
                 .setNegativeButton("Fermer") { _, _ -> }
                 .setOnDismissListener { try { f.delete() } catch (_: Throwable) {} }
                 .show()
+            return true
         } catch (_: Throwable) {
+            return false
         }
     }
 
@@ -310,11 +353,14 @@ class MainActivity : AppCompatActivity() {
             insets
         }
 
+        videoCompatLevel = getSharedPreferences("abv_camera", MODE_PRIVATE)
+            .getInt("video_compat_level", 0)
+
         updateNoiseButton()
         updateModeUi()
         updateFlashChip()
         startupStep = "interface prête"
-        showPreviousCrashIfAny()
+        if (!showPreviousCrashIfAny()) showIncidentIfAny()
         if (hasCameraPermission()) startCamera() else onCameraPermissionMissing()
     }
 
@@ -633,14 +679,18 @@ class MainActivity : AppCompatActivity() {
                     .build()
                 val videoBuilder = VideoCapture.Builder(recorder)
                     .setMirrorMode(MirrorMode.MIRROR_MODE_ON_FRONT_ONLY)
-                Camera2Interop.Extender(videoBuilder)
-                    .setCaptureRequestOption(CaptureRequest.NOISE_REDUCTION_MODE, nrMode())
-                    .setCaptureRequestOption(CaptureRequest.EDGE_MODE, edgeMode())
-                    .setCaptureRequestOption(
-                        CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
-                        if (noiseReductionOn) CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_ON
-                        else CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_OFF
-                    )
+                if (videoCompatLevel == 0) {
+                    // Options capteur avancées : rejetées par la chaîne
+                    // d'encodage de certains appareils → palier 1 s'en passe.
+                    Camera2Interop.Extender(videoBuilder)
+                        .setCaptureRequestOption(CaptureRequest.NOISE_REDUCTION_MODE, nrMode())
+                        .setCaptureRequestOption(CaptureRequest.EDGE_MODE, edgeMode())
+                        .setCaptureRequestOption(
+                            CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
+                            if (noiseReductionOn) CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_ON
+                            else CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_OFF
+                        )
+                }
                 videoCapture = videoBuilder.build()
             }
 
@@ -696,7 +746,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
-            var bound = bind(withEffect = true)
+            var bound = bind(withEffect = videoCompatLevel <= 1)
             if (!bound) bound = bind(withEffect = false)
             if (!bound && lensFacing == CameraSelector.LENS_FACING_FRONT) {
                 // Caméra frontale absente/indisponible : retour à la dorsale
@@ -1063,8 +1113,30 @@ class MainActivity : AppCompatActivity() {
                                 contentResolver.delete(event.outputResults.outputUri, null, null)
                             } catch (_: Exception) {
                             }
-                            txtStatus.text = "Erreur d'enregistrement — vérifiez l'espace libre, puis réessayez."
-                            toast("Erreur d'enregistrement vidéo.")
+                            recordIncident(
+                                "Erreur d'enregistrement vidéo, code ${event.error} " +
+                                    "(palier de compatibilité $videoCompatLevel, " +
+                                    "filigrane actif : $videoEffectActive, anti-bruit : $noiseReductionOn)."
+                            )
+                            // Paliers de compatibilité : on descend d'un cran et
+                            // on relie la caméra, jusqu'au réglage accepté par
+                            // l'appareil. Le palier est mémorisé entre lancements.
+                            val nextLevel = when {
+                                videoCompatLevel >= 2 -> -1
+                                videoCompatLevel == 0 && !videoEffectActive -> 2
+                                else -> videoCompatLevel + 1
+                            }
+                            if (nextLevel > videoCompatLevel) {
+                                videoCompatLevel = nextLevel
+                                getSharedPreferences("abv_camera", MODE_PRIVATE).edit()
+                                    .putInt("video_compat_level", videoCompatLevel).apply()
+                                txtStatus.text = "Réglage vidéo ajusté pour votre téléphone — réessayez l'enregistrement."
+                                toast("Réglage vidéo ajusté (compatibilité) — réessayez.")
+                                startCamera()
+                            } else {
+                                txtStatus.text = "Erreur d'enregistrement (code ${event.error}) — vérifiez l'espace libre, puis réessayez."
+                                toast("Erreur d'enregistrement vidéo.")
+                            }
                         } else {
                             lastMediaUri = event.outputResults.outputUri
                             lastMediaMime = "video/mp4"
@@ -1113,7 +1185,7 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "ABVFarmCamera"
-        private const val VERSION_LABEL = "v1.2.0"
+        private const val VERSION_LABEL = "v1.2.1"
 
         @Volatile
         var startupStep: String = "avant onCreate"

@@ -34,37 +34,15 @@
             android:paddingEnd="14dp">
 
             <ImageView
-                android:layout_width="34dp"
-                android:layout_height="34dp"
+                android:layout_width="42dp"
+                android:layout_height="42dp"
                 android:contentDescription="Logo ABV Farm"
-                android:src="@drawable/app_logo" />
+                android:src="@drawable/watermark_badge" />
 
-            <LinearLayout
+            <View
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
-                android:layout_weight="1"
-                android:orientation="vertical">
-
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:ellipsize="end"
-                    android:maxLines="1"
-                    android:text="ABV Farm Caméra"
-                    android:textColor="#F5D98B"
-                    android:textSize="15sp"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:ellipsize="end"
-                    android:maxLines="1"
-                    android:text="Nourrir l’avenir, naturellement"
-                    android:textColor="#FFFFFF"
-                    android:textSize="10.5sp" />
-            </LinearLayout>
+                android:layout_height="1dp"
+                android:layout_weight="1" />
 
             <Button
                 android:id="@+id/btnFlash"

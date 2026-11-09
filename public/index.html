@@ -2115,6 +2115,7 @@ function processCloudSnapshotDocs(cloudDocs, uid) {
   if (!_pend.length) userSession.lastSync = new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
   updateUserUI();
   try { runDataRepairP3(); } catch (e) {} /* P3 : après une fusion cloud, tenter la migration de réparation (no-op si le marqueur du compte est déjà posé, ou si le jeu est encore vide). */
+  try { runFinanceRepair(); } catch (e) {} /* FIN-REPAIR : même principe — rattacher achats et ventes au journal financier après une fusion cloud. */
 }
 
 function ensureCloudSyncListener(uid) {
@@ -3219,6 +3220,74 @@ async function runDataRepairP3() {
     render();
   } catch (e) { console.warn("Réparation P3 : échec discret, démarrage non bloqué, nouvel essai au prochain chargement :", e); }
   finally { _repairP3Running = false; }
+}
+/* ---------- FIN-REPAIR : réconciliation du journal financier ----------
+   Constat terrain (compte de l'éleveur, 2026-11-09) : l'import du 3 novembre
+   (ancienne application) a apporté les ACHATS (inventaire, avec prix et
+   dates) et les lapins vendus, mais AUCUNE écriture financière — le journal
+   (tx) ne contenait qu'une seule vente. Résultat : les écrans Finances et la
+   tuile « Dépenses approvisionnement (ce mois) », qui ne lisent QUE le
+   journal, affichaient 0 F de dépenses alors que 39 500 F d'achats étaient
+   sous les yeux de l'éleveur. Cette migration rattache chaque achat et
+   chaque vente documentée à son écriture manquante, sans jamais doubler une
+   écriture existante (lien par itemId/rabbitId, ou rattachement d'une
+   écriture libre de même date et même montant). Les ventes anciennes dont
+   le prix et la date ont survécu dans les anciennes données du même
+   élevage sont restaurées via FIN_SALE_EXITS (clé : nom normalisé de la
+   fiche) ; les ventes sans aucun prix connu ne sont PAS inventées. */
+const FIN_SALE_EXITS = {
+  "nespoli (abv-26-001)": { exitDate: "2026-10-24", exitPrice: 8000 } /* Prix confirmé par l'éleveur le 2026-11-09 (8 000 F — les anciennes données affichaient 15 000 F, saisie d'essai écartée) ; date d'octobre 2026 au choix de l'éleveur, 24 octobre retenu (date des anciennes données). */
+};
+const finNormName = (s) => String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim();
+function finRepairPlan(items, txs, rabbits) {
+  const txOps = [], rabbitUpdates = [];
+  const linkedItemIds = new Set(txs.filter((x) => x.itemId).map((x) => x.itemId));
+  const usedTx = new Set();
+  for (const it of items || []) {
+    const price = Number(it.price) || 0;
+    if (!(price > 0) || !it.date || linkedItemIds.has(it.id)) continue;
+    const cat = it.cat === "Nourriture" ? "Aliment" : it.cat === "Médicament" ? "Santé" : it.cat === "Matériel" ? "Matériel" : "Autre dépense";
+    const fuzzy = txs.find((x) => !x.itemId && x.type === "out" && (Number(x.amount) || 0) === price && x.date === it.date && !usedTx.has(x.id));
+    if (fuzzy) { usedTx.add(fuzzy.id); txOps.push({ link: fuzzy.id, patch: { itemId: it.id } }); }
+    else txOps.push({ create: { type: "out", cat, amount: price, date: it.date, label: it.name || "Achat", itemId: it.id } });
+  }
+  const txByRabbit = new Set(txs.filter((x) => x.rabbitId).map((x) => x.rabbitId));
+  for (const r of rabbits || []) {
+    if (!r || r.status !== "Vendu") continue;
+    let exitDate = r.exitDate || "", exitPrice = Number(r.exitPrice) || 0;
+    if (!(exitPrice > 0) || !exitDate) {
+      const g = FIN_SALE_EXITS[finNormName(r.name || "")];
+      if (g) { const patch = {}; if (!exitDate && g.exitDate) patch.exitDate = g.exitDate; if (!(exitPrice > 0) && Number(g.exitPrice) > 0) patch.exitPrice = Number(g.exitPrice); if (Object.keys(patch).length) { rabbitUpdates.push({ id: r.id, patch }); exitDate = patch.exitDate || exitDate; exitPrice = patch.exitPrice || exitPrice; } }
+    }
+    if (exitPrice > 0 && exitDate && !txByRabbit.has(r.id)) txOps.push({ create: { type: "in", cat: "Vente chair", amount: exitPrice, date: exitDate, label: "Vente " + (r.name || ""), rabbitId: r.id } });
+  }
+  return { txOps, rabbitUpdates };
+}
+let _repairFinRunning = false;
+function repairFinMarkerKey() { return "abvfarm_repair_fin_v1_" + ((userSession.isLoggedIn && userSession.uid) || "guest"); }
+async function runFinanceRepair() {
+  if (_repairFinRunning) return;
+  try { if (localStorage.getItem(repairFinMarkerKey()) === "done") return; } catch (e) {}
+  if (!S.inventory.length && !S.rabbits.length) return; /* Compte vide ou cloud pas encore arrivé : ne rien marquer. */
+  _repairFinRunning = true;
+  try {
+    const plan = finRepairPlan(S.inventory, S.tx, S.rabbits);
+    let nC = 0, nL = 0, nR = 0, nFail = 0;
+    for (const u of plan.rabbitUpdates) { const r = byId(S.rabbits, u.id); if (r) { if (await save("rabbit", { ...r, ...u.patch })) nR++; else nFail++; } }
+    for (const t of plan.txOps) {
+      if (t.link) { const x = byId(S.tx, t.link); if (x) { if (await save("tx", { ...x, ...t.patch })) nL++; else nFail++; } }
+      else if (await save("tx", { ...t.create })) nC++; else nFail++;
+    }
+    if (nFail) { console.warn(`Réconciliation finances : ${nFail} écriture(s) en échec — marqueur NON posé, nouvel essai au prochain chargement (opérations idempotentes).`); return; }
+    try { localStorage.setItem(repairFinMarkerKey(), "done"); } catch (e) {}
+    if (nC || nL || nR) {
+      logActivity("Réconciliation finances", `${nC} écriture(s) créée(s) pour rattacher les achats et ventes au journal, ${nL} écriture(s) libre(s) rattachée(s), ${nR} fiche(s) de vente complétée(s) (prix/date retrouvés).`);
+      try { await save("reminder", { title: "Réconciliation automatique des finances terminée", due: today(), prio: "Basse", desc: `Le journal financier ne contenait pas les écritures des achats importés de l'ancienne application : ${nC} écriture(s) ont été créées pour les rattacher (achats et ventes documentées), ${nL} rattachée(s), ${nR} fiche(s) complétée(s). Les soldes et recettes des écrans Finances et Stocks reflètent désormais tout l'argent enregistré. Détail dans le Journal d'activité (écran Données).`, done: false, kind: "reparation-fin" }); } catch (e) {}
+      toast("Finances réconciliées : soldes et recettes à jour.");
+    }
+    render();
+  } catch (e) { console.warn("Réconciliation finances : échec discret, démarrage non bloqué, nouvel essai au prochain chargement :", e); }
+  finally { _repairFinRunning = false; }
 }
 /* ---------- P2 : machine à états saillie, libellés de portée, transitions ---------- */
 function matingTransitions(m) { /* P2/F27/F28 : transitions AUTORISÉES depuis le statut courant — mêmes gardes pour le formulaire et l'action rapide mst. « Mise bas » passe par kindleForm (dates + effectifs contrôlés). */
@@ -4397,14 +4466,11 @@ VIEWS.stocks = () => {
   const _feeds = feeds.filter((f) => (!ui.feedFrom || (f.date || "") >= ui.feedFrom) && (!ui.feedTo || (f.date || "") <= ui.feedTo));
   const _dupDates = duplicateFeedDates();
   const _dupSet = new Set(_dupDates.map((d) => d.date));
-  const _overflow = feedOverflowKg();
   const m0 = today().slice(0, 7); const monthSpend = S.tx.filter((x) => x.type === "out" && x.itemId && (x.date || "").startsWith(m0)).reduce((s, x) => s + (Number(x.amount) || 0), 0); /* m44 : dépenses d'approvisionnement RÉELLEMENT imputées en finances (tx liées aux achats) — avant, tous les achats du mois étaient sommés, même ceux dont « Imputer aux dépenses » était décoché : la tuile contredisait les Finances. */
   const last7 = feeds.filter((f) => { const _d7 = diff(f.date, today()); return _d7 >= 0 && _d7 < 7; }).reduce((s, f) => s + Number(f.grams || 0), 0) / 1000; /* m45 : borne basse — avant, les distributions FUTURES (diff négatif < 7) étaient incluses. */
   const lvl = stock <= 0 ? "bad" : days != null && days < 7 ? "bad" : days != null && days < 14 ? "warn" : "";
   return `<div class="head"><div><h1>Stocks & Alimentation</h1><p>Approvisionnements et distributions journalières</p></div><div class="actions"><button class="btn pri" data-act="feedQuick" title="Distribuer la ration conseillée du cheptel et la déduire automatiquement du stock">${ICON.grain}Distribuer la ration (${nf1.format(rt.grams / 1000)} kg)</button><button class="btn" data-act="feed" data-v="${rt.grams}">${ICON.edit}Ajuster</button><button class="btn" data-act="newitem">${ICON.plus}Nouvel achat</button></div></div>
   ${stock < 0 ? `<div class="banner warn"><span>⚠️ Stock négatif (${nf1.format(stock)} kg) : ${nf1.format(-stock)} kg distribués en trop.</span><details><summary>Causes possibles</summary><span>Un sac acheté est bien compté dans les achats ci-dessous, mais un déficit ancien l'absorbe. Vérifiez les achats non enregistrés, le stock que vous aviez déjà en ouvrant l'application (enregistrez-le comme un achat, catégorie Nourriture), ou les distributions en trop.</span></details></div>` : ""}
-  ${_dupDates.length ? `<div class="banner warn"><span>⚠️ Données historiques à vérifier — ${_dupDates.slice(0, 3).map((d) => `${d.count} distributions le ${fmtDate(d.date)} (total ${nf1.format(d.totalKg)} kg)`).join(" ; ")}${_dupDates.length > 3 ? ` ; + ${_dupDates.length - 3} autre(s) date(s)` : ""} : une seule distribution par jour est autorisée, ces totaux ne sont pas fiables et n'ont PAS été corrigés. Vérifiez vos notes d'élevage avant tout ajustement.</span></div>` : ""}
-  ${_overflow > 0 ? `<div class="banner warn"><span>⚠️ ${nf1.format(_overflow)} kg distribués non rattachés à un achat. Le stock global (${nf1.format(stock)} kg) reste la référence.</span><details><summary>Détail</summary><span>Ces distributions sont supérieures au stock acheté, ou antérieures à leurs achats : la somme des restants par article dépasse donc le stock global de ${nf1.format(_overflow)} kg. Ne corrigez pas les chiffres sans vos notes d'élevage.</span></details></div>` : ""}
   <div class="tiles"><div class="tile ${lvl}"><span class="l">Stock d'aliment disponible</span><span class="v">${nf1.format(stock)} kg</span><span class="s">${days != null ? (days <= 0 ? "Stock épuisé" : `≈ ${nf0.format(days)} jours d'autonomie`) : "—"}</span></div>
   <div class="tile"><span class="l">Distribué (7 derniers jours)</span><span class="v">${nf1.format(last7)} kg</span><span class="s">${nf1.format(last7 / 7)} kg / jour</span></div>
   <div class="tile"><span class="l">Dépenses approvisionnement (ce mois)</span><span class="v">${fcfa(monthSpend)}</span></div></div>
@@ -7023,6 +7089,7 @@ let initialDocs = [];
 try { initialDocs = Object.values(getLocalData()); } catch (e) { console.error("Boot : lecture des donnees locales impossible :", e); }
 try { ingest(initialDocs); } catch (e) { console.error("Boot : ingestion des donnees locales impossible :", e); }
 try { runDataRepairP3(); } catch (e) { console.error("Boot : réparation des données P3 impossible :", e); } /* P3 : migration de réparation des portées historiques — asynchrone, gardée par marqueur, ne bloque jamais le démarrage. */
+try { runFinanceRepair(); } catch (e) { console.error("Boot : réconciliation finances impossible :", e); } /* FIN-REPAIR : rattacher les achats/ventes importés au journal financier — même garde par marqueur. */
 try { initFirebaseSync(); } catch (e) { console.error("Boot : demarrage de la synchronisation impossible :", e); }
 try { if (localDataCorrupt) showLocalDataCorruptSheet(); } catch (e) { console.error("Boot : feuille donnees corrompues impossible :", e); }
 try { updateUserUI(); } catch (e) { console.error("Boot : mise a jour de l'interface utilisateur impossible :", e); }

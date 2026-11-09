@@ -3094,23 +3094,37 @@ async function cloreRappelsSiPorteeEteinte(m) {
 /* ---------- P3 : réparation des données existantes (plan G, P3-13 à P3-16) ----------
    MIGRATION unique et idempotente, exécutée au chargement (boot + premier
    snapshot cloud), gardée par un marqueur localStorage NAMESPACÉ par compte
-   (abvfarm_repair_p3_v1_<uid>) pour ne tourner qu'une fois par compte.
+   (abvfarm_repair_p3_v2_<uid>) pour ne tourner qu'une fois par compte — v2 :
+   le marqueur a changé depuis la v1, la migration rejoue donc même si la v1
+   a déjà tourné (no-op si tout est déjà correct).
    Le bloc entre les marqueurs P3-REPAIR-BEGIN/END est PUR (aucun accès à S,
    au DOM ou au stockage) : il calcule un plan de correctifs à partir des
    tableaux de saillies/lapins, ce qui le rend testable tel quel sous Node.
    Règles : ne remplir QUE les champs vides/absents, ne jamais écraser une
-   valeur existante ; les valeurs issues des notes portent repairedFromNotes ;
-   les portées 1 (Adrienne) et 2 (Sadie), sans effectif exploitable dans les
-   notes, ne sont PAS inventées : elles restent listées dans l'écran
-   « Données à compléter » de Reproduction (completePorteeForm). */
+   valeur existante ; les valeurs issues des notes portent repairedFromNotes.
+   v2 (ancienne sauvegarde Android fournie par l'éleveur, faits recoupés par
+   les naissances des lapereaux) : les portées 1 (Adrienne, 2026-09-14, 4) et
+   2 (Sadie, 2026-09-21, 7) sont complétées depuis la sauvegarde ; une
+   birthDate posée par la v1 (repairedFromNotes) est affinée vers la vraie
+   date de la sauvegarde (repairedFromBackup) — jamais une date saisie par
+   l'éleveur ; les cages d'origine des lapereaux sont restaurées depuis la
+   sauvegarde (P3_KIT_CAGES) quand la fiche n'en a aucune. Toute portée encore
+   incomplète reste listée dans l'écran « Données à compléter » de
+   Reproduction (completePorteeForm). */
 /* === P3-REPAIR-BEGIN === */
 const P3_KNOWN_LITTERS = {
+  "1": { female: "Adrienne", male: "Nespoli", birthDate: "2026-09-14", alive: 4 },
+  "2": { female: "Sadie", male: "Nespoli", birthDate: "2026-09-21", alive: 7 },
   "3": { female: "Tatiana", male: "Brondon", birthDate: "2026-08-25", alive: 6 },
-  "6": { female: "Tatiana", male: "Brondon", birthDate: "2026-09-25", alive: 7 },
+  "6": { female: "Tatiana", male: "Brondon", birthDate: "2026-09-26", alive: 7 },
   "7": { female: "Louna", male: "Brondon", birthDate: "2026-10-20", alive: 5 },
-  "8": { female: "Adrienne", male: "Nespoli", birthDate: "2026-10-26", alive: 6 },
-  "9": { female: "Joy", male: "Nespoli", birthDate: "2026-10-26", alive: 6 }
+  "8": { female: "Adrienne", male: "Nespoli", birthDate: "2026-10-27", alive: 6 },
+  "9": { female: "Joy", male: "Nespoli", birthDate: "2026-10-27", alive: 6 }
 };
+/* Cages d'origine des lapereaux, relevées dans l'ancienne sauvegarde Android
+   (id lapin → cage). Restaurées par la v2 uniquement si la fiche actuelle
+   n'a aucune cage : aucune cage existante n'est écrasée. */
+const P3_KIT_CAGES = { "14": "7", "15": "7", "16": "7", "17": "7", "44": "7", "45": "7", "46": "7", "47": "7", "48": "7", "49": "7", "18": "14", "19": "14", "20": "14", "21": "14", "22": "14", "23": "14", "24": "14", "9": "11", "10": "11", "11": "11", "12": "21", "25": "21", "26": "21", "27": "21", "28": "21", "29": "21", "30": "21", "31": "21", "38": "6", "39": "6", "40": "6", "41": "6", "42": "6", "43": "6", "33": "12", "34": "12", "35": "12", "36": "12", "37": "12" };
 const P3_OPEN_MATING_TO_CLEAN = "mvza6tey6zl8eg"; /* Louna × Ramsès, « Accouplé » : champs de mise bas parasites (alive 0 / dead 0) à vider. */
 function _p3DiffDays(a, b) { const da = new Date(String(a).slice(0, 10) + "T00:00:00"), db = new Date(String(b).slice(0, 10) + "T00:00:00"); if (isNaN(da.getTime()) || isNaN(db.getTime())) return NaN; return Math.round((db - da) / 864e5); }
 function _p3Empty(v) { return v == null || v === ""; }
@@ -3139,6 +3153,12 @@ function p3PlanRepairs(matings, rabbits, todayStr, nameOf) {
     const patch = {};
     if (_p3Empty(m.birthDate)) patch.birthDate = known.birthDate;
     if (_p3Empty(m.alive)) patch.alive = known.alive;
+    /* AFFINAGE v2 : une birthDate posée par la v1 porte repairedFromNotes —
+       c'est une valeur GÉNÉRÉE par nous (souvent la date prévue) ; si la
+       sauvegarde donne la vraie date de mise bas, on la corrige et on trace
+       repairedFromBackup. Une birthDate sans repairedFromNotes est une saisie
+       de l'éleveur : JAMAIS modifiée. L'alive n'est jamais affiné. */
+    if (!_p3Empty(m.birthDate) && m.repairedFromNotes === true && m.birthDate !== known.birthDate) { patch.birthDate = known.birthDate; patch.repairedFromBackup = true; }
     if (Object.keys(patch).length) { patch.repairedFromNotes = true; matingUpdates.push({ id: m.id, patch }); Object.assign(m, patch); }
   }
   const open = byIdMap.get(P3_OPEN_MATING_TO_CLEAN);
@@ -3149,11 +3169,24 @@ function p3PlanRepairs(matings, rabbits, todayStr, nameOf) {
     if (open.birthDate == null) patch.birthDate = ""; /* birthDate déjà "" = déjà propre ; une vraie date sur une saillie ouverte n'est pas un champ vide, on ne l'efface pas. */
     if (Object.keys(patch).length) { matingUpdates.push({ id: open.id, patch }); Object.assign(open, patch); }
   }
-  return { matings: matingUpdates, rabbits: p3LinkKits(eff, rabbits, todayStr) };
+  const rabbitUpdates = p3LinkKits(eff, rabbits, todayStr);
+  /* CAGES depuis l'ancienne sauvegarde : fusionnées par id avec les updates
+     de rattachement (un même lapin peut recevoir matingId ET cage en un seul
+     correctif). Conditions : id présent dans P3_KIT_CAGES, mère renseignée,
+     cage actuelle vide/absente — aucune cage existante n'est écrasée. */
+  const _updById = new Map(rabbitUpdates.map((u) => [String(u.id), u]));
+  for (const k of (rabbits || [])) {
+    const cageSav = P3_KIT_CAGES[String(k.id)];
+    if (!cageSav || !k.mother || k.cage) continue;
+    const ex = _updById.get(String(k.id));
+    if (ex) ex.patch.cage = cageSav;
+    else { const u = { id: k.id, patch: { cage: cageSav } }; rabbitUpdates.push(u); _updById.set(String(k.id), u); }
+  }
+  return { matings: matingUpdates, rabbits: rabbitUpdates };
 }
 /* === P3-REPAIR-END === */
 let _repairP3Running = false;
-function repairP3MarkerKey() { return "abvfarm_repair_p3_v1_" + ((userSession.isLoggedIn && userSession.uid) || "guest"); }
+function repairP3MarkerKey() { return "abvfarm_repair_p3_v2_" + ((userSession.isLoggedIn && userSession.uid) || "guest"); }
 async function runDataRepairP3() {
   if (_repairP3Running) return;
   try { if (localStorage.getItem(repairP3MarkerKey()) === "done") return; } catch (e) {}

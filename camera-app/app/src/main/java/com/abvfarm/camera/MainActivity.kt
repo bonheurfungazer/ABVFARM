@@ -367,12 +367,18 @@ class MainActivity : AppCompatActivity() {
                 videoCapture = videoBuilder.build()
             }
 
-            // --- Filigrane incrusté (aperçu + usage actif) ---
+            // --- Filigrane incrusté dans les médias enregistrés ---
+            // v1.1.1 : l'effet ne touche PLUS l'aperçu en direct (sur certains
+            // téléphones d'entrée de gamme, l'effet sur l'aperçu pouvait le
+            // figer en écran noir). L'aperçu reste donc toujours fluide, et le
+            // filigrane est incrusté là où il compte : la photo et la vidéo
+            // enregistrées (pour la photo, l'incrustation après capture le
+            // garantit en plus sur tous les appareils).
             overlayEffect?.close()
             val targets = if (videoMode)
-                CameraEffect.PREVIEW or CameraEffect.VIDEO_CAPTURE
+                CameraEffect.VIDEO_CAPTURE
             else
-                CameraEffect.PREVIEW or CameraEffect.IMAGE_CAPTURE
+                CameraEffect.IMAGE_CAPTURE
             overlayEffect = OverlayEffect(
                 targets, 0, Handler(Looper.getMainLooper())
             ) { e -> Log.w(TAG, "Effet filigrane en erreur: $e") }

@@ -3236,7 +3236,23 @@ async function runDataRepairP3() {
    élevage sont restaurées via FIN_SALE_EXITS (clé : nom normalisé de la
    fiche) ; les ventes sans aucun prix connu ne sont PAS inventées. */
 const FIN_SALE_EXITS = {
-  "nespoli (abv-26-001)": { exitDate: "2026-10-24", exitPrice: 8000 } /* Prix confirmé par l'éleveur le 2026-11-09 (8 000 F — les anciennes données affichaient 15 000 F, saisie d'essai écartée) ; date d'octobre 2026 au choix de l'éleveur, 24 octobre retenu (date des anciennes données). */
+  "nespoli (abv-26-001)": { exitDate: "2026-10-24", exitPrice: 8000 }, /* Prix confirmé par l'éleveur le 2026-11-09 (8 000 F — les anciennes données affichaient 15 000 F, saisie d'essai écartée) ; date d'octobre 2026 au choix de l'éleveur, 24 octobre retenu. */
+  /* Ventes de lapereaux confirmées par l'éleveur le 2026-11-09 : les 4 de la
+     portée de Tatiana (26 sept.) à 2 750 F pièce, les 7 autres (5 de Sadie,
+     2 d'Adrienne) à 2 500 F pièce — total 28 500 F. Dates fin octobre, comme
+     convenu ; Ambre et Arthur figurent déjà « Vendu » dans la copie du
+     21 octobre, d'où le 20 octobre. */
+  "timon (abv-26-024)": { exitDate: "2026-10-31", exitPrice: 2750 },
+  "tango (abv-26-026)": { exitDate: "2026-10-31", exitPrice: 2750 },
+  "tess (abv-26-025)": { exitDate: "2026-10-31", exitPrice: 2750 },
+  "tulipe (abv-26-027)": { exitDate: "2026-10-31", exitPrice: 2750 },
+  "soline (abv-26-020)": { exitDate: "2026-10-29", exitPrice: 2500 },
+  "stella (abv-26-018)": { exitDate: "2026-10-29", exitPrice: 2500 },
+  "samy (abv-26-017)": { exitDate: "2026-10-29", exitPrice: 2500 },
+  "sylvia (abv-26-023)": { exitDate: "2026-10-29", exitPrice: 2500 },
+  "simba (abv-26-019)": { exitDate: "2026-10-29", exitPrice: 2500 },
+  "ambre (abv-26-014)": { exitDate: "2026-10-20", exitPrice: 2500 },
+  "arthur (abv-26-013)": { exitDate: "2026-10-20", exitPrice: 2500 }
 };
 const finNormName = (s) => String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim();
 function finRepairPlan(items, txs, rabbits) {
@@ -3264,7 +3280,7 @@ function finRepairPlan(items, txs, rabbits) {
   return { txOps, rabbitUpdates };
 }
 let _repairFinRunning = false;
-function repairFinMarkerKey() { return "abvfarm_repair_fin_v1_" + ((userSession.isLoggedIn && userSession.uid) || "guest"); }
+function repairFinMarkerKey() { return "abvfarm_repair_fin_v2_" + ((userSession.isLoggedIn && userSession.uid) || "guest"); } /* v2 : table des ventes complétée avec les prix confirmés par l'éleveur (28 500 F) — la migration idempotente repasse et ne crée que les écritures encore manquantes. */
 async function runFinanceRepair() {
   if (_repairFinRunning) return;
   try { if (localStorage.getItem(repairFinMarkerKey()) === "done") return; } catch (e) {}

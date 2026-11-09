@@ -3007,7 +3007,7 @@ function isAllaitanteMating(m) { /* P1b/A7 : sevrage RÉEL — weanedAt prime su
   if (!m || m.status !== "Mise bas" || !m.birthDate) return false;
   if (porteeEteinte(m)) return false;
   const t = today();
-  if (m.weanedAt) return m.weanedAt > t; /* sevrage fait (date atteinte) → fini ; sevrage à venir → allaitement jusqu'à cette date, même au-delà de J35 */
+  const _wE = effWeanedAt(m); if (_wE) return _wE > t; /* sevrage fait (date atteinte) → fini ; sevrage à venir → allaitement jusqu'à cette date, même au-delà de J35 ; effWeanedAt lit aussi le sevrage des lots créés avant le correctif */
   const a = diff(m.birthDate, t); return a >= 0 && a <= WEANING;
 }
 function allaitementEnCours(r) { const mb = derniereMiseBas(r); return mb && isAllaitanteMating(mb) ? mb : null; }
@@ -3085,6 +3085,17 @@ async function syncWeanedAtFromBatches(matingId) {
   const ws = lotsDePortee(m).map((b) => b.weaning).filter(Boolean).sort();
   const w = ws.length ? ws[0] : "";
   if ((m.weanedAt || "") !== w) await save("mating", { ...m, weanedAt: w });
+}
+/* Sevrage EFFECTIF d'une portée, lu à la volée : le champ weanedAt s'il est
+   posé, sinon la plus petite date de sevrage de ses lots. Indispensable pour
+   les lots créés AVANT le correctif sevrage réel : leur date de sevrage n'a
+   jamais été recopiée sur la portée, et sans cette lecture l'alerte de
+   sevrage (et l'allaitement) ignoraient le lot existant. */
+function effWeanedAt(m) {
+  if (!m) return "";
+  if (m.weanedAt) return m.weanedAt;
+  const ws = lotsDePortee(m).map((b) => b.weaning).filter(Boolean).sort();
+  return ws.length ? ws[0] : "";
 }
 /* Portée éteinte : ses rappels sevrage/vaccination n'ont plus d'objet (D.3). */
 async function cloreRappelsSiPorteeEteinte(m) {
@@ -3464,7 +3475,8 @@ function alerts() {
     if (m.status === "Mise bas" && m.birthDate && !isDeparted(rab(m.female))) { /* P1a/B28 : pas d'alerte sevrage pour une mère partie. */
       const a = diff(m.birthDate, t);
       const _nextG = S.matings.filter((x) => x.female === m.female && x.id !== m.id && ["Accouplé", "Gestation confirmée"].includes(x.status)).sort((a2, b2) => (a2.due || "").localeCompare(b2.due || ""))[0]; let _seuilSev = WEANING - 2; if (_nextG && _nextG.due && m.birthDate) { const _besoin = diff(m.birthDate, _nextG.due) - 3; if (_besoin < _seuilSev) _seuilSev = Math.max(0, _besoin); } /* P2/A9 : si la gestation suivante arrive à terme avant J35, le sevrage est anticipé (au plus tard 3 j avant cette mise bas). */
-      if (a >= _seuilSev && (!m.weanedAt || m.weanedAt > t) && !porteeEteinte(m)) out.push({ sev: a <= WEANING + 10 ? "info" : "warn", icon: "layers", title: `Sevrer la portée de ${f}`, sub: `${porteeNom(m)} — ${m.weanedAt ? `Sevrage prévu le ${fmtShort(m.weanedAt)} — lapereaux âgés de ${a} j` : (a <= WEANING + 10 ? `Lapereaux âgés de ${a} j` : `Sevrage en retard : lapereaux âgés de ${a} j`)}${_nextG && _nextG.due && diff(m.birthDate, _nextG.due) < WEANING ? ` · ⚠️ Gestation suivante : mise bas prévue le ${fmtDate(_nextG.due)}, avant la fin de l'allaitement (J${WEANING}) — sevrage à anticiper` : ""}`, act: [["Créer un lot", "newbatch", m.id]] }); /* P1b/B23 : l'alerte n'est soldée que par un sevrage RÉELLEMENT atteint (weanedAt <= aujourd'hui) — un lot à date future ne la fait plus taire, et elle persiste après J35 tant qu'aucun sevrage n'est enregistré. */
+      const _wEff = effWeanedAt(m); /* sevrage effectif : weanedAt OU date de sevrage d'un lot existant (lots d'avant le correctif). */
+      if (a >= _seuilSev && (!_wEff || _wEff > t) && !porteeEteinte(m)) out.push({ sev: a <= WEANING + 10 ? "info" : "warn", icon: "layers", title: `Sevrer la portée de ${f}`, sub: `${porteeNom(m)} — ${_wEff ? `Sevrage prévu le ${fmtShort(_wEff)} — lapereaux âgés de ${a} j` : (a <= WEANING + 10 ? `Lapereaux âgés de ${a} j` : `Sevrage en retard : lapereaux âgés de ${a} j`)}${_nextG && _nextG.due && diff(m.birthDate, _nextG.due) < WEANING ? ` · ⚠️ Gestation suivante : mise bas prévue le ${fmtDate(_nextG.due)}, avant la fin de l'allaitement (J${WEANING}) — sevrage à anticiper` : ""}`, act: [["Créer un lot", "newbatch", m.id], ["Sevrer sans lot", "weanonly", m.id]] }); /* P1b/B23 : l'alerte n'est soldée que par un sevrage RÉELLEMENT atteint (weanedAt effectif <= aujourd'hui, y compris via un lot existant) — un lot à date future ne la fait plus taire, et elle persiste après J35 tant qu'aucun sevrage n'est enregistré. Le bouton « Sevrer sans lot » permet de la clore en un toucher pour les portées vendues en fiches individuelles, sans lot. */
     }
   }
   /* Correctif captures : un rappel de soin en retard restait affiché « il y a 55 j »
@@ -4318,12 +4330,12 @@ VIEWS.portee = ({ id }) => {
   const _mereGest = gestationOuverte(rab(m.female)); /* P1a/A8 : la gestation SUIVANTE de la mère, visible depuis sa portée en cours d'allaitement. */
   const _viv = vivantsActuels(m), _sortis = sortisPortee(m), _rest = restantsPortee(m); /* P1b : vivants actuels / sortis / restants (définitions partagées). */
   return `<div class="head"><a class="btn ghost" href="#lapin-${esc(m.female)}">${ICON.back}Fiche de la mère</a>
-    <div class="actions">${(_rest != null ? _rest > kits.filter(isActive).length : (Number(m.alive) || 0) > kits.length) ? `<button class="btn" data-act="kits" data-id="${esc(m.id)}">Fiches lapereaux</button>` : ""}${_viv != null && _viv > 0 ? `<button class="btn" data-act="litterloss" data-id="${esc(m.id)}">Déclarer une perte</button>` : ""}${m.weanedAt ? `<button class="btn ghost" data-act="unwean" data-id="${esc(m.id)}">Annuler le sevrage (${fmtShort(m.weanedAt)})</button>` : `<button class="btn" data-act="weanonly" data-id="${esc(m.id)}">Sevrer sans lot</button>`}${!lots.length ? `<button class="btn" data-act="newbatch" data-id="${esc(m.id)}">${ICON.plus}Créer un lot</button>` : `<button class="btn" data-act="newbatch" data-id="${esc(m.id)}">Scission (2e lot)</button>`}<button class="btn ghost" data-act="editmating" data-id="${esc(m.id)}" aria-label="Modifier la portée">${ICON.edit}Modifier</button></div></div>
+    <div class="actions">${(_rest != null ? _rest > kits.filter(isActive).length : (Number(m.alive) || 0) > kits.length) ? `<button class="btn" data-act="kits" data-id="${esc(m.id)}">Fiches lapereaux</button>` : ""}${_viv != null && _viv > 0 ? `<button class="btn" data-act="litterloss" data-id="${esc(m.id)}">Déclarer une perte</button>` : ""}${m.weanedAt ? `<button class="btn ghost" data-act="unwean" data-id="${esc(m.id)}">Annuler le sevrage (${fmtShort(m.weanedAt)})</button>` : (effWeanedAt(m) ? "" : `<button class="btn" data-act="weanonly" data-id="${esc(m.id)}">Sevrer sans lot</button>`)}${!lots.length ? `<button class="btn" data-act="newbatch" data-id="${esc(m.id)}">${ICON.plus}Créer un lot</button>` : `<button class="btn" data-act="newbatch" data-id="${esc(m.id)}">Scission (2e lot)</button>`}<button class="btn ghost" data-act="editmating" data-id="${esc(m.id)}" aria-label="Modifier la portée">${ICON.edit}Modifier</button></div></div>
   <section class="card"><div class="row-h"><h2>${birth ? `Portée du ${fmtDate(birth)}` : `Portée du — (saillie du ${fmtDate(m.date)})`}</h2>${mstChip(m.status)}</div>
     <dl class="kv" style="margin:0">
       <div><dt>Mère</dt><dd><a href="#lapin-${esc(m.female)}">${esc(rname(m.female))}</a></dd></div><div><dt>Père</dt><dd><a href="#lapin-${esc(m.male)}">${esc(rname(m.male))}</a></dd></div>
       <div><dt>Saillie</dt><dd>${fmtDate(m.date)}</dd></div><div><dt>Mise bas</dt><dd>${fmtDate(birth)}</dd></div>
-      <div><dt>Sevrage prévu</dt><dd>${birth ? fmtDate(addDays(birth, WEANING)) + ` (J${WEANING}${ageDays != null && !m.weanedAt ? (ageDays <= WEANING ? `, dans ${WEANING - ageDays} j` : `, en retard de ${ageDays - WEANING} j`) : ""})` : "—"}</dd></div> /* P4/F38 : le compte à rebours passe en RETARD après l'échéance (avant : figé à « dans 0 j »). */<div><dt>Sevrage réel</dt><dd>${m.weanedAt ? fmtDate(m.weanedAt) + (m.weanedAt > today() ? " (à venir)" : "") : "Pas encore sevré"}</dd></div><div><dt>Nés vivants</dt><dd>${m.alive != null && m.alive !== "" ? Number(m.alive) : "—"}</dd></div><div><dt>Vivants actuels</dt><dd>${_viv == null ? "—" : _viv + (_sortis ? ` (${_sortis} sorti(s), ${_rest} restant(s))` : "")}</dd></div><div><dt>Morts-nés</dt><dd>${m.dead != null && m.dead !== "" ? Number(m.dead) : "—"}</dd></div>
+      <div><dt>Sevrage prévu</dt><dd>${birth ? fmtDate(addDays(birth, WEANING)) + ` (J${WEANING}${ageDays != null && !effWeanedAt(m) ? (ageDays <= WEANING ? `, dans ${WEANING - ageDays} j` : `, en retard de ${ageDays - WEANING} j`) : ""})` : "—"}</dd></div> /* P4/F38 : le compte à rebours passe en RETARD après l'échéance (avant : figé à « dans 0 j »). */<div><dt>Sevrage réel</dt><dd>${(() => { const _w = effWeanedAt(m); return _w ? fmtDate(_w) + (_w > today() ? " (à venir)" : "") + (!m.weanedAt ? " (via le lot)" : "") : "Pas encore sevré"; })()}</dd></div><div><dt>Nés vivants</dt><dd>${m.alive != null && m.alive !== "" ? Number(m.alive) : "—"}</dd></div><div><dt>Vivants actuels</dt><dd>${_viv == null ? "—" : _viv + (_sortis ? ` (${_sortis} sorti(s), ${_rest} restant(s))` : "")}</dd></div><div><dt>Morts-nés</dt><dd>${m.dead != null && m.dead !== "" ? Number(m.dead) : "—"}</dd></div>
       <div><dt>Âge des lapereaux</dt><dd>${ageDays == null ? "—" : ageDays + " j"}</dd></div>
     </dl>${_mereGest ? `<div class="banner warn" style="margin-top:12px;display:block;text-align:left">🤰 Mère déjà gestante : saillie du ${fmtDate(_mereGest.date)} (J${Math.max(0, diff(_mereGest.date, today()))}/${GESTATION}), mise bas prévue le ${fmtDate(_mereGest.due)} — pensez au sevrage de cette portée et à la boîte à nid.</div>` : ""}${!birth ? `<div class="banner warn" style="margin-top:12px;display:block;text-align:left">Date de mise bas manquante — complétez-la via « Modifier » pour rétablir l'âge des lapereaux et le sevrage prévu (données historiques incomplètes).</div>` : ""}${m.notes ? `<p class="hint" style="margin-top:12px">${esc(m.notes)}</p>` : ""}</section>
   <div class="grid g2">

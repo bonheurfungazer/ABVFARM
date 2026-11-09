@@ -138,9 +138,70 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // ------------------------------------------------- diagnostic (v1.1.2)
+    // Enregistre la cause exacte d'un plantage dans un fichier ; à l'ouverture
+    // suivante, l'erreur s'affiche à l'écran pour être envoyée en capture.
+    private fun crashFile(): File = File(getExternalFilesDir(null), "abv_crash.txt")
+
+    private fun recordCrash(where: String, error: Throwable) {
+        try {
+            crashFile().writeText(
+                "ABV Farm Caméra v1.1.2 — plantage\nOù : $where (étape : $startupStep)\n\n" +
+                    error.stackTraceToString()
+            )
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun installCrashRecorder() {
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+            recordCrash("exception non rattrapée", error)
+            previous?.uncaughtException(thread, error)
+        }
+    }
+
+    private fun showPreviousCrashIfAny() {
+        try {
+            val f = crashFile()
+            if (!f.exists()) return
+            val text = f.readText()
+            val scroll = android.widget.ScrollView(this)
+            val tv = TextView(this).apply {
+                setText(text)
+                setTextColor(Color.WHITE)
+                setPadding(40, 40, 40, 40)
+                textSize = 12f
+            }
+            scroll.addView(tv)
+            androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("Erreur détectée au démarrage précédent")
+                .setView(scroll)
+                .setPositiveButton("Envoyée en capture") { _, _ -> f.delete() }
+                .setNegativeButton("Ignorer") { _, _ -> }
+                .show()
+        } catch (_: Exception) {
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
+        startupStep = "onCreate"
+        installCrashRecorder()
+        try {
+            setContentView(R.layout.activity_main)
+        } catch (e: Exception) {
+            recordCrash("affichage de l'écran (setContentView)", e)
+            val tv = TextView(this).apply {
+                setText("L'écran n'a pas pu s'afficher.\n\n" + e.stackTraceToString())
+                setTextColor(Color.WHITE)
+                setPadding(40, 80, 40, 40)
+                textSize = 12f
+            }
+            setContentView(android.widget.ScrollView(this).apply { addView(tv) })
+            return
+        }
+        startupStep = "écran affiché"
 
         previewView = findViewById(R.id.previewView)
         txtStatus = findViewById(R.id.txtStatus)
@@ -192,6 +253,8 @@ class MainActivity : AppCompatActivity() {
         updateNoiseButton()
         updateModeUi()
         updateFlashChip()
+        startupStep = "interface prête"
+        showPreviousCrashIfAny()
         if (hasPermissions()) startCamera()
         else permissionLauncher.launch(
             arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)
@@ -305,8 +368,10 @@ class MainActivity : AppCompatActivity() {
         else CameraMetadata.NOISE_REDUCTION_MODE_OFF
 
     private fun startCamera() {
+        startupStep = "démarrage caméra"
         val providerFuture = ProcessCameraProvider.getInstance(this)
         providerFuture.addListener({
+            startupStep = "configuration caméra"
             val provider = providerFuture.get()
 
             // --- Aperçu ---
@@ -394,6 +459,7 @@ class MainActivity : AppCompatActivity() {
 
             val selector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
             torchOn = false
+            startupStep = "liaison caméra"
             try {
                 provider.unbindAll()
                 camera = provider.bindToLifecycle(this, selector, groupBuilder.build())
@@ -412,6 +478,7 @@ class MainActivity : AppCompatActivity() {
                     toast("Caméra indisponible sur cet appareil.")
                 }
             }
+            startupStep = "caméra prête"
             updateFlashChip()
         }, ContextCompat.getMainExecutor(this))
     }
@@ -642,5 +709,8 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "ABVFarmCamera"
+
+        @Volatile
+        var startupStep: String = "avant onCreate"
     }
 }

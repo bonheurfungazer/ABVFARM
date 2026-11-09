@@ -1,6 +1,7 @@
 package com.abvfarm.camera
 
 import android.Manifest
+import android.content.ActivityNotFoundException
 import android.content.ContentValues
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -22,16 +23,21 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.os.Handler
+import android.os.HandlerThread
 import android.os.Looper
 import android.provider.MediaStore
+import android.provider.Settings
 import android.util.Log
+import android.util.Size
 import android.view.MotionEvent
+import android.view.ScaleGestureDetector
 import android.view.View
 import android.widget.Button
 import android.widget.ImageButton
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.camera2.interop.Camera2Interop
 import androidx.camera.core.Camera
@@ -40,6 +46,7 @@ import androidx.camera.core.CameraSelector
 import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
+import androidx.camera.core.MirrorMode
 import androidx.camera.core.Preview
 import androidx.camera.core.UseCaseGroup
 import androidx.camera.core.resolutionselector.AspectRatioStrategy
@@ -57,7 +64,11 @@ import androidx.camera.video.VideoCapture
 import androidx.camera.video.VideoRecordEvent
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -66,22 +77,25 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 /**
- * ABV Farm Caméra — caméra dédiée à l'élevage ABV Farm (v1.1).
+ * ABV Farm Caméra — caméra dédiée à l'élevage ABV Farm (v1.2.0).
  *
- * - Photo haute résolution (résolution maximale du capteur) avec filigrane
- *   ABV Farm incrusté dans le fichier JPEG enregistré + flash (Non/Auto/Oui).
+ * - Photo haute résolution (plafonnée ~12 Mpx pour rester sûre sur les
+ *   téléphones à 3 Go de RAM) avec filigrane ABV Farm incrusté dans le JPEG
+ *   enregistré (incrustation après capture, garantie sur tout appareil) et
+ *   flash Non/Auto/Oui.
  * - Vidéo haute résolution (UHD si l'appareil le permet, sinon FHD/HD) avec
- *   le même filigrane incrusté dans chaque image via OverlayEffect, et lampe
- *   torche pour filmer dans les bâtiments sombres.
- * - Réduction de bruit activable : mode « haute qualité » du capteur
- *   (NOISE_REDUCTION_MODE_HIGH_QUALITY + EDGE_MODE_HIGH_QUALITY) et
- *   stabilisation vidéo quand le téléphone la propose.
+ *   filigrane incrusté via OverlayEffect (cible VIDEO_CAPTURE, combinaison
+ *   autorisée par CameraX) et lampe torche.
+ * - Réduction de bruit activable : NOISE_REDUCTION_MODE_HIGH_QUALITY +
+ *   EDGE_MODE_HIGH_QUALITY + stabilisation vidéo quand elle est proposée.
  *
- * Fiabilité (correctif v1.1) : un seul usage de capture est lié à la fois
- * (photo OU vidéo selon le mode) au lieu des trois simultanément, et le débit
- * vidéo n'est plus forcé — les téléphones d'entrée de gamme (ex. Galaxy A21s,
- * vidéo 1080p max) négocient ainsi proprement leur meilleure qualité au lieu
- * d'échouer à l'enregistrement.
+ * Historique des correctifs v1.2.0 (audit complet 24 agents) :
+ * l'OverlayEffect ne doit JAMAIS recevoir une combinaison de cibles hors de
+ * [PREVIEW, VIDEO_CAPTURE, PREVIEW|VIDEO_CAPTURE,
+ * IMAGE_CAPTURE|PREVIEW|VIDEO_CAPTURE] — la combinaison photo de la v1.1
+ * plantait l'app dès l'ouverture (IllegalArgumentException du constructeur).
+ * Le mode photo n'utilise donc aucun effet ; la vidéo utilise VIDEO_CAPTURE
+ * seul, construit dans un try/catch avec repli signalé à l'utilisateur.
  */
 class MainActivity : AppCompatActivity() {
 
@@ -94,6 +108,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnNoise: ImageButton
     private lateinit var lblNoise: TextView
     private lateinit var btnFlash: Button
+    private lateinit var btnPermission: Button
     private lateinit var segPhoto: TextView
     private lateinit var segVideo: TextView
 
@@ -102,13 +117,24 @@ class MainActivity : AppCompatActivity() {
     private var recording: Recording? = null
     private var camera: Camera? = null
     private var overlayEffect: OverlayEffect? = null
+    private var effectThread: HandlerThread? = null
+    private var videoEffectActive = false
 
     private var lensFacing = CameraSelector.LENS_FACING_BACK
     private var videoMode = false
     private var noiseReductionOn = true
     private var flashMode = ImageCapture.FLASH_MODE_OFF
     private var torchOn = false
+    private var isCapturing = false
+    private var isFinalizing = false
+    private var recStarted = false
+    private var pendingStop = false
+    private var recNoAudio = false
+    private var interruptedRecording = false
+    private var bindGeneration = 0
     private var lastMediaUri: Uri? = null
+    private var lastMediaMime: String? = null
+    private var crashDialog: AlertDialog? = null
 
     private lateinit var cameraExecutor: ExecutorService
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -118,11 +144,20 @@ class MainActivity : AppCompatActivity() {
         BitmapFactory.decodeResource(resources, R.drawable.watermark_badge)
     }
 
+    // Objets de dessin réutilisés par l'effet vidéo (aucune allocation par image)
+    private val wmBadgePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply { alpha = 235 }
+    private val wmTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xFFF5D98B.toInt()
+        isFakeBoldText = true
+        setShadowLayer(6f, 0f, 2f, Color.BLACK)
+    }
+    private val wmDst = RectF()
+
     private val tickRunnable = object : Runnable {
         override fun run() {
-            if (recording != null) {
+            if (recording != null && !isFinalizing) {
                 val s = (System.currentTimeMillis() - recordStartMs) / 1000
-                txtRecording.text = String.format(Locale.FRANCE, "● REC %02d:%02d", s / 60, s % 60)
+                txtRecording.text = String.format(Locale.FRANCE, "● ENR %02d:%02d", s / 60, s % 60)
                 mainHandler.postDelayed(this, 500)
             }
         }
@@ -130,75 +165,72 @@ class MainActivity : AppCompatActivity() {
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { grants ->
-        if (grants[Manifest.permission.CAMERA] == true) {
+    ) { _ ->
+        if (hasCameraPermission()) {
+            btnPermission.visibility = View.GONE
             startCamera()
         } else {
-            toast("Permission caméra refusée — l'application ne peut pas fonctionner.")
+            onCameraPermissionMissing()
         }
     }
 
-    // ------------------------------------------------- diagnostic (v1.1.2)
-    // Enregistre la cause exacte d'un plantage dans un fichier ; à l'ouverture
-    // suivante, l'erreur s'affiche à l'écran pour être envoyée en capture.
-    private fun crashFile(): File = File(getExternalFilesDir(null), "abv_crash.txt")
+    private val audioLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { /* le résultat est relu au démarrage de l'enregistrement */ }
 
-    private fun recordCrash(where: String, error: Throwable) {
-        try {
-            crashFile().writeText(
-                "ABV Farm Caméra v1.1.2 — plantage\nOù : $where (étape : $startupStep)\n\n" +
-                    error.stackTraceToString()
-            )
-        } catch (_: Exception) {
-        }
-    }
-
-    private fun installCrashRecorder() {
-        val previous = Thread.getDefaultUncaughtExceptionHandler()
-        Thread.setDefaultUncaughtExceptionHandler { thread, error ->
-            recordCrash("exception non rattrapée", error)
-            previous?.uncaughtException(thread, error)
-        }
-    }
+    // ------------------------------------------------------------ diagnostic
+    // Le handler est installé une seule fois pour tout le processus, sans
+    // capturer l'Activity ; il écrit la cause dans le stockage interne privé.
 
     private fun showPreviousCrashIfAny() {
+        if (isFinishing || isDestroyed) return
         try {
-            val f = crashFile()
+            val f = crashFileFor(applicationContext)
             if (!f.exists()) return
             val text = f.readText()
             val scroll = android.widget.ScrollView(this)
             val tv = TextView(this).apply {
-                setText(text)
+                setText(
+                    "L'application s'est arrêtée au démarrage précédent. " +
+                        "Faites une capture d'écran de ce message et envoyez-la pour correction.\n\n" + text
+                )
                 setTextColor(Color.WHITE)
                 setPadding(40, 40, 40, 40)
                 textSize = 12f
             }
             scroll.addView(tv)
-            androidx.appcompat.app.AlertDialog.Builder(this)
+            crashDialog = AlertDialog.Builder(this)
                 .setTitle("Erreur détectée au démarrage précédent")
                 .setView(scroll)
-                .setPositiveButton("Envoyée en capture") { _, _ -> f.delete() }
-                .setNegativeButton("Ignorer") { _, _ -> }
+                .setPositiveButton("J'ai envoyé la capture") { _, _ -> }
+                .setNegativeButton("Fermer") { _, _ -> }
+                .setOnDismissListener { try { f.delete() } catch (_: Throwable) {} }
                 .show()
-        } catch (_: Exception) {
+        } catch (_: Throwable) {
         }
     }
+
+    // ---------------------------------------------------------------- cycle
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         startupStep = "onCreate"
-        installCrashRecorder()
+        installCrashRecorder(applicationContext)
+        cameraExecutor = Executors.newSingleThreadExecutor()
         try {
             setContentView(R.layout.activity_main)
-        } catch (e: Exception) {
-            recordCrash("affichage de l'écran (setContentView)", e)
+        } catch (e: Throwable) {
+            recordCrash(applicationContext, "affichage de l'écran (setContentView)", e)
             val tv = TextView(this).apply {
                 setText("L'écran n'a pas pu s'afficher.\n\n" + e.stackTraceToString())
                 setTextColor(Color.WHITE)
                 setPadding(40, 80, 40, 40)
                 textSize = 12f
             }
-            setContentView(android.widget.ScrollView(this).apply { addView(tv) })
+            try {
+                setContentView(android.widget.ScrollView(this).apply { addView(tv) })
+            } catch (_: Throwable) {
+            }
             return
         }
         startupStep = "écran affiché"
@@ -212,42 +244,70 @@ class MainActivity : AppCompatActivity() {
         btnNoise = findViewById(R.id.btnNoise)
         lblNoise = findViewById(R.id.lblNoise)
         btnFlash = findViewById(R.id.btnFlash)
+        btnPermission = findViewById(R.id.btnPermission)
         segPhoto = findViewById(R.id.btnModePhoto)
         segVideo = findViewById(R.id.btnModeVideo)
 
-        cameraExecutor = Executors.newSingleThreadExecutor()
+        // Restauration de l'état après recréation de l'activité
+        savedInstanceState?.let {
+            videoMode = it.getBoolean("videoMode", false)
+            lensFacing = it.getInt("lensFacing", CameraSelector.LENS_FACING_BACK)
+            flashMode = it.getInt("flashMode", ImageCapture.FLASH_MODE_OFF)
+            noiseReductionOn = it.getBoolean("noiseReductionOn", true)
+            torchOn = it.getBoolean("torchOn", false)
+        }
 
         findViewById<ImageButton>(R.id.btnSwitchCamera).setOnClickListener {
-            if (recording != null) return@setOnClickListener
+            if (busy()) return@setOnClickListener
             lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK)
                 CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK
+            torchOn = false // autre appareil : la lampe repart éteinte
             startCamera()
         }
-        btnNoise.setOnClickListener {
-            if (recording != null) return@setOnClickListener
+        val noiseClick = View.OnClickListener {
+            if (busy()) return@OnClickListener
             noiseReductionOn = !noiseReductionOn
             updateNoiseButton()
             startCamera()
-            toast(if (noiseReductionOn) "Réduction de bruit activée (haute qualité)" else "Réduction de bruit désactivée")
+            toast(if (noiseReductionOn) "Anti-bruit activé (haute qualité)" else "Anti-bruit désactivé")
         }
+        btnNoise.setOnClickListener(noiseClick)
+        findViewById<View>(R.id.colNoise).setOnClickListener(noiseClick)
         btnFlash.setOnClickListener { onFlashPressed() }
         segPhoto.setOnClickListener { setMode(video = false) }
         segVideo.setOnClickListener { setMode(video = true) }
         btnCapture.setOnClickListener {
             if (videoMode) toggleRecording() else takePhoto()
         }
-        findViewById<ImageButton>(R.id.btnGallery).setOnClickListener { openGallery() }
-
-        // Mise au point au toucher
-        previewView.setOnTouchListener { v, event ->
-            if (event.action == MotionEvent.ACTION_UP) {
-                val point = previewView.meteringPointFactory.createPoint(event.x, event.y)
-                val action = FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF)
-                    .setAutoCancelDuration(3, TimeUnit.SECONDS).build()
-                camera?.cameraControl?.startFocusAndMetering(action)
-                v.performClick()
+        val galleryClick = View.OnClickListener { openGallery() }
+        findViewById<ImageButton>(R.id.btnGallery).setOnClickListener(galleryClick)
+        findViewById<View>(R.id.colGallery).setOnClickListener(galleryClick)
+        btnPermission.setOnClickListener {
+            if (shouldShowRequestPermissionRationale(Manifest.permission.CAMERA)) {
+                permissionLauncher.launch(permissionArray())
+            } else {
+                // Refus définitif : seul l'écran système peut débloquer
+                try {
+                    startActivity(
+                        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                            .setData(Uri.parse("package:$packageName"))
+                    )
+                    toast("Autorisations → Caméra → Autoriser, puis revenez ici.")
+                } catch (_: Exception) {
+                    permissionLauncher.launch(permissionArray())
+                }
             }
-            true
+        }
+
+        setupTouchControls()
+
+        // La barre de navigation ne doit pas recouvrir les commandes du bas
+        val bottomBlock = findViewById<View>(R.id.bottomBlock)
+        val baseBottomPadding = bottomBlock.paddingBottom
+        ViewCompat.setOnApplyWindowInsetsListener(bottomBlock) { v, insets ->
+            val nav = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
+            v.setPadding(v.paddingLeft, v.paddingTop, v.paddingRight, baseBottomPadding + nav.bottom)
+            insets
         }
 
         updateNoiseButton()
@@ -255,22 +315,84 @@ class MainActivity : AppCompatActivity() {
         updateFlashChip()
         startupStep = "interface prête"
         showPreviousCrashIfAny()
-        if (hasPermissions()) startCamera()
-        else permissionLauncher.launch(
-            arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)
-        )
+        if (hasCameraPermission()) startCamera() else onCameraPermissionMissing()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putBoolean("videoMode", videoMode)
+        outState.putInt("lensFacing", lensFacing)
+        outState.putInt("flashMode", flashMode)
+        outState.putBoolean("noiseReductionOn", noiseReductionOn)
+        outState.putBoolean("torchOn", torchOn)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (interruptedRecording) {
+            interruptedRecording = false
+            toast("Enregistrement interrompu : l'application était passée en arrière-plan.")
+        }
+        if (hasCameraPermission() && camera == null && !isFinishing) {
+            btnPermission.visibility = View.GONE
+            startCamera()
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        if (recording != null && !isFinalizing) {
+            // CameraX arrête l'enregistrement quand l'app passe en arrière-plan :
+            // on le finalise proprement et on prévient au retour.
+            isFinalizing = true
+            interruptedRecording = true
+            try {
+                recording?.stop()
+            } catch (_: Exception) {
+            }
+        }
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        recording?.close()
-        overlayEffect?.close()
-        cameraExecutor.shutdown()
+        mainHandler.removeCallbacks(tickRunnable)
+        try {
+            crashDialog?.dismiss()
+        } catch (_: Exception) {
+        }
+        try {
+            recording?.close()
+        } catch (_: Exception) {
+        }
+        recording = null
+        closeEffect()
+        if (::cameraExecutor.isInitialized) cameraExecutor.shutdown()
     }
 
-    private fun hasPermissions(): Boolean =
+    // ------------------------------------------------------------ permissions
+
+    private fun permissionArray(): Array<String> {
+        val list = mutableListOf(Manifest.permission.CAMERA)
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            list.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        }
+        return list.toTypedArray()
+    }
+
+    private fun hasCameraPermission(): Boolean =
         ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) ==
             PackageManager.PERMISSION_GRANTED
+
+    private fun hasAudioPermission(): Boolean =
+        ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+
+    private fun onCameraPermissionMissing() {
+        btnPermission.visibility = View.VISIBLE
+        txtStatus.text = "Caméra non autorisée — touchez « Autoriser la caméra »."
+    }
+
+    private fun busy(): Boolean = recording != null || isFinalizing || isCapturing
 
     // ------------------------------------------------------------- interface
 
@@ -284,20 +406,30 @@ class MainActivity : AppCompatActivity() {
             btnNoise.imageTintList = ColorStateList.valueOf(Color.WHITE)
             lblNoise.setTextColor(Color.WHITE)
         }
+        lblNoise.text = if (noiseReductionOn) "Anti-bruit : Oui" else "Anti-bruit : Non"
+        btnNoise.contentDescription = if (noiseReductionOn) "Anti-bruit activé" else "Anti-bruit désactivé"
     }
 
-    /** Bouton flash : en photo, cycle Non → Auto → Oui ; en vidéo, lampe torche. */
+    /** Bouton flash : en photo, cycle Non → Auto → Oui ; en vidéo, lampe torche confirmée par CameraX. */
     private fun onFlashPressed() {
         val hasFlash = camera?.cameraInfo?.hasFlashUnit() == true
         if (!hasFlash) {
-            toast("Pas de flash sur cette caméra.")
+            toast(if (videoMode) "Pas de lampe sur cette caméra." else "Pas de flash sur cette caméra.")
             return
         }
         if (videoMode) {
-            torchOn = !torchOn
-            camera?.cameraControl?.enableTorch(torchOn)
-            updateFlashChip()
-            toast(if (torchOn) "Lampe allumée" else "Lampe éteinte")
+            val target = !torchOn
+            val future = camera?.cameraControl?.enableTorch(target) ?: return
+            future.addListener({
+                try {
+                    future.get()
+                    torchOn = target
+                    updateFlashChip()
+                    toast(if (target) "Lampe allumée" else "Lampe éteinte")
+                } catch (e: Exception) {
+                    toast("La lampe n'a pas pu être ${if (target) "allumée" else "éteinte"}.")
+                }
+            }, ContextCompat.getMainExecutor(this))
         } else {
             flashMode = when (flashMode) {
                 ImageCapture.FLASH_MODE_OFF -> ImageCapture.FLASH_MODE_AUTO
@@ -310,32 +442,37 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateFlashChip() {
-        val hasFlash = camera?.cameraInfo?.hasFlashUnit() != false
+        val hasFlash = camera?.cameraInfo?.hasFlashUnit() == true
+        btnFlash.isEnabled = hasFlash
         btnFlash.alpha = if (hasFlash) 1f else 0.45f
+        val active: Boolean
         if (videoMode) {
-            btnFlash.text = if (torchOn) "Lampe : Oui" else "Lampe : Non"
-            val active = torchOn
-            btnFlash.setBackgroundResource(
-                if (active) R.drawable.bg_flash_chip_active else R.drawable.bg_flash_chip
-            )
-            btnFlash.setTextColor(if (active) 0xFF0B2E21.toInt() else Color.WHITE)
+            btnFlash.text = if (!hasFlash) "Lampe : —" else if (torchOn) "Lampe : Oui" else "Lampe : Non"
+            active = hasFlash && torchOn
         } else {
-            btnFlash.text = when (flashMode) {
-                ImageCapture.FLASH_MODE_AUTO -> "Flash : Auto"
-                ImageCapture.FLASH_MODE_ON -> "Flash : Oui"
+            btnFlash.text = when {
+                !hasFlash -> "Flash : —"
+                flashMode == ImageCapture.FLASH_MODE_AUTO -> "Flash : Auto"
+                flashMode == ImageCapture.FLASH_MODE_ON -> "Flash : Oui"
                 else -> "Flash : Non"
             }
-            val active = flashMode != ImageCapture.FLASH_MODE_OFF
-            btnFlash.setBackgroundResource(
-                if (active) R.drawable.bg_flash_chip_active else R.drawable.bg_flash_chip
-            )
-            btnFlash.setTextColor(if (active) 0xFF0B2E21.toInt() else Color.WHITE)
+            active = hasFlash && flashMode != ImageCapture.FLASH_MODE_OFF
         }
+        btnFlash.setBackgroundResource(
+            if (active) R.drawable.bg_flash_chip_active else R.drawable.bg_flash_chip
+        )
+        btnFlash.setTextColor(if (active) 0xFF0B2E21.toInt() else Color.WHITE)
+        btnFlash.compoundDrawableTintList =
+            ColorStateList.valueOf(if (active) 0xFF0B2E21.toInt() else Color.WHITE)
     }
 
     private fun setMode(video: Boolean) {
-        if (recording != null || video == videoMode) return
+        if (busy() || video == videoMode) return
         videoMode = video
+        if (videoMode && !hasAudioPermission()) {
+            // Le micro n'est demandé qu'au premier passage en vidéo
+            audioLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
         updateModeUi()
         startCamera()
     }
@@ -348,7 +485,7 @@ class MainActivity : AppCompatActivity() {
             segPhoto.setTextColor(Color.WHITE)
             captureInner.setBackgroundResource(R.drawable.bg_shutter_inner_red)
             txtStatus.text = "Mode vidéo — filigrane incrusté dans l'enregistrement"
-            txtQuality.text = "Vidéo haute résolution (UHD / FHD selon l'appareil)"
+            txtQuality.text = "Vidéo — meilleure qualité de l'appareil"
         } else {
             segPhoto.setBackgroundResource(R.drawable.bg_mode_selected)
             segPhoto.setTextColor(0xFF0B2E21.toInt())
@@ -356,9 +493,57 @@ class MainActivity : AppCompatActivity() {
             segVideo.setTextColor(Color.WHITE)
             captureInner.setBackgroundResource(R.drawable.bg_shutter_inner_white)
             txtStatus.text = "Mode photo — filigrane ABV Farm ajouté automatiquement"
-            txtQuality.text = "Photo résolution maximale du capteur"
+            txtQuality.text = "Photo — meilleure qualité de l'appareil"
         }
         updateFlashChip()
+    }
+
+    // ------------------------------------------------------- toucher / zoom
+
+    private var downX = 0f
+    private var downY = 0f
+    private var downTime = 0L
+    private var multiTouchSeen = false
+
+    private fun setupTouchControls() {
+        val scaleDetector = ScaleGestureDetector(this, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            override fun onScale(detector: ScaleGestureDetector): Boolean {
+                val cam = camera ?: return false
+                val info = cam.cameraInfo.zoomState.value ?: return false
+                val target = (info.zoomRatio * detector.scaleFactor)
+                    .coerceIn(info.minZoomRatio, info.maxZoomRatio)
+                cam.cameraControl.setZoomRatio(target)
+                return true
+            }
+        })
+        previewView.setOnTouchListener { v, event ->
+            scaleDetector.onTouchEvent(event)
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    downX = event.x; downY = event.y
+                    downTime = System.currentTimeMillis()
+                    multiTouchSeen = false
+                }
+                MotionEvent.ACTION_POINTER_DOWN -> multiTouchSeen = true
+                MotionEvent.ACTION_UP -> {
+                    val dx = event.x - downX
+                    val dy = event.y - downY
+                    val quick = System.currentTimeMillis() - downTime < 350
+                    if (!multiTouchSeen && event.pointerCount == 1 && quick &&
+                        dx * dx + dy * dy < 40f * 40f
+                    ) {
+                        val point = previewView.meteringPointFactory.createPoint(event.x, event.y)
+                        val action = FocusMeteringAction.Builder(
+                            point,
+                            FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE
+                        ).setAutoCancelDuration(3, TimeUnit.SECONDS).build()
+                        camera?.cameraControl?.startFocusAndMetering(action)
+                    }
+                    v.performClick()
+                }
+            }
+            true
+        }
     }
 
     // ---------------------------------------------------------------- caméra
@@ -367,22 +552,49 @@ class MainActivity : AppCompatActivity() {
         if (noiseReductionOn) CameraMetadata.NOISE_REDUCTION_MODE_HIGH_QUALITY
         else CameraMetadata.NOISE_REDUCTION_MODE_OFF
 
+    private fun edgeMode(): Int =
+        if (noiseReductionOn) CameraMetadata.EDGE_MODE_HIGH_QUALITY
+        else CameraMetadata.EDGE_MODE_OFF
+
+    private fun closeEffect() {
+        try {
+            overlayEffect?.close()
+        } catch (_: Exception) {
+        }
+        overlayEffect = null
+        videoEffectActive = false
+        try {
+            effectThread?.quitSafely()
+        } catch (_: Exception) {
+        }
+        effectThread = null
+    }
+
     private fun startCamera() {
+        if (!hasCameraPermission()) {
+            onCameraPermissionMissing()
+            return
+        }
         startupStep = "démarrage caméra"
+        val generation = ++bindGeneration
         val providerFuture = ProcessCameraProvider.getInstance(this)
         providerFuture.addListener({
+            if (generation != bindGeneration || isFinishing || isDestroyed) return@addListener
             startupStep = "configuration caméra"
-            val provider = providerFuture.get()
+            val provider = try {
+                providerFuture.get()
+            } catch (e: Exception) {
+                recordCrash(applicationContext, "initialisation du fournisseur caméra", e)
+                txtStatus.text = "Caméra indisponible — fermez les autres applications qui l'utilisent, puis réessayez."
+                toast("Caméra indisponible sur cet appareil.")
+                return@addListener
+            }
 
             // --- Aperçu ---
             val previewBuilder = Preview.Builder()
             Camera2Interop.Extender(previewBuilder)
                 .setCaptureRequestOption(CaptureRequest.NOISE_REDUCTION_MODE, nrMode())
-                .setCaptureRequestOption(
-                    CaptureRequest.EDGE_MODE,
-                    if (noiseReductionOn) CameraMetadata.EDGE_MODE_HIGH_QUALITY
-                    else CameraMetadata.EDGE_MODE_OFF
-                )
+                .setCaptureRequestOption(CaptureRequest.EDGE_MODE, edgeMode())
             val preview = previewBuilder.build().also {
                 it.surfaceProvider = previewView.surfaceProvider
             }
@@ -391,22 +603,25 @@ class MainActivity : AppCompatActivity() {
             imageCapture = null
             videoCapture = null
             if (!videoMode) {
+                // Plafond ~12 Mpx : la pleine résolution d'un capteur 48 Mpx
+                // ferait exploser la mémoire à l'incrustation (OOM sur 3 Go).
                 val photoSelector = ResolutionSelector.Builder()
                     .setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY)
-                    .setResolutionStrategy(ResolutionStrategy.HIGHEST_AVAILABLE_STRATEGY)
+                    .setResolutionStrategy(
+                        ResolutionStrategy(
+                            Size(4032, 3024),
+                            ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
+                        )
+                    )
                     .build()
                 val imageBuilder = ImageCapture.Builder()
                     .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
                     .setResolutionSelector(photoSelector)
-                    .setJpegQuality(100)
+                    .setJpegQuality(95)
                     .setFlashMode(flashMode)
                 Camera2Interop.Extender(imageBuilder)
                     .setCaptureRequestOption(CaptureRequest.NOISE_REDUCTION_MODE, nrMode())
-                    .setCaptureRequestOption(
-                        CaptureRequest.EDGE_MODE,
-                        if (noiseReductionOn) CameraMetadata.EDGE_MODE_HIGH_QUALITY
-                        else CameraMetadata.EDGE_MODE_OFF
-                    )
+                    .setCaptureRequestOption(CaptureRequest.EDGE_MODE, edgeMode())
                 imageCapture = imageBuilder.build()
             } else {
                 val qualitySelector = QualitySelector.fromOrderedList(
@@ -417,13 +632,10 @@ class MainActivity : AppCompatActivity() {
                     .setQualitySelector(qualitySelector)
                     .build()
                 val videoBuilder = VideoCapture.Builder(recorder)
+                    .setMirrorMode(MirrorMode.MIRROR_MODE_ON_FRONT_ONLY)
                 Camera2Interop.Extender(videoBuilder)
                     .setCaptureRequestOption(CaptureRequest.NOISE_REDUCTION_MODE, nrMode())
-                    .setCaptureRequestOption(
-                        CaptureRequest.EDGE_MODE,
-                        if (noiseReductionOn) CameraMetadata.EDGE_MODE_HIGH_QUALITY
-                        else CameraMetadata.EDGE_MODE_OFF
-                    )
+                    .setCaptureRequestOption(CaptureRequest.EDGE_MODE, edgeMode())
                     .setCaptureRequestOption(
                         CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
                         if (noiseReductionOn) CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_ON
@@ -432,51 +644,79 @@ class MainActivity : AppCompatActivity() {
                 videoCapture = videoBuilder.build()
             }
 
-            // --- Filigrane incrusté dans les médias enregistrés ---
-            // v1.1.1 : l'effet ne touche PLUS l'aperçu en direct (sur certains
-            // téléphones d'entrée de gamme, l'effet sur l'aperçu pouvait le
-            // figer en écran noir). L'aperçu reste donc toujours fluide, et le
-            // filigrane est incrusté là où il compte : la photo et la vidéo
-            // enregistrées (pour la photo, l'incrustation après capture le
-            // garantit en plus sur tous les appareils).
-            overlayEffect?.close()
-            val targets = if (videoMode)
-                CameraEffect.VIDEO_CAPTURE
-            else
-                CameraEffect.IMAGE_CAPTURE
-            overlayEffect = OverlayEffect(
-                targets, 0, Handler(Looper.getMainLooper())
-            ) { e -> Log.w(TAG, "Effet filigrane en erreur: $e") }
-            overlayEffect?.setOnDrawListener { frame ->
-                drawWatermark(frame.overlayCanvas)
-                true
+            val selector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
+            startupStep = "liaison caméra"
+
+            fun bind(withEffect: Boolean): Boolean {
+                // On détache TOUT avant de fermer l'ancien effet (il peut être
+                // encore attaché au groupe précédent).
+                provider.unbindAll()
+                closeEffect()
+                var effect: OverlayEffect? = null
+                if (withEffect && videoMode) {
+                    effect = try {
+                        val thread = HandlerThread("abv-effect").apply { start() }
+                        val eff = OverlayEffect(
+                            CameraEffect.VIDEO_CAPTURE, 0, Handler(thread.looper)
+                        ) { e -> Log.w(TAG, "Effet filigrane en erreur: $e") }
+                        eff.setOnDrawListener { frame ->
+                            drawWatermark(frame.overlayCanvas)
+                            true
+                        }
+                        effectThread = thread
+                        eff
+                    } catch (e: Throwable) {
+                        Log.e(TAG, "Création de l'effet filigrane impossible", e)
+                        null
+                    }
+                }
+                val groupBuilder = UseCaseGroup.Builder().addUseCase(preview)
+                imageCapture?.let { groupBuilder.addUseCase(it) }
+                videoCapture?.let { groupBuilder.addUseCase(it) }
+                if (effect != null) groupBuilder.addEffect(effect)
+                return try {
+                    camera = provider.bindToLifecycle(this, selector, groupBuilder.build())
+                    overlayEffect = effect
+                    videoEffectActive = effect != null
+                    true
+                } catch (e: Exception) {
+                    Log.e(TAG, "Liaison caméra en erreur", e)
+                    try {
+                        effect?.close()
+                    } catch (_: Exception) {
+                    }
+                    if (effect != null) {
+                        try {
+                            effectThread?.quitSafely()
+                        } catch (_: Exception) {
+                        }
+                        effectThread = null
+                    }
+                    false
+                }
             }
 
-            val groupBuilder = UseCaseGroup.Builder().addUseCase(preview)
-            imageCapture?.let { groupBuilder.addUseCase(it) }
-            videoCapture?.let { groupBuilder.addUseCase(it) }
-            overlayEffect?.let { groupBuilder.addEffect(it) }
-
-            val selector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
-            torchOn = false
-            startupStep = "liaison caméra"
-            try {
-                provider.unbindAll()
-                camera = provider.bindToLifecycle(this, selector, groupBuilder.build())
-            } catch (e: Exception) {
-                // Repli sans l'effet (certains téléphones anciens) : la photo garde
-                // son filigrane grâce à l'incrustation après capture ci-dessous.
-                Log.e(TAG, "Liaison avec effet impossible, repli sans effet", e)
-                try {
-                    provider.unbindAll()
-                    val plain = UseCaseGroup.Builder().addUseCase(preview)
-                    imageCapture?.let { plain.addUseCase(it) }
-                    videoCapture?.let { plain.addUseCase(it) }
-                    camera = provider.bindToLifecycle(this, selector, plain.build())
-                } catch (e2: Exception) {
-                    Log.e(TAG, "Impossible de démarrer la caméra", e2)
-                    toast("Caméra indisponible sur cet appareil.")
-                }
+            var bound = bind(withEffect = true)
+            if (!bound) bound = bind(withEffect = false)
+            if (!bound && lensFacing == CameraSelector.LENS_FACING_FRONT) {
+                // Caméra frontale absente/indisponible : retour à la dorsale
+                lensFacing = CameraSelector.LENS_FACING_BACK
+                toast("Caméra avant indisponible — retour à la caméra arrière.")
+                startCamera()
+                return@addListener
+            }
+            if (!bound) {
+                txtStatus.text = "Caméra indisponible — fermez les autres applications qui l'utilisent, puis réessayez."
+                toast("Caméra indisponible sur cet appareil.")
+                return@addListener
+            }
+            // Restaurer la lampe si elle était allumée (même caméra, même mode)
+            if (videoMode && torchOn && camera?.cameraInfo?.hasFlashUnit() == true) {
+                camera?.cameraControl?.enableTorch(true)
+            }
+            if (videoMode && !videoEffectActive) {
+                txtStatus.text = "Mode vidéo — ⚠ filigrane indisponible sur cet appareil"
+                toast("Attention : le filigrane vidéo n'a pas pu être activé.")
             }
             startupStep = "caméra prête"
             updateFlashChip()
@@ -485,62 +725,88 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * Dessine le filigrane ABV Farm : badge circulaire en bas à droite +
-     * signature dorée en bas à gauche.
+     * signature dorée en bas à gauche. Appelé par l'effet vidéo sur son
+     * propre thread (objets de dessin pré-alloués, réutilisés).
      */
     private fun drawWatermark(canvas: Canvas) {
         canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
         val w = canvas.width
         val h = canvas.height
         if (w <= 0 || h <= 0) return
-
         val margin = w * 0.035f
         val size = w * 0.21f
-        val badgePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
-            alpha = 235
-        }
-        val dst = RectF(w - margin - size, h - margin - size, w - margin, h - margin)
-        canvas.drawBitmap(badgeBitmap, null, dst, badgePaint)
-
-        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = 0xFFF5D98B.toInt()
-            textSize = (w * 0.028f).coerceAtLeast(14f)
-            isFakeBoldText = true
-            setShadowLayer(6f, 0f, 2f, Color.BLACK)
-        }
+        wmDst.set(w - margin - size, h - margin - size, w - margin, h - margin)
+        canvas.drawBitmap(badgeBitmap, null, wmDst, wmBadgePaint)
+        wmTextPaint.textSize = (w * 0.028f).coerceAtLeast(14f)
         canvas.drawText(
-            "ABV Farm — Nourrir l'avenir, naturellement",
+            "ABV Farm — Nourrir l’avenir, naturellement",
             margin,
             h - margin - size * 0.32f,
-            textPaint
+            wmTextPaint
         )
     }
 
     // ------------------------------------------------------------------ photo
 
+    private fun stamp(): String =
+        SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.FRANCE).format(System.currentTimeMillis())
+
     private fun takePhoto() {
-        val capture = imageCapture ?: return
-        val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.FRANCE).format(System.currentTimeMillis())
-        val tempFile = File(cacheDir, "abv_$stamp.jpg")
-        val output = ImageCapture.OutputFileOptions.Builder(tempFile).build()
+        if (isCapturing) return
+        val capture = imageCapture
+        if (capture == null) {
+            txtStatus.text = "Caméra en démarrage… réessayez dans un instant."
+            return
+        }
+        startupStep = "capture photo"
+        isCapturing = true
+        btnCapture.alpha = 0.55f
+        val st = stamp()
+        val tempFile = File(cacheDir, "abv_$st.jpg")
+        val metadata = ImageCapture.Metadata().apply {
+            // Selfie cadré dans l'aperçu miroir = fichier final en miroir aussi
+            isReversedHorizontal = lensFacing == CameraSelector.LENS_FACING_FRONT
+        }
+        val output = ImageCapture.OutputFileOptions.Builder(tempFile)
+            .setMetadata(metadata)
+            .build()
         txtStatus.text = "Capture en cours…"
         capture.takePicture(output, cameraExecutor, object : ImageCapture.OnImageSavedCallback {
             override fun onImageSaved(result: ImageCapture.OutputFileResults) {
-                // Incrustation garantie du filigrane dans le JPEG final,
-                // quel que soit le téléphone (en plus de l'effet temps réel).
-                val uri = try {
-                    burnWatermarkAndSave(tempFile, stamp)
-                } catch (e: Exception) {
-                    Log.e(TAG, "Incrustation photo impossible", e)
-                    null
+                var uri: Uri? = null
+                var withWatermark = true
+                try {
+                    uri = burnWatermarkAndSave(tempFile, st)
+                } catch (t: Throwable) {
+                    // JAMAIS perdre la photo : repli = enregistrer l'original
+                    Log.e(TAG, "Incrustation impossible, repli sur l'original", t)
+                    withWatermark = false
+                    uri = try {
+                        saveOriginalToGallery(tempFile, st)
+                    } catch (t2: Throwable) {
+                        Log.e(TAG, "Repli d'enregistrement impossible", t2)
+                        null
+                    }
                 }
                 tempFile.delete()
+                val savedUri = uri
+                val wm = withWatermark
                 runOnUiThread {
-                    if (uri != null) {
-                        lastMediaUri = uri
-                        txtStatus.text = "📷 Photo enregistrée avec filigrane — Galerie / ABV Farm Camera"
-                        toast("Photo enregistrée avec le filigrane ABV Farm ✅")
+                    isCapturing = false
+                    btnCapture.alpha = 1f
+                    if (isDestroyed) return@runOnUiThread
+                    if (savedUri != null) {
+                        lastMediaUri = savedUri
+                        lastMediaMime = "image/jpeg"
+                        if (wm) {
+                            txtStatus.text = "📷 Photo enregistrée avec filigrane"
+                            toast("Photo enregistrée avec le filigrane ABV Farm ✅")
+                        } else {
+                            txtStatus.text = "📷 Photo enregistrée (sans filigrane — mémoire insuffisante)"
+                            toast("Photo enregistrée, mais sans filigrane cette fois.")
+                        }
                     } else {
-                        txtStatus.text = "Échec de l'enregistrement de la photo"
+                        txtStatus.text = "Échec de l'enregistrement — vérifiez l'espace libre, puis réessayez."
                         toast("Échec de l'enregistrement de la photo.")
                     }
                 }
@@ -548,16 +814,25 @@ class MainActivity : AppCompatActivity() {
 
             override fun onError(exception: ImageCaptureException) {
                 Log.e(TAG, "Capture photo en erreur", exception)
-                runOnUiThread { toast("Erreur de capture photo.") }
+                runOnUiThread {
+                    isCapturing = false
+                    btnCapture.alpha = 1f
+                    if (isDestroyed) return@runOnUiThread
+                    txtStatus.text = "Échec de la capture photo — réessayez."
+                    toast("Erreur de capture photo.")
+                }
             }
         })
     }
 
     /** Charge la photo temporaire, corrige l'orientation, dessine le filigrane, enregistre dans la galerie. */
-    private fun burnWatermarkAndSave(tempFile: File, stamp: String): Uri {
-        var bitmap = BitmapFactory.decodeFile(tempFile.absolutePath)
-            ?: throw IllegalStateException("Photo illisible")
-        // Orientation EXIF
+    private fun burnWatermarkAndSave(tempFile: File, st: String): Uri {
+        startupStep = "incrustation photo"
+        var bitmap = BitmapFactory.decodeFile(
+            tempFile.absolutePath,
+            BitmapFactory.Options().apply { inMutable = true }
+        ) ?: throw IllegalStateException("Photo illisible")
+        // Orientation EXIF — les 8 cas
         try {
             val exif = ExifInterface(tempFile.absolutePath)
             val orientation = exif.getAttributeInt(
@@ -565,10 +840,17 @@ class MainActivity : AppCompatActivity() {
             )
             val matrix = Matrix()
             when (orientation) {
-                ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
-                ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
-                ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
                 ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
+                ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+                ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
+                ExifInterface.ORIENTATION_TRANSPOSE -> {
+                    matrix.postRotate(90f); matrix.postScale(-1f, 1f)
+                }
+                ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+                ExifInterface.ORIENTATION_TRANSVERSE -> {
+                    matrix.postRotate(270f); matrix.postScale(-1f, 1f)
+                }
+                ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
             }
             if (!matrix.isIdentity) {
                 val rotated = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
@@ -581,47 +863,60 @@ class MainActivity : AppCompatActivity() {
             Log.w(TAG, "Lecture EXIF impossible: $e")
         }
 
-        val mutable = bitmap.copy(Bitmap.Config.ARGB_8888, true)
-        if (mutable != bitmap) bitmap.recycle()
-        val canvas = Canvas(mutable)
-        // Même dessin que l'effet, mais sur un canvas plein (sans l'effacement initial)
-        val w = canvas.width
-        val margin = w * 0.035f
-        val size = w * 0.21f
-        val badgePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply { alpha = 235 }
-        canvas.drawBitmap(
-            badgeBitmap, null,
-            RectF(w - margin - size, canvas.height - margin - size, w - margin, canvas.height - margin),
-            badgePaint
-        )
-        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = 0xFFF5D98B.toInt()
-            textSize = (w * 0.028f).coerceAtLeast(14f)
-            isFakeBoldText = true
-            setShadowLayer(6f, 0f, 2f, Color.BLACK)
+        try {
+            val canvas = Canvas(bitmap)
+            val w = canvas.width
+            val margin = w * 0.035f
+            val size = w * 0.21f
+            canvas.drawBitmap(
+                badgeBitmap, null,
+                RectF(w - margin - size, canvas.height - margin - size, w - margin, canvas.height - margin),
+                wmBadgePaint
+            )
+            val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = 0xFFF5D98B.toInt()
+                textSize = (w * 0.028f).coerceAtLeast(14f)
+                isFakeBoldText = true
+                setShadowLayer(6f, 0f, 2f, Color.BLACK)
+            }
+            canvas.drawText(
+                "ABV Farm — Nourrir l’avenir, naturellement",
+                margin, canvas.height - margin - size * 0.32f, textPaint
+            )
+            return writeJpegToGallery(bitmap, st)
+        } finally {
+            bitmap.recycle()
         }
-        canvas.drawText(
-            "ABV Farm — Nourrir l'avenir, naturellement",
-            margin, canvas.height - margin - size * 0.32f, textPaint
-        )
+    }
 
-        val name = "ABV_Farm_$stamp.jpg"
+    /** Écrit un JPEG dans Pictures/ABV Farm Camera en vérifiant chaque étape. */
+    private fun writeJpegToGallery(bitmap: Bitmap, st: String): Uri {
+        val name = "ABV_Farm_$st.jpg"
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val values = ContentValues().apply {
                 put(MediaStore.Images.Media.DISPLAY_NAME, name)
                 put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
                 put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/ABV Farm Camera")
+                put(MediaStore.Images.Media.DATE_TAKEN, System.currentTimeMillis())
                 put(MediaStore.Images.Media.IS_PENDING, 1)
             }
             val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
                 ?: throw IllegalStateException("MediaStore a refusé la photo")
-            contentResolver.openOutputStream(uri)?.use { out ->
-                mutable.compress(Bitmap.CompressFormat.JPEG, 95, out)
+            try {
+                val out = contentResolver.openOutputStream(uri)
+                    ?: throw IllegalStateException("Flux d'écriture indisponible")
+                val ok = out.use { bitmap.compress(Bitmap.CompressFormat.JPEG, 95, it) }
+                if (!ok) throw IllegalStateException("Compression JPEG échouée")
+            } catch (e: Exception) {
+                try {
+                    contentResolver.delete(uri, null, null)
+                } catch (_: Exception) {
+                }
+                throw e
             }
             values.clear()
             values.put(MediaStore.Images.Media.IS_PENDING, 0)
             contentResolver.update(uri, values, null, null)
-            mutable.recycle()
             uri
         } else {
             val dir = File(
@@ -630,26 +925,86 @@ class MainActivity : AppCompatActivity() {
             )
             dir.mkdirs()
             val file = File(dir, name)
-            FileOutputStream(file).use { out -> mutable.compress(Bitmap.CompressFormat.JPEG, 95, out) }
-            mutable.recycle()
+            val ok = FileOutputStream(file).use { bitmap.compress(Bitmap.CompressFormat.JPEG, 95, it) }
+            if (!ok) {
+                file.delete()
+                throw IllegalStateException("Compression JPEG échouée")
+            }
             MediaScannerConnection.scanFile(this, arrayOf(file.absolutePath), arrayOf("image/jpeg"), null)
-            Uri.fromFile(file)
+            FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+        }
+    }
+
+    /** Repli : copie le JPEG d'origine (sans filigrane) dans la galerie. */
+    private fun saveOriginalToGallery(tempFile: File, st: String): Uri {
+        val name = "ABV_Farm_$st.jpg"
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val values = ContentValues().apply {
+                put(MediaStore.Images.Media.DISPLAY_NAME, name)
+                put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/ABV Farm Camera")
+                put(MediaStore.Images.Media.DATE_TAKEN, System.currentTimeMillis())
+                put(MediaStore.Images.Media.IS_PENDING, 1)
+            }
+            val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                ?: throw IllegalStateException("MediaStore a refusé la photo")
+            try {
+                val out = contentResolver.openOutputStream(uri)
+                    ?: throw IllegalStateException("Flux d'écriture indisponible")
+                out.use { o -> FileInputStream(tempFile).use { it.copyTo(o) } }
+            } catch (e: Exception) {
+                try {
+                    contentResolver.delete(uri, null, null)
+                } catch (_: Exception) {
+                }
+                throw e
+            }
+            values.clear()
+            values.put(MediaStore.Images.Media.IS_PENDING, 0)
+            contentResolver.update(uri, values, null, null)
+            uri
+        } else {
+            val dir = File(
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
+                "ABV Farm Camera"
+            )
+            dir.mkdirs()
+            val file = File(dir, name)
+            FileInputStream(tempFile).use { input ->
+                FileOutputStream(file).use { input.copyTo(it) }
+            }
+            MediaScannerConnection.scanFile(this, arrayOf(file.absolutePath), arrayOf("image/jpeg"), null)
+            FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
         }
     }
 
     // ------------------------------------------------------------------ vidéo
 
     private fun toggleRecording() {
+        startupStep = "bascule enregistrement"
         val current = recording
         if (current != null) {
-            current.stop()
-            recording = null
+            if (isFinalizing) return
+            isFinalizing = true
+            txtStatus.text = "Finalisation de la vidéo…"
+            if (recStarted) {
+                try {
+                    current.stop()
+                } catch (_: Exception) {
+                }
+            } else {
+                // Start pas encore arrivé : l'arrêt sera appliqué à son arrivée
+                pendingStop = true
+            }
             return
         }
-        val capture = videoCapture ?: return
-        val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.FRANCE).format(System.currentTimeMillis())
-        val name = "ABV_Farm_$stamp.mp4"
-
+        val capture = videoCapture
+        if (capture == null) {
+            txtStatus.text = "Caméra en démarrage… réessayez dans un instant."
+            return
+        }
+        val st = stamp()
+        val name = "ABV_Farm_$st.mp4"
         val values = ContentValues().apply {
             put(MediaStore.Video.Media.DISPLAY_NAME, name)
             put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
@@ -661,47 +1016,96 @@ class MainActivity : AppCompatActivity() {
             contentResolver, MediaStore.Video.Media.EXTERNAL_CONTENT_URI
         ).setContentValues(values).build()
 
-        var pending = capture.output.prepareRecording(this, output)
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
-            PackageManager.PERMISSION_GRANTED
-        ) {
-            pending = pending.withAudioEnabled()
-        }
-        recording = pending.start(ContextCompat.getMainExecutor(this)) { event ->
-            when (event) {
-                is VideoRecordEvent.Start -> {
-                    recordStartMs = System.currentTimeMillis()
-                    txtRecording.visibility = View.VISIBLE
-                    mainHandler.post(tickRunnable)
-                    captureInner.setBackgroundResource(R.drawable.bg_shutter_inner_rec)
-                    txtStatus.text = "Enregistrement… filigrane + anti-bruit actifs"
-                }
-                is VideoRecordEvent.Finalize -> {
-                    mainHandler.removeCallbacks(tickRunnable)
-                    txtRecording.visibility = View.GONE
-                    captureInner.setBackgroundResource(R.drawable.bg_shutter_inner_red)
-                    if (event.hasError()) {
-                        Log.e(TAG, "Erreur vidéo: ${event.error}")
-                        txtStatus.text = "Erreur d'enregistrement vidéo"
-                        toast("Erreur d'enregistrement vidéo.")
-                    } else {
-                        lastMediaUri = event.outputResults.outputUri
-                        txtStatus.text = "🎥 Vidéo enregistrée avec filigrane — Galerie / ABV Farm Camera"
-                        toast("Vidéo enregistrée avec le filigrane ABV Farm ✅")
+        recNoAudio = !hasAudioPermission()
+        recStarted = false
+        pendingStop = false
+        try {
+            var pending = capture.output.prepareRecording(this, output)
+            if (!recNoAudio) pending = pending.withAudioEnabled()
+            recording = pending.start(ContextCompat.getMainExecutor(this)) { event ->
+                when (event) {
+                    is VideoRecordEvent.Start -> {
+                        recStarted = true
+                        if (pendingStop) {
+                            pendingStop = false
+                            try {
+                                recording?.stop()
+                            } catch (_: Exception) {
+                            }
+                            return@start
+                        }
+                        recordStartMs = System.currentTimeMillis()
+                        txtRecording.visibility = View.VISIBLE
+                        mainHandler.removeCallbacks(tickRunnable)
+                        mainHandler.post(tickRunnable)
+                        captureInner.setBackgroundResource(R.drawable.bg_shutter_inner_rec)
+                        val extras = buildString {
+                            if (!videoEffectActive) append(" — SANS filigrane")
+                            if (recNoAudio) append(" — sans son (micro non autorisé)")
+                            if (!noiseReductionOn) append(" — anti-bruit coupé")
+                        }
+                        txtStatus.text = "Enregistrement…$extras"
+                    }
+                    is VideoRecordEvent.Finalize -> {
+                        val finished = recording
+                        recording = null
+                        isFinalizing = false
+                        recStarted = false
+                        pendingStop = false
+                        mainHandler.removeCallbacks(tickRunnable)
+                        txtRecording.visibility = View.GONE
+                        captureInner.setBackgroundResource(R.drawable.bg_shutter_inner_red)
+                        if (isDestroyed) return@start
+                        if (event.hasError()) {
+                            Log.e(TAG, "Erreur vidéo: ${event.error}")
+                            // Ne pas laisser de MP4 cassé dans la galerie
+                            try {
+                                contentResolver.delete(event.outputResults.outputUri, null, null)
+                            } catch (_: Exception) {
+                            }
+                            txtStatus.text = "Erreur d'enregistrement — vérifiez l'espace libre, puis réessayez."
+                            toast("Erreur d'enregistrement vidéo.")
+                        } else {
+                            lastMediaUri = event.outputResults.outputUri
+                            lastMediaMime = "video/mp4"
+                            txtStatus.text =
+                                if (videoEffectActive) "🎥 Vidéo enregistrée avec filigrane"
+                                else "🎥 Vidéo enregistrée (sans filigrane)"
+                            toast("Vidéo enregistrée ✅")
+                        }
+                        finished?.let { /* déjà arrêté par l'événement */ }
                     }
                 }
             }
+        } catch (e: Exception) {
+            Log.e(TAG, "Démarrage de l'enregistrement impossible", e)
+            recording = null
+            isFinalizing = false
+            txtStatus.text = "L'enregistrement n'a pas pu démarrer — réessayez."
+            toast("L'enregistrement n'a pas pu démarrer.")
         }
     }
 
     private fun openGallery() {
-        val uri = lastMediaUri
-        if (uri != null) {
-            startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "*/*").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
-        } else {
-            startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(
-                MediaStore.Images.Media.EXTERNAL_CONTENT_URI, "image/*"
-            ))
+        try {
+            val uri = lastMediaUri
+            if (uri != null) {
+                startActivity(
+                    Intent(Intent.ACTION_VIEW)
+                        .setDataAndType(uri, lastMediaMime ?: "*/*")
+                        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                )
+            } else {
+                startActivity(
+                    Intent(Intent.ACTION_VIEW).setDataAndType(
+                        MediaStore.Images.Media.EXTERNAL_CONTENT_URI, "image/*"
+                    )
+                )
+            }
+        } catch (e: ActivityNotFoundException) {
+            toast("Aucune application pour ouvrir la galerie.")
+        } catch (e: Exception) {
+            toast("Impossible d'ouvrir la galerie.")
         }
     }
 
@@ -709,8 +1113,40 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "ABVFarmCamera"
+        private const val VERSION_LABEL = "v1.2.0"
 
         @Volatile
         var startupStep: String = "avant onCreate"
+
+        @Volatile
+        private var crashRecorderInstalled = false
+
+        fun crashFileFor(ctx: android.content.Context): File =
+            File(ctx.filesDir, "abv_crash.txt")
+
+        fun recordCrash(ctx: android.content.Context, where: String, error: Throwable) {
+            try {
+                crashFileFor(ctx).writeText(
+                    "ABV Farm Caméra $VERSION_LABEL — plantage\n" +
+                        "Où : $where (étape : $startupStep, thread : ${Thread.currentThread().name})\n\n" +
+                        error.stackTraceToString()
+                )
+            } catch (_: Throwable) {
+            }
+        }
+
+        @Synchronized
+        fun installCrashRecorder(appCtx: android.content.Context) {
+            if (crashRecorderInstalled) return
+            crashRecorderInstalled = true
+            val previous = Thread.getDefaultUncaughtExceptionHandler()
+            Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+                try {
+                    recordCrash(appCtx, "exception non rattrapée", error)
+                } finally {
+                    previous?.uncaughtException(thread, error)
+                }
+            }
+        }
     }
 }

@@ -10,111 +10,135 @@
         android:layout_height="match_parent"
         android:contentDescription="Aperçu caméra" />
 
-    <!-- Voiles dégradés pour la lisibilité des commandes -->
+    <!-- Voile dégradé du haut pour la lisibilité des commandes -->
     <View
         android:layout_width="match_parent"
         android:layout_height="110dp"
         android:layout_gravity="top"
         android:background="@drawable/bg_scrim_top" />
 
-    <View
-        android:layout_width="match_parent"
-        android:layout_height="250dp"
-        android:layout_gravity="bottom"
-        android:background="@drawable/bg_scrim_bottom" />
-
-    <!-- Barre supérieure : marque, flash, changement de caméra -->
+    <!-- Barre supérieure + voyant d'enregistrement (le voyant suit la barre) -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="top"
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:paddingStart="14dp"
-        android:paddingTop="12dp"
-        android:paddingEnd="14dp">
-
-        <ImageView
-            android:layout_width="38dp"
-            android:layout_height="38dp"
-            android:contentDescription="Logo ABV Farm"
-            android:src="@drawable/app_logo" />
+        android:orientation="vertical">
 
         <LinearLayout
-            android:layout_width="0dp"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginStart="10dp"
-            android:layout_weight="1"
-            android:orientation="vertical">
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="14dp"
+            android:paddingTop="12dp"
+            android:paddingEnd="14dp">
 
-            <TextView
+            <ImageView
+                android:layout_width="34dp"
+                android:layout_height="34dp"
+                android:contentDescription="Logo ABV Farm"
+                android:src="@drawable/app_logo" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:text="ABV Farm Caméra"
+                    android:textColor="#F5D98B"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:text="Nourrir l’avenir, naturellement"
+                    android:textColor="#FFFFFF"
+                    android:textSize="10.5sp" />
+            </LinearLayout>
+
+            <Button
+                android:id="@+id/btnFlash"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="ABV Farm Caméra"
-                android:textColor="#F5D98B"
-                android:textSize="16sp"
+                android:layout_marginEnd="8dp"
+                android:background="@drawable/bg_flash_chip"
+                android:drawableStart="@drawable/ic_flash"
+                android:drawablePadding="4dp"
+                android:minHeight="48dp"
+                android:minWidth="0dp"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                android:text="Flash : Non"
+                android:textAllCaps="false"
+                android:textColor="#FFFFFF"
+                android:textSize="12.5sp"
                 android:textStyle="bold" />
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Nourrir l’avenir, naturellement"
-                android:textColor="#FFFFFF"
-                android:textSize="11sp" />
+            <ImageButton
+                android:id="@+id/btnSwitchCamera"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="@drawable/bg_glass_circle"
+                android:contentDescription="Changer de caméra"
+                android:padding="12dp"
+                android:src="@drawable/ic_switch_camera" />
         </LinearLayout>
 
-        <Button
-            android:id="@+id/btnFlash"
+        <TextView
+            android:id="@+id/txtRecording"
             android:layout_width="wrap_content"
-            android:layout_height="44dp"
-            android:layout_marginEnd="10dp"
-            android:background="@drawable/bg_flash_chip"
-            android:drawableStart="@drawable/ic_flash"
-            android:drawablePadding="5dp"
-            android:minWidth="0dp"
-            android:paddingStart="12dp"
-            android:paddingEnd="12dp"
-            android:text="Flash : Non"
-            android:textAllCaps="false"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_rec_pill"
+            android:paddingStart="14dp"
+            android:paddingTop="6dp"
+            android:paddingEnd="14dp"
+            android:paddingBottom="6dp"
+            android:text="● ENR 00:00"
             android:textColor="#FFFFFF"
-            android:textSize="13sp"
-            android:textStyle="bold" />
-
-        <ImageButton
-            android:id="@+id/btnSwitchCamera"
-            android:layout_width="44dp"
-            android:layout_height="44dp"
-            android:background="@drawable/bg_glass_circle"
-            android:contentDescription="Changer de caméra"
-            android:padding="11dp"
-            android:src="@drawable/ic_switch_camera" />
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
     </LinearLayout>
 
-    <!-- Voyant + minuteur d'enregistrement -->
-    <TextView
-        android:id="@+id/txtRecording"
+    <!-- Bouton de secours si la permission caméra manque -->
+    <Button
+        android:id="@+id/btnPermission"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_gravity="top|center_horizontal"
-        android:layout_marginTop="76dp"
-        android:background="@drawable/bg_rec_pill"
-        android:paddingStart="14dp"
-        android:paddingTop="6dp"
-        android:paddingEnd="14dp"
-        android:paddingBottom="6dp"
-        android:text="● REC 00:00"
-        android:textColor="#FFFFFF"
-        android:textSize="14sp"
+        android:layout_gravity="center"
+        android:background="@drawable/bg_flash_chip_active"
+        android:minHeight="52dp"
+        android:paddingStart="22dp"
+        android:paddingEnd="22dp"
+        android:text="Autoriser la caméra"
+        android:textAllCaps="false"
+        android:textColor="#0B2E21"
+        android:textSize="15sp"
         android:textStyle="bold"
         android:visibility="gone" />
 
-    <!-- Bloc de commandes du bas -->
+    <!-- Bloc de commandes du bas (fond dégradé épousant le contenu) -->
     <LinearLayout
+        android:id="@+id/bottomBlock"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom"
+        android:background="@drawable/bg_scrim_bottom"
         android:orientation="vertical"
         android:paddingStart="18dp"
+        android:paddingTop="26dp"
         android:paddingEnd="18dp"
         android:paddingBottom="18dp">
 
@@ -138,8 +162,10 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="2dp"
+            android:ellipsize="end"
             android:gravity="center"
-            android:text="Photo résolution maximale"
+            android:maxLines="1"
+            android:text="Photo — meilleure qualité de l’appareil"
             android:textColor="#F5D98B"
             android:textSize="11sp" />
 
@@ -158,10 +184,10 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:background="@drawable/bg_mode_selected"
+                android:gravity="center"
+                android:minHeight="48dp"
                 android:paddingStart="26dp"
-                android:paddingTop="8dp"
                 android:paddingEnd="26dp"
-                android:paddingBottom="8dp"
                 android:text="PHOTO"
                 android:textColor="#0B2E21"
                 android:textSize="13.5sp"
@@ -171,10 +197,10 @@
                 android:id="@+id/btnModeVideo"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:gravity="center"
+                android:minHeight="48dp"
                 android:paddingStart="26dp"
-                android:paddingTop="8dp"
                 android:paddingEnd="26dp"
-                android:paddingBottom="8dp"
                 android:text="VIDÉO"
                 android:textColor="#FFFFFF"
                 android:textSize="13.5sp"
@@ -190,6 +216,7 @@
             android:orientation="horizontal">
 
             <LinearLayout
+                android:id="@+id/colGallery"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
@@ -211,7 +238,7 @@
                     android:layout_marginTop="4dp"
                     android:text="Galerie"
                     android:textColor="#FFFFFF"
-                    android:textSize="10.5sp" />
+                    android:textSize="12sp" />
             </LinearLayout>
 
             <FrameLayout
@@ -230,6 +257,7 @@
             </FrameLayout>
 
             <LinearLayout
+                android:id="@+id/colNoise"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
@@ -241,7 +269,7 @@
                     android:layout_width="54dp"
                     android:layout_height="54dp"
                     android:background="@drawable/bg_gold_circle"
-                    android:contentDescription="Réduction de bruit"
+                    android:contentDescription="Anti-bruit activé"
                     android:padding="15dp"
                     android:src="@drawable/ic_noise" />
 
@@ -250,9 +278,9 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
-                    android:text="Anti-bruit"
+                    android:text="Anti-bruit : Oui"
                     android:textColor="#F5D98B"
-                    android:textSize="10.5sp" />
+                    android:textSize="12sp" />
             </LinearLayout>
         </LinearLayout>
     </LinearLayout>

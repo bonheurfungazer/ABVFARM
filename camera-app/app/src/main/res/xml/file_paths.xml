@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Photos enregistrées par l'app avant Android 10 (ouverture galerie) -->
+    <external-path name="abv_pictures" path="Pictures/ABV Farm Camera/" />
+    <external-path name="abv_movies" path="Movies/ABV Farm Camera/" />
+</paths>

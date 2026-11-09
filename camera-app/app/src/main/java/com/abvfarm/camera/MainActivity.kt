@@ -156,11 +156,6 @@ class MainActivity : AppCompatActivity() {
 
     // Objets de dessin réutilisés par l'effet vidéo (aucune allocation par image)
     private val wmBadgePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply { alpha = 235 }
-    private val wmTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0xFFF5D98B.toInt()
-        isFakeBoldText = true
-        setShadowLayer(6f, 0f, 2f, Color.BLACK)
-    }
     private val wmDst = RectF()
 
     private val tickRunnable = object : Runnable {
@@ -710,7 +705,11 @@ class MainActivity : AppCompatActivity() {
                             CameraEffect.VIDEO_CAPTURE, 0, Handler(thread.looper)
                         ) { e -> Log.w(TAG, "Effet filigrane en erreur: $e") }
                         eff.setOnDrawListener { frame ->
-                            drawWatermark(frame.overlayCanvas)
+                            drawVideoWatermark(
+                                frame.overlayCanvas,
+                                frame.rotationDegrees,
+                                frame.isMirroring
+                            )
                             true
                         }
                         effectThread = thread
@@ -774,26 +773,56 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Dessine le filigrane ABV Farm : badge circulaire en bas à droite +
-     * signature dorée en bas à gauche. Appelé par l'effet vidéo sur son
-     * propre thread (objets de dessin pré-alloués, réutilisés).
+     * Filigrane vidéo : l'effet dessine dans l'espace du tampon capteur
+     * (paysage), que l'encodeur redresse ensuite selon rotationDegrees —
+     * sans compensation, le filigrane sortait tourné de 90° dans les vidéos
+     * portrait (constaté sur le Galaxy A21s). On dessine donc pré-tourné en
+     * sens inverse, dans un repère logique aux dimensions échangées, et on
+     * corrige l'effet miroir éventuel (caméra frontale).
      */
-    private fun drawWatermark(canvas: Canvas) {
+    private fun drawVideoWatermark(canvas: Canvas, rotationDegrees: Int, mirroring: Boolean) {
         canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
-        val w = canvas.width
-        val h = canvas.height
+        val bw = canvas.width
+        val bh = canvas.height
+        if (bw <= 0 || bh <= 0) return
+        val rot = ((rotationDegrees % 360) + 360) % 360
+        if (rot == 0 && !mirroring) {
+            drawWatermarkContent(canvas, bw, bh)
+            return
+        }
+        canvas.save()
+        if (rot != 0) {
+            canvas.translate(bw / 2f, bh / 2f)
+            canvas.rotate(-rot.toFloat())
+            if (rot == 90 || rot == 270) {
+                canvas.translate(-bh / 2f, -bw / 2f)
+            } else {
+                canvas.translate(-bw / 2f, -bh / 2f)
+            }
+        }
+        val logicalW = if (rot == 90 || rot == 270) bh else bw
+        val logicalH = if (rot == 90 || rot == 270) bw else bh
+        if (mirroring) {
+            canvas.translate(logicalW.toFloat(), 0f)
+            canvas.scale(-1f, 1f)
+        }
+        drawWatermarkContent(canvas, logicalW, logicalH)
+        canvas.restore()
+    }
+
+    /**
+     * Dessin du filigrane dans un repère logique donné : le logo exact fourni
+     * par Mr Robot (fond détouré transparent), proportions conservées,
+     * ancré en bas à droite. Le logo contient déjà le nom et le slogan —
+     * aucun texte n'est ajouté par-dessus.
+     */
+    private fun drawWatermarkContent(canvas: Canvas, w: Int, h: Int) {
         if (w <= 0 || h <= 0) return
         val margin = w * 0.035f
-        val size = w * 0.21f
-        wmDst.set(w - margin - size, h - margin - size, w - margin, h - margin)
+        val badgeW = w * 0.26f
+        val badgeH = badgeW * badgeBitmap.height / badgeBitmap.width
+        wmDst.set(w - margin - badgeW, h - margin - badgeH, w - margin, h - margin)
         canvas.drawBitmap(badgeBitmap, null, wmDst, wmBadgePaint)
-        wmTextPaint.textSize = (w * 0.028f).coerceAtLeast(14f)
-        canvas.drawText(
-            "ABV Farm — Nourrir l’avenir, naturellement",
-            margin,
-            h - margin - size * 0.32f,
-            wmTextPaint
-        )
     }
 
     // ------------------------------------------------------------------ photo
@@ -917,21 +946,15 @@ class MainActivity : AppCompatActivity() {
             val canvas = Canvas(bitmap)
             val w = canvas.width
             val margin = w * 0.035f
-            val size = w * 0.21f
+            val badgeW = w * 0.26f
+            val badgeH = badgeW * badgeBitmap.height / badgeBitmap.width
             canvas.drawBitmap(
                 badgeBitmap, null,
-                RectF(w - margin - size, canvas.height - margin - size, w - margin, canvas.height - margin),
+                RectF(
+                    w - margin - badgeW, canvas.height - margin - badgeH,
+                    w - margin, canvas.height - margin
+                ),
                 wmBadgePaint
-            )
-            val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = 0xFFF5D98B.toInt()
-                textSize = (w * 0.028f).coerceAtLeast(14f)
-                isFakeBoldText = true
-                setShadowLayer(6f, 0f, 2f, Color.BLACK)
-            }
-            canvas.drawText(
-                "ABV Farm — Nourrir l’avenir, naturellement",
-                margin, canvas.height - margin - size * 0.32f, textPaint
             )
             return writeJpegToGallery(bitmap, st)
         } finally {
@@ -1185,7 +1208,7 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "ABVFarmCamera"
-        private const val VERSION_LABEL = "v1.2.1"
+        private const val VERSION_LABEL = "v1.2.2"
 
         @Volatile
         var startupStep: String = "avant onCreate"

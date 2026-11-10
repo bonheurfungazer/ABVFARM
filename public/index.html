@@ -3810,7 +3810,7 @@ const NAV = [
   { id: "donnees", label: "Données & Export PDF", icon: "data" },
 ];
 const BOTTOM = ["accueil", "lapins", "saillies", "rappels"];
-let ui = { q: "", gq: "", cageq: "", rpage: 1, txpage: 1, spage: 1, sq: "", sfilter: "all", ssort: "date_desc", /* P4/F82 : recherche, filtre et tri de l historique des saillies. */ feedFrom: "", feedTo: "", st: "actifs", stage: "all", breed: "all", sort: "name_asc", viewMode: "grid", ageBracket: "all", minAgeM: "", maxAgeM: "", minWeight: "", maxWeight: "", txf: "all", txFrom: "", txTo: "" };
+let ui = { q: "", gq: "", cageq: "", fcage: "", rpage: 1, txpage: 1, spage: 1, sq: "", sfilter: "all", ssort: "date_desc", /* P4/F82 : recherche, filtre et tri de l historique des saillies. */ feedFrom: "", feedTo: "", st: "actifs", stage: "all", breed: "all", sort: "name_asc", viewMode: "grid", ageBracket: "all", minAgeM: "", maxAgeM: "", minWeight: "", maxWeight: "", txf: "all", txFrom: "", txTo: "" };
 /* C31 : debounce des champs de recherche — avant, chaque frappe relançait
    un render() complet (nav, header, badges, toute la vue en innerHTML) :
    recherche saccadée sur téléphone. La saisie n'est appliquée qu'après
@@ -3827,6 +3827,16 @@ function route() {
 }
 function go(h) { if (location.hash.slice(1) === h) render(); else location.hash = h; }
 window.addEventListener("hashchange", () => { closeModal(); render(); window.scrollTo(0, 0); });
+/* Retour progressif (2026-11-10, demande Mr Robot) : le bouton retour du
+   téléphone ne doit plus quitter l'écran d'un coup. Chaque feuille ouverte
+   (formulaire, filtres, menu…) pousse une entrée d'historique dédiée
+   (sheet()) : un appui sur Retour ferme d'abord la feuille et reste sur
+   l'écran courant ; l'appui suivant revient à l'écran précédent via le
+   hash, comme avant. Voir sheetPushedState / sheetPopIsOurs plus bas. */
+window.addEventListener("popstate", () => {
+  if (sheetPopIsOurs) { sheetPopIsOurs = false; return; } /* ce recul vient de notre propre history.back() dans closeModal() */
+  if (sheetPushedState) { sheetPushedState = false; if ($("#modal").innerHTML) closeModal(); } /* Retour avec une feuille ouverte : on la ferme, sans changer d'écran. Le garde-fou « saisie non enregistrée » reste respecté. */
+});
 
 function renderNav() {
   const r = route(); const cur = r.name === "lapin" ? "lapins" : r.name;
@@ -4007,6 +4017,7 @@ function lapinFilterSheet() {
      plus de tout l'effectif (archivés compris). */
   const facetList = baseList.filter((r) => {
     if (ui.breed && ui.breed !== "all" && (r.breed || "").trim().toLowerCase() !== ui.breed.toLowerCase()) return false;
+    const _cg = (ui.fcage || "").trim().toLowerCase(); if (_cg && !(r.cage || "").trim().toLowerCase().includes(_cg)) return false; /* 2026-11-10 : le filtre cage compte aussi dans les facettes (compteurs de stade cohérents). */
     if (ui.ageBracket && ui.ageBracket !== "all") { const _br = ageBrackets().find((b) => b.id === ui.ageBracket); if (_br) { const _a = age(r); if (!(_a >= _br.minD && _a <= _br.maxD)) return false; } }
     if (ui.minAgeM !== "" && !isNaN(Number(ui.minAgeM)) && !(age(r) >= Number(ui.minAgeM) * DAYS_PER_MONTH)) return false;
     if (ui.maxAgeM !== "" && !isNaN(Number(ui.maxAgeM))) { const _a = age(r); if (!(_a >= 0 && _a <= Number(ui.maxAgeM) * DAYS_PER_MONTH)) return false; }
@@ -4034,6 +4045,7 @@ function lapinFilterSheet() {
     <div class="fsec"><h3>Statut</h3><div class="fchips">${[["actifs", "Actifs"], ["archives", `Sortis / Externes`], ["all", "Tous"]].map(([v, l]) => chip("st", v, l, ui.st === v)).join("")}</div></div>
     <div class="fsec"><h3>Stade</h3><div class="fchips">${Object.entries(stageLabels()).map(([v, l]) => chip("stage", v, l, ui.stage === v, counts[v] ?? counts.all)).join("")}</div></div>
     <div class="fsec"><h3>Race</h3><div class="fchips">${chip("breed", "all", "Toutes les races", !ui.breed || ui.breed === "all")}${breeds.map((b) => chip("breed", b, b, ui.breed === b)).join("")}</div></div>
+    <div class="fsec"><h3>Cage</h3><div class="field"><label for="fsCage">Numéro de cage</label><input type="search" id="fsCage" placeholder="ex. 12 ou A3" value="${esc(ui.fcage || "")}"></div><p class="hint" style="margin:6px 0 0">Affiche uniquement les lapins dont le numéro de cage contient ce texte.</p></div>
     <div class="fsec"><h3>Tranche d'âge</h3><p class="hint" style="margin:0">Cliquer sur une tranche déjà sélectionnée la désélectionne et revient à « Tous les âges ».</p><div class="fchips">${chip("ageBracket", "all", "Tous les âges", !ui.ageBracket || ui.ageBracket === "all")}${ageBrackets().map((b) => { const n = baseList.filter((r) => { const a = age(r); return a >= b.minD && a <= b.maxD; }).length; return chip("ageBracket", ui.ageBracket === b.id ? "all" : b.id, `${b.label} (${n})`, ui.ageBracket === b.id); }).join("")}</div></div>
     <div class="fsec"><h3>Âge précis (mois)</h3><div class="fgrid2"><div class="field"><label for="fsMinAge">Âge min</label><input type="number" id="fsMinAge" step="0.5" min="0" placeholder="ex. 3" value="${esc(ui.minAgeM || "")}"></div><div class="field"><label for="fsMaxAge">Âge max</label><input type="number" id="fsMaxAge" step="0.5" min="0" placeholder="ex. 6" value="${esc(ui.maxAgeM || "")}"></div></div></div>
     <div class="fsec"><h3>Poids précis (kg)</h3><div class="fgrid2"><div class="field"><label for="fsMinWeight">Poids min</label><input type="number" id="fsMinWeight" step="0.1" min="0" placeholder="ex. 2.2" value="${esc(ui.minWeight || "")}"></div><div class="field"><label for="fsMaxWeight">Poids max</label><input type="number" id="fsMaxWeight" step="0.1" min="0" placeholder="ex. 4.0" value="${esc(ui.maxWeight || "")}"></div></div></div>
@@ -4055,13 +4067,14 @@ function lapinFilterSheet() {
   const applyNums = () => {
     ui.minAgeM = $("#fsMinAge")?.value || ""; ui.maxAgeM = $("#fsMaxAge")?.value || "";
     ui.minWeight = $("#fsMinWeight")?.value || ""; ui.maxWeight = $("#fsMaxWeight")?.value || "";
+    ui.fcage = $("#fsCage")?.value || "";
     ui.sort = $("#fsSort")?.value || ui.sort;
     ui.rpage = 1; /* M14 */
   };
-  ["fsMinAge", "fsMaxAge", "fsMinWeight", "fsMaxWeight"].forEach((id) => { const el = document.getElementById(id); if (el) el.addEventListener("change", () => { let _s = null, _e = null; try { _s = el.selectionStart; _e = el.selectionEnd; } catch (e) {} applyNums(); render(); lapinFilterSheet(); const _nx = document.getElementById(id); if (_nx) { _nx.focus(); try { if (_s != null && _e != null) _nx.setSelectionRange(_s, _e); } catch (e) {} } }); });
+  ["fsMinAge", "fsMaxAge", "fsMinWeight", "fsMaxWeight", "fsCage"].forEach((id) => { const el = document.getElementById(id); if (el) el.addEventListener("change", () => { let _s = null, _e = null; try { _s = el.selectionStart; _e = el.selectionEnd; } catch (e) {} applyNums(); render(); lapinFilterSheet(); const _nx = document.getElementById(id); if (_nx) { _nx.focus(); try { if (_s != null && _e != null) _nx.setSelectionRange(_s, _e); } catch (e) {} } }); });
   const sortEl = document.getElementById("fsSort"); if (sortEl) sortEl.addEventListener("change", () => { applyNums(); render(); lapinFilterSheet(); const _nx = document.getElementById("fsSort"); if (_nx) _nx.focus(); });
   const applyBtn = document.getElementById("fsApply"); if (applyBtn) applyBtn.addEventListener("click", () => { applyNums(); closeModal(); render(); });
-  const resetBtn = document.getElementById("fsReset"); if (resetBtn) resetBtn.addEventListener("click", () => { closeModal(); ui.q = ""; ui.stage = "all"; ui.breed = "all"; ui.st = "actifs"; ui.ageBracket = "all"; ui.minAgeM = ""; ui.maxAgeM = ""; ui.minWeight = ""; ui.maxWeight = ""; ui.sort = "name_asc"; ui.viewMode = "grid"; ui.rpage = 1; render(); });
+  const resetBtn = document.getElementById("fsReset"); if (resetBtn) resetBtn.addEventListener("click", () => { closeModal(); ui.q = ""; ui.stage = "all"; ui.breed = "all"; ui.fcage = ""; ui.st = "actifs"; ui.ageBracket = "all"; ui.minAgeM = ""; ui.maxAgeM = ""; ui.minWeight = ""; ui.maxWeight = ""; ui.sort = "name_asc"; ui.viewMode = "grid"; ui.rpage = 1; render(); });
 }
 
 VIEWS.lapins = () => {
@@ -4110,6 +4123,12 @@ VIEWS.lapins = () => {
   // 4. Filtre par Race
   if (ui.breed && ui.breed !== "all") {
     list = list.filter((r) => (r.breed || "").trim().toLowerCase() === ui.breed.toLowerCase());
+  }
+
+  // 4bis. Filtre par numéro de cage (filtre avancé, 2026-11-10 — demande Mr Robot)
+  const _fcage = (ui.fcage || "").trim().toLowerCase();
+  if (_fcage) {
+    list = list.filter((r) => (r.cage || "").trim().toLowerCase().includes(_fcage));
   }
 
   /* m11 : les lapins sans naissance (âge inconnu) ou sans pesée sont exclus
@@ -4174,11 +4193,12 @@ VIEWS.lapins = () => {
     }
   });
 
-  const hasActiveFilters = (ui.stage && ui.stage !== "all") || (ui.breed && ui.breed !== "all") || ui.st !== "actifs" || (ui.ageBracket && ui.ageBracket !== "all") || ui.minAgeM !== "" || ui.maxAgeM !== "" || ui.minWeight !== "" || ui.maxWeight !== "" || (ui.sort && ui.sort !== "name_asc") || ui.viewMode === "table" || q;
+  const hasActiveFilters = (ui.stage && ui.stage !== "all") || (ui.breed && ui.breed !== "all") || ui.st !== "actifs" || (ui.ageBracket && ui.ageBracket !== "all") || ui.minAgeM !== "" || ui.maxAgeM !== "" || ui.minWeight !== "" || ui.maxWeight !== "" || (ui.sort && ui.sort !== "name_asc") || ui.viewMode === "table" || (ui.fcage || "").trim() !== "" || q;
   // Pastilles des filtres actifs : seules elles restent visibles sous la barre.
   const activeChips = [];
   if (ui.stage && ui.stage !== "all") activeChips.push([stageLabels()[ui.stage] || ui.stage, "stage"]);
   if (ui.breed && ui.breed !== "all") activeChips.push([`Race : ${ui.breed}`, "breed"]);
+  if ((ui.fcage || "").trim() !== "") activeChips.push([`Cage : ${ui.fcage.trim()}`, "fcage"]);
   if (ui.st === "archives") activeChips.push(["Sortis / Externes", "st"]);
   if (ui.st === "all") activeChips.push(["Tous les statuts", "st"]);
   if (ui.ageBracket && ui.ageBracket !== "all") { const _br = ageBrackets().find((b) => b.id === ui.ageBracket); activeChips.push([_br ? `Âge : ${_br.label}` : "Tranche d'âge", "ageBracket"]); }
@@ -5596,6 +5616,12 @@ let modalReturnTo = null;
    lèvent le garde-fou : sheet() le réinitialise (nouvelle feuille) et le
    flux d'enregistrement le suspend pendant onSubmit. */
 let modalDirtyGuard = null;
+/* Retour progressif : sheetPushedState = une feuille ouverte a poussé son
+   entrée d'historique (le prochain Retour la fermera au lieu de changer
+   d'écran) ; sheetPopIsOurs = le popstate en cours vient de notre propre
+   history.back() de fermeture, il doit être ignoré. */
+let sheetPushedState = false;
+let sheetPopIsOurs = false;
 function a11yTables(root) { /* m60 : région défilante des tableaux focusable au clavier et en-têtes annoncés (scope) — décoré après chaque rendu, vues et feuilles. */
   (root || document).querySelectorAll(".tablewrap").forEach((w) => {
     if (!w.hasAttribute("tabindex")) { w.setAttribute("tabindex", "0"); w.setAttribute("role", "region"); w.setAttribute("aria-label", "Tableau : faites défiler horizontalement pour voir toutes les colonnes"); }
@@ -5624,11 +5650,17 @@ function closeModal(force) {
     if (dirty) { showModalDirtyConfirm(); return; }
   }
   modalDirtyGuard = null;
+  /* Retour progressif : fermeture par l'interface (×, Annuler, Enregistrer…)
+     → on consomme l'entrée d'historique de la feuille, pour que le Retour
+     suivant aille bien à l'écran précédent. Si une navigation par lien a
+     déjà placé une autre entrée au-dessus, on ne recule pas (le marqueur
+     restant sera simplement traversé plus tard, sans effet visible). */
+  if (sheetPushedState) { sheetPushedState = false; if (history.state && history.state.abvSheet) { sheetPopIsOurs = true; try { history.back(); } catch (e) { sheetPopIsOurs = false; } } }
   const ret = modalReturnTo; modalReturnTo = null; $("#modal").innerHTML = ""; document.body.style.overflow = ""; if (ret && document.contains(ret) && typeof ret.focus === "function") { try { ret.focus(); } catch (e) {} }
 }
 function sheet(title, body) {
   modalDirtyGuard = null; /* C28 : une nouvelle feuille remplace l'ancienne — le garde-fou de l'ancien formulaire ne s'applique plus (form() pose le sien juste après cet appel). */
-  if (!$("#modal").innerHTML) modalReturnTo = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  if (!$("#modal").innerHTML) { modalReturnTo = document.activeElement instanceof HTMLElement ? document.activeElement : null; try { history.pushState({ abvSheet: 1 }, ""); sheetPushedState = true; } catch (e) {} } /* Retour progressif : première feuille ouverte → entrée d'historique dédiée, pour que Retour la ferme sans changer d'écran. Les feuilles qui remplacent une feuille déjà ouverte ne repoussent rien. */
   $("#modal").innerHTML = `<div class="overlay" data-act="overlay"><div class="sheet" role="dialog" aria-modal="true" aria-label="${esc(title)}"><div class="sh"><h2>${esc(title)}</h2><button class="btn ghost sm" data-act="close" aria-label="Fermer">${ICON.x}</button></div>${body}</div></div>`;
   document.body.style.overflow = "hidden";
   a11yTables($("#modal")); /* m60 : tableaux des feuilles aussi */
@@ -6532,9 +6564,9 @@ const A = {
   themeModal: () => themeModal(),
   unauthorizedDomainModal: () => unauthorizedDomainModal(),
   params: () => { form({ title: "Paramètres d'élevage", values: { gestation: GESTATION, mature: MATURE_DAYS, weaning: WEANING, fatten: FATTEN_DAYS, palpStart: PALP_START, palpEnd: PALP_END }, fields: [{ k: "gestation", label: "Gestation (jours)", type: "number", step: 1, min: 1, max: 60, req: true }, { k: "mature", label: "Maturité (jours)", type: "number", step: 1, min: 1, max: 730, req: true }, { k: "weaning", label: "Sevrage (jours)", type: "number", step: 1, min: 1, max: 120, req: true }, { k: "fatten", label: "Engraissement (jours)", type: "number", step: 1, min: 1, max: 365, req: true }, { k: "palpStart", label: "Palpation — début de fenêtre (jour après saillie)", type: "number", step: 1, min: 1, max: 30, req: true }, { k: "palpEnd", label: "Palpation — fin de fenêtre (jour après saillie)", type: "number", step: 1, min: 1, max: 35, req: true }], onSubmit: async (v) => { /* m35 : bornes plausibles HAUTES et basses vérifiées à l'enregistrement — avant, seul min:1 existait côté champ : une valeur absurde (ex. gestation 3000 j) recalculait toutes les échéances de l'élevage. */ const _bornes = [["gestation", "Gestation", 20, 60], ["mature", "Maturité", 30, 730], ["weaning", "Sevrage", 7, 120], ["fatten", "Engraissement", 7, 365], ["palpStart", "Palpation (début)", 5, 25], ["palpEnd", "Palpation (fin)", 6, 30]]; if (!(Number(v.palpEnd) > Number(v.palpStart))) { toast("⛔ Fenêtre de palpation invalide : la fin doit être après le début."); return false; } for (const [_k, _lbl, _min, _max] of _bornes) { const _n = Number(v[_k]); if (!Number.isFinite(_n) || _n < _min || _n > _max) { toast(`⛔ ${_lbl} invalide : entre ${_min} et ${_max} jours.`); return false; } } try { localStorage.setItem("abvfarm_params", JSON.stringify(v)); } catch (e) { toast("⛔ Paramètres NON enregistrés : stockage local indisponible. Le formulaire reste ouvert."); return false; } const _oldFatten = FATTEN_DAYS; GESTATION = Number(v.gestation); MATURE_DAYS = Number(v.mature); WEANING = Number(v.weaning); FATTEN_DAYS = Number(v.fatten); PALP_START = Number(v.palpStart); PALP_END = Number(v.palpEnd); let _recalcFail = 0; for (const _m of S.matings.filter((x) => ["Accouplé", "Gestation confirmée"].includes(x.status))) { if (!_m.date) continue; if (!await save("mating", { ..._m, due: addDays(_m.date, GESTATION) })) _recalcFail++; } for (const _b of S.batches.filter((x) => ["Actif", "Quarantaine"].includes(x.status))) { if (!_b.weaning) continue; if (_b.target && _b.target !== addDays(_b.weaning, _oldFatten)) continue; /* P4/F36 : une date cible PERSONNALISÉE (≠ ancien calcul automatique) n'est plus écrasée par le changement de paramètre. */ if (!await save("batch", { ..._b, target: addDays(_b.weaning, FATTEN_DAYS) })) _recalcFail++; } closeModal(); /* m36 : le toast tient compte des échecs de recalcul — avant, « enregistrés et appliqués » s'affichait même si des save() de recalcul avaient échoué. */ toast(_recalcFail ? `⚠️ Paramètres enregistrés, mais ${_recalcFail} fiche(s) n'ont pas pu être recalculée(s) : vérifiez la synchronisation.` : "Paramètres enregistrés et appliqués aux gestations et lots en cours"); render(); return true; } }); },
-  resetFilters: () => { ui.q = ""; ui.stage = "all"; ui.breed = "all"; ui.st = "actifs"; ui.ageBracket = "all"; ui.minAgeM = ""; ui.maxAgeM = ""; ui.minWeight = ""; ui.maxWeight = ""; ui.sort = "name_asc"; ui.viewMode = "grid"; ui.rpage = 1; render(); },
+  resetFilters: () => { ui.q = ""; ui.stage = "all"; ui.breed = "all"; ui.fcage = ""; ui.st = "actifs"; ui.ageBracket = "all"; ui.minAgeM = ""; ui.maxAgeM = ""; ui.minWeight = ""; ui.maxWeight = ""; ui.sort = "name_asc"; ui.viewMode = "grid"; ui.rpage = 1; render(); },
   filterSheet: () => lapinFilterSheet(),
-  clearFilter: (el) => { const k = el.dataset.k; if (k === "ageRange") { ui.minAgeM = ""; ui.maxAgeM = ""; } else if (k === "weightRange") { ui.minWeight = ""; ui.maxWeight = ""; } else if (k === "st") { ui.st = "actifs"; } else if (k === "stage") { ui.stage = "all"; } else if (k === "breed") { ui.breed = "all"; } else if (k === "ageBracket") { ui.ageBracket = "all"; } else if (k === "sort") { ui.sort = "name_asc"; } else if (k === "viewMode") { ui.viewMode = "grid"; } ui.rpage = 1; render(); },
+  clearFilter: (el) => { const k = el.dataset.k; if (k === "ageRange") { ui.minAgeM = ""; ui.maxAgeM = ""; } else if (k === "weightRange") { ui.minWeight = ""; ui.maxWeight = ""; } else if (k === "st") { ui.st = "actifs"; } else if (k === "stage") { ui.stage = "all"; } else if (k === "breed") { ui.breed = "all"; } else if (k === "fcage") { ui.fcage = ""; } else if (k === "ageBracket") { ui.ageBracket = "all"; } else if (k === "sort") { ui.sort = "name_asc"; } else if (k === "viewMode") { ui.viewMode = "grid"; } ui.rpage = 1; render(); },
   newrabbit: () => rabbitForm(), editrabbit: (el) => rabbitForm(rab(el.dataset.id)),
   status: (el) => { const r = rab(el.dataset.id); if (!r) { toast("Fiche introuvable (déjà supprimée ou pas encore synchronisée) : action annulée."); return; } /* M23 */ form({ title: `Statut de ${r.name}`, values: r, fields: [{ k: "status", label: "Statut", type: "select", opts: STATUSES, full: true, hint: "Un animal vendu, abattu ou décédé passe dans la rubrique « Sortis ». Une vente exige un prix, sinon aucune recette n'est créée." }, { k: "exitDate", label: "Date de sortie (vente, décès, abattage, don)", type: "date", def: today() }, { k: "exitPrice", label: "Prix de vente (FCFA) — obligatoire si Vendu", type: "number", step: 1, min: 0, hint: "Obligatoire pour une vente : le prix crée la recette en finances. Laisser vide n'est possible que pour un don, un décès ou un abattage." }, { k: "exitCat", label: "Type de vente (si Vendu)", type: "select", opts: [["", "— Auto : reproducteur si déjà reproduit, sinon chair —"], ["Vente reproducteur", "Vente reproducteur"], ["Vente chair", "Vente chair"]], hint: "Choisissez « Vente reproducteur » pour un jeune vendu comme reproducteur AVANT sa première saillie : la déduction automatique le classerait « chair » à tort (P4/F3)." }, { k: "exitBuyer", label: "Acheteur / destinataire", ph: "ex. Client marché, voisin" }, { k: "exitCause", label: "Cause / motif", full: true, ph: "ex. Vente chair, maladie, don" }], onSubmit: async (v) => { /* D2 — réversion de vente interdite (section 7) : une vente enregistrée ne peut pas être annulée depuis ce formulaire, car cela supprimait la recette liée en finances. Une vente se corrige en gardant le statut « Vendu » (prix, date, acheteur, motif). */ if (r.status === "Vendu" && v.status !== "Vendu") { toast(`⛔ Vente déjà enregistrée : impossible de passer ce lapin de « Vendu » à « ${v.status} » depuis ce formulaire, car la recette de vente liée serait supprimée. Pour corriger la vente (prix, date, acheteur), gardez le statut « Vendu ».`); return false; } /* R1 (section 5 E4a) : un lapereau déjà vendu avec son lot ne doit pas recevoir une seconde recette individuelle. */
       if (isLotSoldKit(r) && v.status === "Vendu") { toast("⛔ Ce lapereau a déjà été vendu avec son lot : la recette existe déjà au niveau du lot, elle ne doit pas être créée une seconde fois."); return false; }

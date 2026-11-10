@@ -4,13 +4,6 @@
 // Routes :
 //   GET  /api/          -> statut du backend
 //   GET  /api/alerts    -> regles d'alertes
-//   GET    /api/echeances/<jeton>  -> dernier releve d'echeances transmis par l'app
-//   POST   /api/echeances/<jeton>  -> l'app y depose ses echeances (7 jours a venir)
-//   DELETE /api/echeances/<jeton>  -> desactivation des alertes Telegram
-// Le <jeton> est un secret aleatoire (32 caracteres hex) propre a l'appareil
-// de Mr Robot : il tient lieu d'identifiant ET d'autorisation, pour cette
-// seule liste (dates + libelles, aucune autre donnee). Stockage : Netlify Blobs.
-//
 // Note : l'endpoint POST /api/audit (audit complet des donnees de l'elevage)
 // a ete retire le 2026-11-08 a la demande de Mr Robot, en meme temps que la
 // section « Audit API » de l'application : le probleme C12 (endpoint public
@@ -40,17 +33,6 @@ function corsHeaders(event) {
   return base;
 }
 
-/* Echeances Telegram (2026-11-10) : stockage cle/valeur Netlify Blobs.
-   Chargement tolerant : si le module est absent, les routes /api/echeances
-   repondent 503 sans affecter le reste de l'API. */
-async function echeancesStore(event) {
-  try {
-    const blobs = require('@netlify/blobs');
-    if (blobs && typeof blobs.connectLambda === 'function' && event) { try { blobs.connectLambda(event); } catch (e) {} }
-    return blobs.getStore('echeances');
-  } catch (e) { console.error('ABV Farm API : Blobs indisponible', e); return null; }
-}
-
 exports.handler = async (event, context) => {
   const headers = corsHeaders(event);
   if (event.httpMethod === 'OPTIONS') {
@@ -67,19 +49,9 @@ exports.handler = async (event, context) => {
   const rawPath = event.path || '';
   const query = event.queryStringParameters || {};
   const isAlerts = _lastSeg === 'alerts';
-  /* /api/echeances/<jeton> : le segment precedent doit etre « echeances »
-     et le dernier un jeton de 32 caracteres hexadecimaux. */
-  const isEcheances = _segments.length >= 2 && (_segments[_segments.length - 2] || '').toLowerCase() === 'echeances' && /^[a-z0-9]{32}$/.test(_lastSeg);
 
   try {
     if (event.httpMethod === 'GET') {
-      if (isEcheances) {
-        const store = await echeancesStore(event);
-        if (!store) return { statusCode: 503, headers, body: JSON.stringify({ success: false, error: 'STORAGE_UNAVAILABLE', message: 'Stockage des échéances indisponible.' }) };
-        const raw = await store.get(_lastSeg);
-        let digest = null; try { digest = raw ? JSON.parse(raw) : null; } catch (e) { digest = null; }
-        return { statusCode: 200, headers, body: JSON.stringify({ success: true, digest }) };
-      }
       if (isAlerts) {
         return {
           statusCode: 200, headers,
@@ -126,23 +98,11 @@ exports.handler = async (event, context) => {
       if (Buffer.byteLength(rawBody, 'utf8') > MAX_BODY_BYTES) {
         return { statusCode: 413, headers, body: JSON.stringify({ success: false, error: 'PAYLOAD_TOO_LARGE', message: 'Corps trop volumineux (limite 1 Mo).' }) };
       }
-      if (isEcheances && Buffer.byteLength(rawBody, 'utf8') > 65536) {
-        return { statusCode: 413, headers, body: JSON.stringify({ success: false, error: 'PAYLOAD_TOO_LARGE', message: 'Échéances trop volumineuses (limite 64 Ko).' }) };
-      }
       let payload;
       try { payload = rawBody ? JSON.parse(rawBody) : {}; }
       catch (e) { return { statusCode: 400, headers, body: JSON.stringify({ success: false, error: 'INVALID_JSON', message: 'Corps JSON invalide.' }) }; }
       if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
         return { statusCode: 400, headers, body: JSON.stringify({ success: false, error: 'INVALID_PAYLOAD', message: 'Corps JSON invalide : un objet est attendu.' }) };
-      }
-      if (isEcheances) {
-        const items = Array.isArray(payload.items) ? payload.items : null;
-        const valid = payload.v === 1 && !!items && items.length <= 100 && items.every((i) => i && typeof i.d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(i.d) && typeof i.t === 'string' && i.t.length > 0 && i.t.length <= 140);
-        if (!valid) return { statusCode: 400, headers, body: JSON.stringify({ success: false, error: 'INVALID_DIGEST', message: "Format d'échéances invalide." }) };
-        const store = await echeancesStore(event);
-        if (!store) return { statusCode: 503, headers, body: JSON.stringify({ success: false, error: 'STORAGE_UNAVAILABLE', message: 'Stockage des échéances indisponible.' }) };
-        await store.set(_lastSeg, JSON.stringify({ v: 1, at: typeof payload.at === 'string' ? payload.at : new Date().toISOString(), items: items.map((i) => ({ d: i.d, t: i.t })) }));
-        return { statusCode: 200, headers, body: JSON.stringify({ success: true, stored: true, count: items.length }) };
       }
       if (isAlerts || payload.action === 'send_alert') {
         return {
@@ -171,13 +131,7 @@ exports.handler = async (event, context) => {
     }
 
     if (event.httpMethod === 'DELETE') {
-      if (isEcheances) {
-        const store = await echeancesStore(event);
-        if (!store) return { statusCode: 503, headers, body: JSON.stringify({ success: false, error: 'STORAGE_UNAVAILABLE', message: 'Stockage des échéances indisponible.' }) };
-        await store.delete(_lastSeg);
-        return { statusCode: 200, headers, body: JSON.stringify({ success: true, deleted: true }) };
-      }
-      return { statusCode: 405, headers: { ...headers, 'Allow': 'GET, POST, DELETE, OPTIONS' }, body: JSON.stringify({ success: false, error: 'METHOD_NOT_ALLOWED', message: 'Suppression disponible uniquement sur /api/echeances/<jeton>.' }) };
+      return { statusCode: 405, headers: { ...headers, 'Allow': 'GET, POST, DELETE, OPTIONS' }, body: JSON.stringify({ success: false, error: 'METHOD_NOT_ALLOWED', message: 'Aucune suppression n\'est disponible sur cette API.' }) };
     }
 
     /* m27 : 405 avec en-tete Allow (methodes reellement servies) et format

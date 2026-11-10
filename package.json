@@ -1,1 +1,6 @@
-{"dependencies":{"@netlify/blobs":"^8.1.0"},"description":"ABV Farm — dépendances des fonctions Netlify (stockage des échéances Telegram).","name":"abv-farm","private":true,"version":"1.0.0"}
+{
+  "name": "abv-farm",
+  "private": true,
+  "version": "1.0.0",
+  "description": "ABV Farm — fonctions Netlify (aucune dépendance externe)."
+}

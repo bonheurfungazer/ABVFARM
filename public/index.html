@@ -3825,18 +3825,27 @@ function route() {
   if (h === "cages") return { name: "donnees" }; /* M51 : accès direct au registre des cages */
   return { name: NAV.some((n) => n.id === h) ? h : "accueil" };
 }
-function go(h) { if (location.hash.slice(1) === h) render(); else location.hash = h; }
+function go(h) { if (location.hash.slice(1) === h) render(); else { curEntryIsSheet = false; location.hash = h; } }
 window.addEventListener("hashchange", () => { closeModal(); render(); window.scrollTo(0, 0); });
-/* Retour progressif (2026-11-10, demande Mr Robot) : le bouton retour du
-   téléphone ne doit plus quitter l'écran d'un coup. Chaque feuille ouverte
-   (formulaire, filtres, menu…) pousse une entrée d'historique dédiée
-   (sheet()) : un appui sur Retour ferme d'abord la feuille et reste sur
-   l'écran courant ; l'appui suivant revient à l'écran précédent via le
-   hash, comme avant. Voir sheetPushedState / sheetPopIsOurs plus bas. */
-window.addEventListener("popstate", () => {
-  if (sheetPopIsOurs) { sheetPopIsOurs = false; return; } /* ce recul vient de notre propre history.back() dans closeModal() */
-  if (sheetPushedState) { sheetPushedState = false; if ($("#modal").innerHTML) closeModal(); } /* Retour avec une feuille ouverte : on la ferme, sans changer d'écran. Le garde-fou « saisie non enregistrée » reste respecté. */
+/* Retour progressif (2026-11-10, demande Mr Robot ; mécanisme corrigé le
+   même jour après son test réel) : le bouton retour du téléphone ne doit
+   plus quitter l'écran d'un coup. Chaque feuille ouverte (formulaire,
+   filtres, menu…) pousse une entrée d'historique dédiée (sheet()). Un
+   appui sur Retour ferme d'abord la feuille et reste sur l'écran courant ;
+   l'appui suivant revient à l'écran précédent via le hash. closeModal()
+   ne touche JAMAIS à l'historique : l'ancien history.back() de fermeture,
+   asynchrone, entrait en course avec le toucher suivant et faisait sauter
+   un écran (retour brutal vers la liste filtrée). Si la feuille a été
+   fermée par l'interface, son entrée dédiée est traversée en transparence
+   ci-dessous, grâce au suivi de l'entrée courante (curEntryIsSheet). */
+window.addEventListener("popstate", (e) => {
+  const wasSheet = curEntryIsSheet;
+  curEntryIsSheet = !!(e.state && e.state.abvSheet); /* état de l'entrée sur laquelle on vient d'atterrir */
+  if ($("#modal").innerHTML) { closeModal(); return; } /* Retour avec une feuille ouverte : on la ferme, sans changer d'écran. Le garde-fou « saisie non enregistrée » reste respecté. */
+  if (wasSheet) history.back(); /* on vient de reculer depuis l'entrée d'une feuille déjà fermée par l'interface : on la traverse en transparence, un seul appui doit mener à l'écran précédent. */
 });
+/* Toute navigation par lien d'ancre fait sortir de l'entrée de feuille. */
+document.addEventListener("click", (e) => { const a = e.target && e.target.closest ? e.target.closest('a[href^="#"]') : null; if (a) curEntryIsSheet = false; }, true);
 
 function renderNav() {
   const r = route(); const cur = r.name === "lapin" ? "lapins" : r.name;
@@ -4017,7 +4026,7 @@ function lapinFilterSheet() {
      plus de tout l'effectif (archivés compris). */
   const facetList = baseList.filter((r) => {
     if (ui.breed && ui.breed !== "all" && (r.breed || "").trim().toLowerCase() !== ui.breed.toLowerCase()) return false;
-    const _cg = (ui.fcage || "").trim().toLowerCase(); if (_cg && !(r.cage || "").trim().toLowerCase().includes(_cg)) return false; /* 2026-11-10 : le filtre cage compte aussi dans les facettes (compteurs de stade cohérents). */
+    const _cg = (ui.fcage || "").trim().toLowerCase(); if (_cg && (r.cage || "").trim().toLowerCase() !== _cg) return false; /* 2026-11-10 : filtre cage en correspondance EXACTE (la cage 6 ne doit pas attraper la 16 — retour de Mr Robot), appliqué aussi aux facettes pour des compteurs de stade cohérents. */
     if (ui.ageBracket && ui.ageBracket !== "all") { const _br = ageBrackets().find((b) => b.id === ui.ageBracket); if (_br) { const _a = age(r); if (!(_a >= _br.minD && _a <= _br.maxD)) return false; } }
     if (ui.minAgeM !== "" && !isNaN(Number(ui.minAgeM)) && !(age(r) >= Number(ui.minAgeM) * DAYS_PER_MONTH)) return false;
     if (ui.maxAgeM !== "" && !isNaN(Number(ui.maxAgeM))) { const _a = age(r); if (!(_a >= 0 && _a <= Number(ui.maxAgeM) * DAYS_PER_MONTH)) return false; }
@@ -4045,7 +4054,7 @@ function lapinFilterSheet() {
     <div class="fsec"><h3>Statut</h3><div class="fchips">${[["actifs", "Actifs"], ["archives", `Sortis / Externes`], ["all", "Tous"]].map(([v, l]) => chip("st", v, l, ui.st === v)).join("")}</div></div>
     <div class="fsec"><h3>Stade</h3><div class="fchips">${Object.entries(stageLabels()).map(([v, l]) => chip("stage", v, l, ui.stage === v, counts[v] ?? counts.all)).join("")}</div></div>
     <div class="fsec"><h3>Race</h3><div class="fchips">${chip("breed", "all", "Toutes les races", !ui.breed || ui.breed === "all")}${breeds.map((b) => chip("breed", b, b, ui.breed === b)).join("")}</div></div>
-    <div class="fsec"><h3>Cage</h3><div class="field"><label for="fsCage">Numéro de cage</label><input type="search" id="fsCage" placeholder="ex. 12 ou A3" value="${esc(ui.fcage || "")}"></div><p class="hint" style="margin:6px 0 0">Affiche uniquement les lapins dont le numéro de cage contient ce texte.</p></div>
+    <div class="fsec"><h3>Cage</h3><div class="field"><label for="fsCage">Numéro de cage</label><input type="search" id="fsCage" placeholder="ex. 12 ou A3" value="${esc(ui.fcage || "")}"></div><p class="hint" style="margin:6px 0 0">Affiche uniquement les lapins logés dans la cage portant exactement ce numéro.</p></div>
     <div class="fsec"><h3>Tranche d'âge</h3><p class="hint" style="margin:0">Cliquer sur une tranche déjà sélectionnée la désélectionne et revient à « Tous les âges ».</p><div class="fchips">${chip("ageBracket", "all", "Tous les âges", !ui.ageBracket || ui.ageBracket === "all")}${ageBrackets().map((b) => { const n = baseList.filter((r) => { const a = age(r); return a >= b.minD && a <= b.maxD; }).length; return chip("ageBracket", ui.ageBracket === b.id ? "all" : b.id, `${b.label} (${n})`, ui.ageBracket === b.id); }).join("")}</div></div>
     <div class="fsec"><h3>Âge précis (mois)</h3><div class="fgrid2"><div class="field"><label for="fsMinAge">Âge min</label><input type="number" id="fsMinAge" step="0.5" min="0" placeholder="ex. 3" value="${esc(ui.minAgeM || "")}"></div><div class="field"><label for="fsMaxAge">Âge max</label><input type="number" id="fsMaxAge" step="0.5" min="0" placeholder="ex. 6" value="${esc(ui.maxAgeM || "")}"></div></div></div>
     <div class="fsec"><h3>Poids précis (kg)</h3><div class="fgrid2"><div class="field"><label for="fsMinWeight">Poids min</label><input type="number" id="fsMinWeight" step="0.1" min="0" placeholder="ex. 2.2" value="${esc(ui.minWeight || "")}"></div><div class="field"><label for="fsMaxWeight">Poids max</label><input type="number" id="fsMaxWeight" step="0.1" min="0" placeholder="ex. 4.0" value="${esc(ui.maxWeight || "")}"></div></div></div>
@@ -4128,7 +4137,7 @@ VIEWS.lapins = () => {
   // 4bis. Filtre par numéro de cage (filtre avancé, 2026-11-10 — demande Mr Robot)
   const _fcage = (ui.fcage || "").trim().toLowerCase();
   if (_fcage) {
-    list = list.filter((r) => (r.cage || "").trim().toLowerCase().includes(_fcage));
+    list = list.filter((r) => (r.cage || "").trim().toLowerCase() === _fcage); /* correspondance exacte : « 6 » ne doit pas afficher la cage « 16 » */
   }
 
   /* m11 : les lapins sans naissance (âge inconnu) ou sans pesée sont exclus
@@ -5616,12 +5625,11 @@ let modalReturnTo = null;
    lèvent le garde-fou : sheet() le réinitialise (nouvelle feuille) et le
    flux d'enregistrement le suspend pendant onSubmit. */
 let modalDirtyGuard = null;
-/* Retour progressif : sheetPushedState = une feuille ouverte a poussé son
-   entrée d'historique (le prochain Retour la fermera au lieu de changer
-   d'écran) ; sheetPopIsOurs = le popstate en cours vient de notre propre
-   history.back() de fermeture, il doit être ignoré. */
-let sheetPushedState = false;
-let sheetPopIsOurs = false;
+/* Retour progressif : curEntryIsSheet = l'entrée d'historique courante
+   est celle qu'une feuille ouverte a poussée (voir sheet() et le
+   gestionnaire popstate). Tenue à jour par sheet(), go(), les clics sur
+   les liens d'ancre et chaque popstate (via history.state). */
+let curEntryIsSheet = false;
 function a11yTables(root) { /* m60 : région défilante des tableaux focusable au clavier et en-têtes annoncés (scope) — décoré après chaque rendu, vues et feuilles. */
   (root || document).querySelectorAll(".tablewrap").forEach((w) => {
     if (!w.hasAttribute("tabindex")) { w.setAttribute("tabindex", "0"); w.setAttribute("role", "region"); w.setAttribute("aria-label", "Tableau : faites défiler horizontalement pour voir toutes les colonnes"); }
@@ -5650,17 +5658,14 @@ function closeModal(force) {
     if (dirty) { showModalDirtyConfirm(); return; }
   }
   modalDirtyGuard = null;
-  /* Retour progressif : fermeture par l'interface (×, Annuler, Enregistrer…)
-     → on consomme l'entrée d'historique de la feuille, pour que le Retour
-     suivant aille bien à l'écran précédent. Si une navigation par lien a
-     déjà placé une autre entrée au-dessus, on ne recule pas (le marqueur
-     restant sera simplement traversé plus tard, sans effet visible). */
-  if (sheetPushedState) { sheetPushedState = false; if (history.state && history.state.abvSheet) { sheetPopIsOurs = true; try { history.back(); } catch (e) { sheetPopIsOurs = false; } } }
+  /* Retour progressif : aucune manipulation d'historique ici — l'entrée
+     poussée par sheet() sera traversée en transparence au prochain appui
+     sur Retour (voir le gestionnaire popstate). */
   const ret = modalReturnTo; modalReturnTo = null; $("#modal").innerHTML = ""; document.body.style.overflow = ""; if (ret && document.contains(ret) && typeof ret.focus === "function") { try { ret.focus(); } catch (e) {} }
 }
 function sheet(title, body) {
   modalDirtyGuard = null; /* C28 : une nouvelle feuille remplace l'ancienne — le garde-fou de l'ancien formulaire ne s'applique plus (form() pose le sien juste après cet appel). */
-  if (!$("#modal").innerHTML) { modalReturnTo = document.activeElement instanceof HTMLElement ? document.activeElement : null; try { history.pushState({ abvSheet: 1 }, ""); sheetPushedState = true; } catch (e) {} } /* Retour progressif : première feuille ouverte → entrée d'historique dédiée, pour que Retour la ferme sans changer d'écran. Les feuilles qui remplacent une feuille déjà ouverte ne repoussent rien. */
+  if (!$("#modal").innerHTML) { modalReturnTo = document.activeElement instanceof HTMLElement ? document.activeElement : null; try { history.pushState({ abvSheet: 1 }, ""); curEntryIsSheet = true; } catch (e) {} } /* Retour progressif : première feuille ouverte → entrée d'historique dédiée, pour que Retour la ferme sans changer d'écran. Les feuilles qui remplacent une feuille déjà ouverte ne repoussent rien. */
   $("#modal").innerHTML = `<div class="overlay" data-act="overlay"><div class="sheet" role="dialog" aria-modal="true" aria-label="${esc(title)}"><div class="sh"><h2>${esc(title)}</h2><button class="btn ghost sm" data-act="close" aria-label="Fermer">${ICON.x}</button></div>${body}</div></div>`;
   document.body.style.overflow = "hidden";
   a11yTables($("#modal")); /* m60 : tableaux des feuilles aussi */

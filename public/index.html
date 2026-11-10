@@ -3589,6 +3589,52 @@ function alerts() {
   return _sorted;
 }
 
+/* ---------- Alertes Telegram (2026-11-10, demande Mr Robot n°2) ----------
+   Les notifications natives d'une PWA fermée exigeraient un serveur
+   d'envoi push dédié ; à la place, l'app transmet ses échéances DATÉES
+   (7 jours à venir + retards récents) à sa propre API
+   (/api/echeances/<jeton>), et le bot Telegram personnel de Mr Robot les
+   lui envoie chaque matin. Le jeton est un secret aléatoire propre à cet
+   appareil, créé à l'activation (écran Rappels) ; il ne donne accès qu'à
+   cette liste d'échéances (dates + libellés), rien d'autre. */
+const TG_TOKEN_KEY = "abvfarm_tg_token_v1", TG_LAST_KEY = "abvfarm_tg_last_v1";
+function tgToken() { try { return localStorage.getItem(TG_TOKEN_KEY) || ""; } catch (e) { return ""; } }
+function tgDigest() {
+  const t = today(), from = addDays(t, -7), to = addDays(t, 7), items = [];
+  const push = (d, label) => { if (d && d >= from && d <= to) items.push({ d, t: label }); };
+  for (const m of S.matings) {
+    const f = rname(m.female);
+    if (["Accouplé", "Gestation confirmée"].includes(m.status) && isActive(rab(m.female)) && !isDeparted(rab(m.male))) {
+      if (!m.palpationDate && m.date) push(addDays(m.date, PALP_START), `Palper ${f}`);
+      if (!m.nidPoseLe && m.due) push(addDays(m.due, -3), `Boîte à nid pour ${f}`);
+      if (m.due) push(m.due, `Mise bas attendue : ${f}`);
+    }
+    if (m.status === "Mise bas" && m.birthDate && isActive(rab(m.female)) && !porteeEteinte(m)) { const _w = effWeanedAt(m); if (!_w || _w > t) push(_w || addDays(m.birthDate, WEANING), `Sevrer la portée de ${f}`); }
+  }
+  for (const x of S.treatments) if (x.next && !(x.rabbit && isDeparted(rab(x.rabbit)))) push(x.next, `${x.type} : ${x.product || "rappel"} (${x.rabbit ? rname(x.rabbit) : "tout l'élevage"})`);
+  for (const r of S.reminders) if (!r.done && (!r.treatmentId || !(byId(S.treatments, r.treatmentId) || {}).next) && !(r.rabbitId && isDeparted(rab(r.rabbitId)))) push(r.due, r.title);
+  for (const b of S.batches) if (b.status === "Actif" && b.target) push(b.target, `Lot ${b.code} prêt à la vente`);
+  items.sort((a, b) => a.d.localeCompare(b.d));
+  return { v: 1, at: new Date().toISOString(), items: items.slice(0, 100) };
+}
+let _tgPostTimer = null;
+function tgMaybePost() {
+  const token = tgToken(); if (!token || !ready) return;
+  clearTimeout(_tgPostTimer);
+  _tgPostTimer = setTimeout(async () => {
+    try {
+      const digest = tgDigest();
+      const body = JSON.stringify(digest);
+      let last = ""; try { last = localStorage.getItem(TG_LAST_KEY) || ""; } catch (e) {}
+      const _lp = last.split("|"); const lastHash = _lp[0] || "", lastAt = Number(_lp[1] || 0);
+      const hash = body.length + ":" + digest.items.map((i) => i.d + i.t).join(",");
+      if (lastHash === hash && Date.now() - lastAt < 24 * 3600 * 1000) return; /* inchangé et frais : ne pas renvoyer */
+      const res = await fetch(`/api/echeances/${token}`, { method: "POST", headers: { "Content-Type": "application/json" }, body });
+      if (res.ok) { try { localStorage.setItem(TG_LAST_KEY, hash + "|" + Date.now()); } catch (e) {} }
+    } catch (e) { /* hors ligne : nouvel essai au prochain affichage */ }
+  }, 4000);
+}
+
 /* ---------- Offline Audio Chime & Vibration Engine ---------- */
 function playAlertChime() {
   try {
@@ -3866,6 +3912,7 @@ function render() {
     const r = route(); const v = VIEWS[r.name] || VIEWS.accueil;
     $("#main").innerHTML = `<div class="wrap">${v(r)}</div>`;
     afterRender();
+    try { tgMaybePost(); } catch (e) {} /* Alertes Telegram : transmission des échéances si l'option est activée (débouncée + seulement si la liste a changé). */
     if (location.hash === "#cages") { const _cg = document.getElementById("registre-cages"); if (_cg) _cg.scrollIntoView(); } /* M51 */
     purgeNetlifyWatermark();
   } catch (err) {
@@ -4315,7 +4362,7 @@ function rabbitCard(r) {
       ${lact ? `<span class="chip info">Allaitante · J${diff(lact.birthDate, today())}</span>` : ""}
       ${wd ? `<span class="chip bad">Délai d'attente</span>` : ""}
     </div>
-    <div class="quick">${(isActive(r) || r.status === "Externe") ? `<button class="btn sm" data-act="newweight" data-id="${esc(r.id)}">${ICON.scale}Pesée</button><button class="btn sm" data-act="newtreat" data-id="${esc(r.id)}">${ICON.syringe}Soin</button>` : ""}<a class="btn sm ghost" href="#lapin-${esc(r.id)}">Fiche →</a></div><!-- m54 : Pesée/Soin au pouce, sans ouvrir la fiche -->
+    <div class="quick">${(isActive(r) || r.status === "Externe") ? `<button class="btn sm" data-act="newweight" data-id="${esc(r.id)}">${ICON.scale}Pesée</button><button class="btn sm" data-act="newtreat" data-id="${esc(r.id)}">${ICON.syringe}Soin</button>` : ""}<a class="btn sm ghost" href="#lapin-${esc(r.id)}">Fiche →</a><button class="btn sm ghost" data-act="quick" data-id="${esc(r.id)}" aria-label="Plus d'actions pour ${esc(r.name)}">${ICON.more}Plus</button></div><!-- m54 : Pesée/Soin au pouce, sans ouvrir la fiche ; 2026-11-10 : bouton « Plus » = toutes les actions rapides (cage, saillie, sortie…) en un seul endroit, demande Mr Robot n°1 -->
   </div>`;
 }
 
@@ -4343,6 +4390,7 @@ function rabbitTableRow(r) {
         ${(isActive(r) || r.status === "Externe") ? `<button class="btn sm ghost" data-act="newweight" data-id="${esc(r.id)}" title="Ajouter une pesée" aria-label="Ajouter une pesée pour ${esc(r.name)}">${ICON.scale}</button>
         <button class="btn sm ghost" data-act="newtreat" data-id="${esc(r.id)}" title="Ajouter un soin" aria-label="Ajouter un soin pour ${esc(r.name)}">${ICON.syringe}</button>` : ""}<!-- m12 : pas de Pesée/Soin pour un animal sorti — avant, les boutons étaient proposés puis toujours refusés (fiche figée), comme sur la fiche individuelle qui, elle, les masque. -->
         <a class="btn sm" href="#lapin-${esc(r.id)}">Fiche</a>
+        <button class="btn sm ghost" data-act="quick" data-id="${esc(r.id)}" title="Plus d'actions" aria-label="Plus d'actions pour ${esc(r.name)}">${ICON.more}</button>
       </div>
     </td>
   </tr>`;
@@ -4570,6 +4618,9 @@ VIEWS.rappels = () => {
   const _calc = alerts().filter((a) => !(a.act && a.act.some((x) => x[1] === "remdone" || x[1] === "treatdone"))); /* P2/B29 : alertes CALCULÉES (palpations, nids, mises bas, sevrages, stocks…) — la MÊME liste alerts() que le compteur « À faire » de l'Accueil : les palpations apparaissent donc ici aussi. */ /* m7 : plus de borne à -14 j — avant, un rappel de soin en retard de plus de 14 jours disparaissait aussi de cette liste sanitaire, alors que c'est là qu'il doit rester visible jusqu'à clôture. */
   const herd = S.treatments.filter((x) => !x.rabbit).sort((a, b) => (b.date || "").localeCompare(a.date || ""));
   return `<div class="head"><div><h1>Tâches & Soins Vétérinaires</h1><p>Planning sanitaire et rappels préventifs</p></div><div class="actions"><button class="btn" data-act="newtreat">${ICON.syringe}Soin collectif</button><button class="btn pri" data-act="newrem">${ICON.plus}Nouveau rappel</button></div></div>
+  <section class="card" style="margin-bottom:14px"><div class="row-h"><h2>Alertes sur Telegram</h2>${tgToken() ? `<span class="chip ok">Activées</span>` : `<span class="chip">Non activées</span>`}</div>
+  ${tgToken() ? `<p>Chaque matin vers 6 h 30, votre bot Telegram « Muse — Agent personnel » vous envoie les échéances du jour et les retards : mises bas, palpations, boîtes à nid, sevrages, soins et rappels. L'application transmet la liste des 7 prochains jours à chaque ouverture — pensez à l'ouvrir régulièrement pour la garder à jour.</p><div class="actions" style="margin-top:8px"><button class="btn sm" data-act="tgSync">Renvoyer la liste maintenant</button><button class="btn sm ghost" data-act="tgOff" style="color:var(--bad)">Désactiver</button></div>` : `<p>Recevez vos échéances chaque matin sur Telegram, même sans ouvrir l'application : mises bas, palpations, boîtes à nid, sevrages, soins et rappels du jour, plus les retards. L'activation ouvre votre bot Telegram « Muse — Agent personnel » : appuyez sur « Démarrer » là-bas, et c'est lié.</p><div class="actions" style="margin-top:8px"><button class="btn pri sm" data-act="tgActivate">Activer les alertes Telegram</button></div>`}
+  </section>
   <section class="card" style="margin-bottom:14px"><div class="row-h"><h2>Alertes du jour — même liste que l'Accueil</h2><span class="chip ${_calc.some((a) => a.sev === "bad") ? "bad" : _calc.length ? "warn" : "ok"}">${_calc.length}</span></div>${_calc.length ? `<div class="list">${_calc.map((a) => `<div class="li">${sevIco(a)}<div class="grow"><div class="t">${esc(a.title)}</div><div class="d">${esc(a.sub)}</div>${a.act ? `<div class="actions" style="margin-top:6px">${a.act.map(([l, act, id, v]) => `<button class="btn sm" data-act="${act}" ${id ? `data-id="${esc(id)}"` : ""} ${v ? `data-v="${esc(v)}"` : ""}>${esc(l)}</button>`).join("")}</div>` : ""}</div></div>`).join("")}</div>` : emptyBox("check", "Aucune alerte calculée", "Palpations, boîtes à nid, mises bas et sevrages apparaîtront ici le jour venu, comme sur l'Accueil.")}</section>
   <div class="grid g2">
     <section class="card"><div class="row-h"><h2>Tâches à traiter</h2><span class="chip">${open.length}</span></div>${open.length ? `<div class="list">${open.map(remRow).join("")}</div>` : emptyBox("bell", "Aucune tâche en attente", "Désinfection, nettoyage des abreuvoirs, réassorts…")}</section>
@@ -6570,6 +6621,25 @@ const A = {
   unauthorizedDomainModal: () => unauthorizedDomainModal(),
   params: () => { form({ title: "Paramètres d'élevage", values: { gestation: GESTATION, mature: MATURE_DAYS, weaning: WEANING, fatten: FATTEN_DAYS, palpStart: PALP_START, palpEnd: PALP_END }, fields: [{ k: "gestation", label: "Gestation (jours)", type: "number", step: 1, min: 1, max: 60, req: true }, { k: "mature", label: "Maturité (jours)", type: "number", step: 1, min: 1, max: 730, req: true }, { k: "weaning", label: "Sevrage (jours)", type: "number", step: 1, min: 1, max: 120, req: true }, { k: "fatten", label: "Engraissement (jours)", type: "number", step: 1, min: 1, max: 365, req: true }, { k: "palpStart", label: "Palpation — début de fenêtre (jour après saillie)", type: "number", step: 1, min: 1, max: 30, req: true }, { k: "palpEnd", label: "Palpation — fin de fenêtre (jour après saillie)", type: "number", step: 1, min: 1, max: 35, req: true }], onSubmit: async (v) => { /* m35 : bornes plausibles HAUTES et basses vérifiées à l'enregistrement — avant, seul min:1 existait côté champ : une valeur absurde (ex. gestation 3000 j) recalculait toutes les échéances de l'élevage. */ const _bornes = [["gestation", "Gestation", 20, 60], ["mature", "Maturité", 30, 730], ["weaning", "Sevrage", 7, 120], ["fatten", "Engraissement", 7, 365], ["palpStart", "Palpation (début)", 5, 25], ["palpEnd", "Palpation (fin)", 6, 30]]; if (!(Number(v.palpEnd) > Number(v.palpStart))) { toast("⛔ Fenêtre de palpation invalide : la fin doit être après le début."); return false; } for (const [_k, _lbl, _min, _max] of _bornes) { const _n = Number(v[_k]); if (!Number.isFinite(_n) || _n < _min || _n > _max) { toast(`⛔ ${_lbl} invalide : entre ${_min} et ${_max} jours.`); return false; } } try { localStorage.setItem("abvfarm_params", JSON.stringify(v)); } catch (e) { toast("⛔ Paramètres NON enregistrés : stockage local indisponible. Le formulaire reste ouvert."); return false; } const _oldFatten = FATTEN_DAYS; GESTATION = Number(v.gestation); MATURE_DAYS = Number(v.mature); WEANING = Number(v.weaning); FATTEN_DAYS = Number(v.fatten); PALP_START = Number(v.palpStart); PALP_END = Number(v.palpEnd); let _recalcFail = 0; for (const _m of S.matings.filter((x) => ["Accouplé", "Gestation confirmée"].includes(x.status))) { if (!_m.date) continue; if (!await save("mating", { ..._m, due: addDays(_m.date, GESTATION) })) _recalcFail++; } for (const _b of S.batches.filter((x) => ["Actif", "Quarantaine"].includes(x.status))) { if (!_b.weaning) continue; if (_b.target && _b.target !== addDays(_b.weaning, _oldFatten)) continue; /* P4/F36 : une date cible PERSONNALISÉE (≠ ancien calcul automatique) n'est plus écrasée par le changement de paramètre. */ if (!await save("batch", { ..._b, target: addDays(_b.weaning, FATTEN_DAYS) })) _recalcFail++; } closeModal(); /* m36 : le toast tient compte des échecs de recalcul — avant, « enregistrés et appliqués » s'affichait même si des save() de recalcul avaient échoué. */ toast(_recalcFail ? `⚠️ Paramètres enregistrés, mais ${_recalcFail} fiche(s) n'ont pas pu être recalculée(s) : vérifiez la synchronisation.` : "Paramètres enregistrés et appliqués aux gestations et lots en cours"); render(); return true; } }); },
   resetFilters: () => { ui.q = ""; ui.stage = "all"; ui.breed = "all"; ui.fcage = ""; ui.st = "actifs"; ui.ageBracket = "all"; ui.minAgeM = ""; ui.maxAgeM = ""; ui.minWeight = ""; ui.maxWeight = ""; ui.sort = "name_asc"; ui.viewMode = "grid"; ui.rpage = 1; render(); },
+  /* Actions rapides (2026-11-10, demande Mr Robot n°1) : toutes les actions
+     d'un lapin réunies derrière le bouton « Plus » de sa carte (la Pesée et
+     le Soin y étaient déjà en accès direct depuis m54). */
+  quick: (el) => { const r = rab(el.dataset.id); if (!r) { toast("Fiche introuvable : action annulée."); return; } const act = isActive(r) || r.status === "Externe"; const _b = (inner) => `<button class="btn ghost" ${inner} style="justify-content:flex-start;padding:10px 12px;font-size:1rem;color:var(--ink)">`; sheet(`Actions — ${r.name}`, `<div class="morelist">
+    <a class="nav-a" href="#lapin-${esc(r.id)}">${ICON.rabbit}<span>Voir la fiche</span></a>
+    ${act ? `${_b(`data-act="newweight" data-id="${esc(r.id)}"`)}${ICON.scale}<span>Pesée</span></button>
+    ${_b(`data-act="newtreat" data-id="${esc(r.id)}"`)}${ICON.syringe}<span>Soin</span></button>
+    ${_b(`data-act="quickcage" data-id="${esc(r.id)}"`)}${ICON.box}<span>Changer de cage${r.cage ? ` (actuelle : ${esc(r.cage)})` : ""}</span></button>
+    ${_b(`data-act="newmating" data-id="${esc(r.id)}"`)}${ICON.heart}<span>Saillie</span></button>
+    ${_b(`data-act="status" data-id="${esc(r.id)}"`)}${ICON.coins}<span>Sortie / Vente</span></button>` : ""}
+    ${_b(`data-act="editrabbit" data-id="${esc(r.id)}"`)}${ICON.edit}<span>Modifier la fiche</span></button>
+  </div>`); },
+  quickcage: (el) => { const r = rab(el.dataset.id); if (!r) { toast("Fiche introuvable : action annulée."); return; } form({ title: `Cage de ${r.name}`, values: { cage: r.cage || "" }, fields: [{ k: "cage", label: "Numéro de cage / loge", ph: "ex. 12 ou A3", full: true }], submit: "Enregistrer", onSubmit: async (v) => { const _nc = (v.cage || "").trim(); if (!await save("rabbit", { ...r, cage: _nc })) { toast("⛔ Enregistrement impossible : réessayez."); return false; } closeModal(); toast(_nc ? `${r.name} → cage ${_nc}` : `${r.name} : cage retirée`); render(); return true; } }); },
+  /* Alertes Telegram (demande n°2) : activation par lien profond vers le bot
+     personnel — le bot reçoit « /start abv_<jeton> » et lie ce jeton à la
+     conversation de Mr Robot ; l'app envoie ensuite ses échéances à l'API. */
+  tgActivate: () => { let token = tgToken(); if (!token) { token = Array.from(crypto.getRandomValues(new Uint8Array(16))).map((b) => b.toString(16).padStart(2, "0")).join(""); try { localStorage.setItem(TG_TOKEN_KEY, token); localStorage.removeItem(TG_LAST_KEY); } catch (e) { toast("⛔ Stockage local indisponible : activation impossible sur cet appareil."); return; } } tgMaybePost(); window.open(`https://t.me/goad_soc_master_bot?start=abv_${token}`, "_blank"); toast("Telegram ouvert : appuyez sur « Démarrer » dans le bot pour terminer l'activation."); render(); },
+  tgSync: () => { try { localStorage.removeItem(TG_LAST_KEY); } catch (e) {} tgMaybePost(); toast("Liste des échéances renvoyée (elle part dans quelques secondes)."); },
+  tgOff: () => { const token = tgToken(); try { localStorage.removeItem(TG_TOKEN_KEY); localStorage.removeItem(TG_LAST_KEY); } catch (e) {} if (token) fetch(`/api/echeances/${token}`, { method: "DELETE" }).catch(() => {}); toast("Alertes Telegram désactivées sur cet appareil."); render(); },
   filterSheet: () => lapinFilterSheet(),
   clearFilter: (el) => { const k = el.dataset.k; if (k === "ageRange") { ui.minAgeM = ""; ui.maxAgeM = ""; } else if (k === "weightRange") { ui.minWeight = ""; ui.maxWeight = ""; } else if (k === "st") { ui.st = "actifs"; } else if (k === "stage") { ui.stage = "all"; } else if (k === "breed") { ui.breed = "all"; } else if (k === "fcage") { ui.fcage = ""; } else if (k === "ageBracket") { ui.ageBracket = "all"; } else if (k === "sort") { ui.sort = "name_asc"; } else if (k === "viewMode") { ui.viewMode = "grid"; } ui.rpage = 1; render(); },
   newrabbit: () => rabbitForm(), editrabbit: (el) => rabbitForm(rab(el.dataset.id)),

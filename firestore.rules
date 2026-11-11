@@ -102,6 +102,20 @@ service cloud.firestore {
              (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 64));
     }
 
+    // Notifications d'activité d'un espace : écrites par l'auteur d'une
+    // modification (propriétaire ou invité en écriture), lues par le
+    // propriétaire et ses invités. L'auteur naît dans readBy (il ne se
+    // notifie pas lui-même) ; seuls readBy peuvent changer ensuite.
+    function isValidNotification(data) {
+      return data.keys().hasOnly(['authorUid', 'authorEmail', 'text', 'kind', 'at', 'readBy']) &&
+             data.authorUid is string && data.authorUid == request.auth.uid &&
+             (!('authorEmail' in data) || (data.authorEmail is string && data.authorEmail.size() <= 200)) &&
+             data.text is string && data.text.size() > 0 && data.text.size() <= 300 &&
+             (!('kind' in data) || (data.kind is string && data.kind.size() <= 50)) &&
+             data.at is string && data.at.size() > 0 && data.at.size() <= 64 &&
+             data.readBy is list && data.readBy.size() <= 50;
+    }
+
     function shareLevel(ownerUid) {
       return exists(/databases/$(database)/documents/partages/$(ownerUid + '__' + request.auth.token.email))
         ? get(/databases/$(database)/documents/partages/$(ownerUid + '__' + request.auth.token.email)).data.level
@@ -327,6 +341,15 @@ service cloud.firestore {
         allow read: if (isOwner(userId) && isAllowedUser()) || hasShareRead(userId);
         allow create, update: if ((isOwner(userId) && isAllowedUser()) || hasShareWrite(userId)) && isValidCheptel(incoming(), docId);
         allow delete: if (isOwner(userId) && isAllowedUser()) || hasShareWrite(userId);
+      }
+
+      // Notifications d'activité entre collaborateurs de l'espace
+      match /notifications/{notifId} {
+        allow read: if (isOwner(userId) && isAllowedUser()) || hasShareRead(userId);
+        allow create: if ((isOwner(userId) && isAllowedUser()) || hasShareWrite(userId)) && isValidNotification(incoming());
+        allow update: if ((isOwner(userId) && isAllowedUser()) || hasShareRead(userId)) &&
+                        incoming().diff(existing()).affectedKeys().hasOnly(['readBy']);
+        allow delete: if isOwner(userId) && isAllowedUser();
       }
 
       // Rabbits subcollection

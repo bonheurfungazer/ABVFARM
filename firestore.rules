@@ -19,6 +19,33 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Liste des e-mails autorisés : lisible par tout utilisateur connecté
+    // (contrôle d'accès à la connexion), écrite par le super admin seul.
+    match /admin/access {
+      allow get: if isSignedIn();
+      allow list: if false;
+      allow create, update: if isSuperAdmin() && isValidAccessDoc(incoming());
+      allow delete: if false;
+    }
+
+    // Partages de données entre utilisateurs (lecture ou lecture+écriture).
+    match /partages/{shareId} {
+      allow get, list: if isSignedIn() &&
+        (resource.data.ownerUid == request.auth.uid ||
+         resource.data.guestEmail == request.auth.token.email ||
+         isSuperAdmin());
+      allow create: if isSignedIn() && isValidShare(incoming()) &&
+        incoming().ownerUid == request.auth.uid &&
+        shareId == incoming().ownerUid + '__' + incoming().guestEmail;
+      allow update: if isSignedIn() && isValidShare(incoming()) &&
+        existing().ownerUid == request.auth.uid &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().guestEmail == existing().guestEmail &&
+        shareId == incoming().ownerUid + '__' + incoming().guestEmail;
+      allow delete: if isSignedIn() &&
+        (existing().ownerUid == request.auth.uid || isSuperAdmin());
+    }
+
     function isValidId(id) {
       return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
@@ -37,6 +64,56 @@ service cloud.firestore {
 
     function isOwner(userId) {
       return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // ---- Accès & partages (2026-11-11, demande Mr Robot) ----
+    // Super administrateur : LONTI KENFACK ARCEN (lontiarcen@gmail.com),
+    // seul habilité à choisir quels e-mails peuvent utiliser l'application.
+    function isSuperAdmin() {
+      return isSignedIn() && request.auth.token.email == 'lontiarcen@gmail.com';
+    }
+
+    // Un utilisateur est autorisé s'il est le super administrateur OU si son
+    // e-mail figure dans le document admin/access (liste tenue par le super
+    // administrateur seul). Document absent = seul le super admin passe :
+    // l'application le crée automatiquement à sa première connexion.
+    function isAllowedUser() {
+      return isSuperAdmin() ||
+        (isSignedIn() &&
+         exists(/databases/$(database)/documents/admin/access) &&
+         request.auth.token.email in get(/databases/$(database)/documents/admin/access).data.allowedEmails);
+    }
+
+    function isValidAccessDoc(data) {
+      return data.keys().hasOnly(['allowedEmails', 'updatedAt', 'updatedBy']) &&
+             data.allowedEmails is list && data.allowedEmails.size() <= 500 &&
+             (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64)) &&
+             (!('updatedBy' in data) || (data.updatedBy is string && data.updatedBy.size() <= 200));
+    }
+
+    // Partages : document partages/{ownerUid}__{guestEmail} créé par le
+    // propriétaire, niveau 'lecture' ou 'ecriture'.
+    function isValidShare(data) {
+      return data.keys().hasOnly(['ownerUid', 'ownerEmail', 'guestEmail', 'level', 'createdAt']) &&
+             data.ownerUid is string && data.ownerUid.size() > 0 && data.ownerUid.size() <= 128 &&
+             data.guestEmail is string && data.guestEmail.size() > 3 && data.guestEmail.size() <= 200 &&
+             data.level in ['lecture', 'ecriture'] &&
+             (!('ownerEmail' in data) || (data.ownerEmail is string && data.ownerEmail.size() <= 200)) &&
+             (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 64));
+    }
+
+    function shareLevel(ownerUid) {
+      return exists(/databases/$(database)/documents/partages/$(ownerUid + '__' + request.auth.token.email))
+        ? get(/databases/$(database)/documents/partages/$(ownerUid + '__' + request.auth.token.email)).data.level
+        : '';
+    }
+
+    function hasShareRead(userId) {
+      return isSignedIn() && shareLevel(userId) != '';
+    }
+
+    function hasShareWrite(userId) {
+      return isSignedIn() && shareLevel(userId) == 'ecriture';
     }
 
     // Validation helper for user profile
@@ -230,16 +307,16 @@ service cloud.firestore {
 
     // User Profile
     match /users/{userId} {
-      allow get, list: if isOwner(userId);
-      allow create: if isOwner(userId) && isValidId(userId) && isValidUserProfile(incoming());
+      allow get, list: if isOwner(userId) && isAllowedUser();
+      allow create: if isOwner(userId) && isAllowedUser() && isValidId(userId) && isValidUserProfile(incoming());
       // m15 : createdAt IMMUABLE a la mise a jour quand il existe deja —
       // avant, rien n'empechait de le reecrire a chaque connexion. Non requis
       // a la creation : l'app Android ne l'envoie jamais, l'exiger casserait
       // ses creations de profil.
-      allow update: if isOwner(userId) && isValidId(userId) && isValidUserProfile(incoming()) &&
+      allow update: if isOwner(userId) && isAllowedUser() && isValidId(userId) && isValidUserProfile(incoming()) &&
                        (!('createdAt' in existing()) || existing().createdAt == null ||
                         !('createdAt' in incoming()) || incoming().createdAt == existing().createdAt);
-      allow delete: if isOwner(userId);
+      allow delete: if isOwner(userId) && isAllowedUser();
 
       // Cheptel documents subcollection used by Web App
       // SEC : validation compatible import (voir isValidCheptel). La lecture
@@ -247,9 +324,9 @@ service cloud.firestore {
       // de contenu : une suppression ne doit pas etre bloquee par un
       // document ancien mal forme.
       match /cheptel/{docId} {
-        allow read: if isOwner(userId);
-        allow create, update: if isOwner(userId) && isValidCheptel(incoming(), docId);
-        allow delete: if isOwner(userId);
+        allow read: if (isOwner(userId) && isAllowedUser()) || hasShareRead(userId);
+        allow create, update: if ((isOwner(userId) && isAllowedUser()) || hasShareWrite(userId)) && isValidCheptel(incoming(), docId);
+        allow delete: if (isOwner(userId) && isAllowedUser()) || hasShareWrite(userId);
       }
 
       // Rabbits subcollection

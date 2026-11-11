@@ -526,6 +526,14 @@ th.r { white-space: normal; } /* C1 : bat td.r/th.r nowrap pour les en-têtes (r
         <span id="sideAlertBadge" class="chip sm warn" style="display:none">0</span>
       </button>
 
+      <button type="button" class="side-alerts-widget" id="sideNotifBtn" data-act="abvNotifModal" title="Notifications des collaborateurs">
+        <div style="display:flex;align-items:center;gap:8px">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="3.5"/><path d="M3 20c0-3.3 2.7-5.5 6-5.5s6 2.2 6 5.5"/><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8M21 20c0-3-1.7-5-4.2-5.4"/></svg>
+          <span style="font-weight:700;font-size:.85rem">Notifications</span>
+        </div>
+        <span id="sideNotifBadge" class="chip sm warn" style="display:none">0</span>
+      </button>
+
       <button type="button" class="side-alerts-widget" data-act="themeModal" title="Changer le thème visuel" style="margin-bottom:8px">
         <div style="display:flex;align-items:center;gap:8px">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
@@ -1662,6 +1670,7 @@ async function save(kind, obj) {
   // Visibilité d'écriture : file AVANT tentative — un envoi coincé reste visible en attente.
   queuePendingSync({ action: "set", kind, id: obj.id, doc });
   pushToCloud(kind, obj.id, doc, "set");
+  abvNotifyOwnAction(_prevDoc ? "a modifié" : "a ajouté", kind, doc);
   logActivity("Enregistré", `${kind} ${obj.name || obj.label || obj.title || obj.id}`);
   return true;
 }
@@ -1688,6 +1697,7 @@ async function removeDoc(kind, id) {
   // Visibilité d'écriture : file AVANT tentative, comme save().
   queuePendingSync({ action: "delete", kind, id, deletedAt: _deletedAt, serverUpdatedAt: _del && _del.serverUpdatedAt ? _del.serverUpdatedAt : undefined });
   pushToCloud(kind, id, { deletedAt: _deletedAt, serverUpdatedAt: _del && _del.serverUpdatedAt ? _del.serverUpdatedAt : undefined }, "delete");
+  if (_del) abvNotifyOwnAction("a supprimé", kind, _del);
   return true;
 }
 
@@ -3864,6 +3874,7 @@ function render() {
     renderNav();
     updateUserUI();
     updateAlertBadges();
+    abvPaintNotifBadge();
     if (!ready) return;
     const r = route(); const v = VIEWS[r.name] || VIEWS.accueil;
     $("#main").innerHTML = `<div class="wrap">${ABV_SHARED ? abvSharedBanner() : ""}${v(r)}</div>`;
@@ -6601,6 +6612,7 @@ function abvGateThenProceed(user) {
         _abvGateUid = user.uid;
       }
       abvHideBlocked();
+      setTimeout(abvStartNotifWatch, 3000);
       if (!userSession.isLoggedIn || userSession.uid !== user.uid) handleUserAuthenticated(user);
       else ensureCloudSyncListener(user.uid);
     } catch (e) { console.warn("Porte d'accès ABV :", e); abvShowBlocked((user.email || "").toLowerCase(), "error"); }
@@ -6633,6 +6645,7 @@ async function abvSharedSave(kind, obj) {
   const _key = kind + "-" + obj.id; const _ix = ABV_SHARED.docs.findIndex((d) => d.kind + "-" + d.id === _key);
   if (_ix >= 0) ABV_SHARED.docs[_ix] = clean; else ABV_SHARED.docs.push(clean);
   ingest(ABV_SHARED.docs.slice());
+  abvQueueNotif(ABV_SHARED.ownerUid, abvNotifText(_ix >= 0 ? "a modifié" : "a ajouté", kind, clean));
   logActivity("Enregistré (élevage partagé)", `${kind} ${obj.name || obj.label || obj.title || obj.id}`);
   return true;
 }
@@ -6641,7 +6654,9 @@ async function abvSharedRemove(kind, id) {
   if (ABV_SHARED.level !== "ecriture") { toast("🔒 Lecture seule : suppression impossible dans l'élevage de " + (ABV_SHARED.ownerEmail || "un autre éleveur") + "."); return false; }
   try { await fsDeleteCheptelDoc(ABV_SHARED.ownerUid, kind + "-" + id); }
   catch (e) { toast("⛔ Suppression impossible dans l'élevage partagé (" + ((e && (e.code || e.message)) || "erreur") + ") : réessayez."); return false; }
+  const _goneDoc = ABV_SHARED.docs.find((d) => d.kind === kind && String(d.id) === String(id));
   ABV_SHARED.docs = ABV_SHARED.docs.filter((d) => !(d.kind === kind && String(d.id) === String(id)));
+  abvQueueNotif(ABV_SHARED.ownerUid, abvNotifText("a supprimé", kind, _goneDoc || {}));
   ingest(ABV_SHARED.docs.slice());
   return true;
 }
@@ -6708,6 +6723,104 @@ VIEWS.acces = () => {
   return h;
 };
 
+/* ---------- Notifications entre collaborateurs d'un même espace (2026-11-11) ----------
+   Quand deux personnes gèrent le même élevage (propriétaire + invité en
+   écriture, ou propriétaire informé des actions de ses invités), chaque
+   modification faite par l'un crée une notification dans l'espace concerné
+   (users/{ownerUid}/notifications). L'AUTEUR ne voit jamais ses propres
+   notifications : elles sont filtrées partout (liste et badge) et naissent
+   déjà marquées lues par lui. Regroupement anti-spam : les modifications en
+   rafale (import, recalculs) sont résumées en une seule notification. */
+let ABV_NOTIFS = []; /* [{spaceUid, spaceLabel, items:[docs]}] */
+let ABV_NOTIF_UNREAD = 0;
+let _abvNotifTimer = null;
+let _abvMySharesCache = null; /* mes partages (pour savoir si mon espace est partagé) */
+const ABV_KIND_LABEL = { rabbit: "un lapin", mating: "une saillie", weight: "une pesée", treatment: "un soin", item: "un article de stock", feed: "une ration d'aliment", tx: "une transaction", batch: "un lot d'engraissement", reminder: "un rappel", cage: "une cage" };
+async function fsSetUserDoc(ownerUid, coll, id, obj) { await fsRest("PATCH", "/users/" + encodeURIComponent(ownerUid) + "/" + coll + "/" + encodeURIComponent(id), { fields: fsEncode(obj) }); }
+async function fsQueryUserColl(ownerUid, coll, limit) { const _res = await fsRest("POST", "/users/" + encodeURIComponent(ownerUid) + "/" + coll + ":runQuery", { structuredQuery: { from: [{ collectionId: coll }], orderBy: [{ field: { fieldPath: "at" }, direction: "DESCENDING" }], limit: limit || 30 } }); const _rows = await _res.json().catch(() => []); const _out = []; for (const _row of (Array.isArray(_rows) ? _rows : [])) { if (!_row || !_row.document || !_row.document.fields) continue; const _o = fsDecode(_row.document.fields); try { Object.defineProperty(_o, "_docId", { value: String(_row.document.name || "").split("/").pop(), enumerable: false }); } catch (e) {} _out.push(_o); } return _out; }
+function abvNotifText(verb, kind, obj) { const _lbl = ABV_KIND_LABEL[kind] || "une fiche"; const _nm = (obj && (obj.name || obj.title || obj.label || obj.code)) || ""; return verb + " " + _lbl + (_nm ? " : " + _nm : ""); }
+let _abvNotifQueue = [];
+let _abvNotifFlushTimer = null;
+function abvQueueNotif(spaceUid, text) {
+  if (!spaceUid || !userSession.uid) return;
+  _abvNotifQueue.push({ spaceUid, text });
+  if (_abvNotifFlushTimer) clearTimeout(_abvNotifFlushTimer);
+  _abvNotifFlushTimer = setTimeout(abvFlushNotifs, 6000);
+}
+async function abvFlushNotifs() {
+  _abvNotifFlushTimer = null;
+  const _q = _abvNotifQueue.splice(0); if (!_q.length) return;
+  const _bySpace = {};
+  for (const _n of _q) { (_bySpace[_n.spaceUid] = _bySpace[_n.spaceUid] || []).push(_n.text); }
+  for (const [_space, _texts] of Object.entries(_bySpace)) {
+    const _final = _texts.length > 3 ? ["a effectué " + _texts.length + " modifications dans l'élevage (ajouts, mises à jour ou suppressions groupées)"] : _texts;
+    for (const _t of _final) {
+      try { await fsSetUserDoc(_space, "notifications", uid(), { authorUid: userSession.uid, authorEmail: abvMyEmail(), text: _t, kind: "activite", at: new Date().toISOString(), readBy: [userSession.uid] }); }
+      catch (e) { console.warn("Notification non écrite :", e); }
+    }
+  }
+}
+async function abvNotifyOwnAction(verb, kind, obj) {
+  /* Mes propres actions ne notifient que si MON espace est partagé. */
+  try {
+    if (_abvMySharesCache === null) { _abvMySharesCache = await fsQueryRoot("partages", "ownerUid", userSession.uid).catch(() => []); }
+    if (_abvMySharesCache && _abvMySharesCache.length) abvQueueNotif(userSession.uid, abvNotifText(verb, kind, obj));
+  } catch (e) {}
+}
+async function abvFetchNotifs() {
+  if (!userSession.uid || userSession.isLocalProfile) return;
+  try {
+    if (_abvMySharesCache === null) _abvMySharesCache = await fsQueryRoot("partages", "ownerUid", userSession.uid).catch(() => []);
+    const _in = await fsQueryRoot("partages", "guestEmail", abvMyEmail()).catch(() => []);
+    const _spaces = [];
+    if (_abvMySharesCache && _abvMySharesCache.length) _spaces.push({ uid: userSession.uid, label: "Votre élevage" });
+    for (const _s of _in) _spaces.push({ uid: _s.ownerUid, label: "Élevage de " + (_s.ownerEmail || "un collaborateur") });
+    const _out = []; let _unread = 0;
+    for (const _sp of _spaces) {
+      const _items = await fsQueryUserColl(_sp.uid, "notifications", 30).catch(() => []);
+      const _vis = _items.filter((_n) => _n.authorUid !== userSession.uid);
+      for (const _n of _vis) if (!Array.isArray(_n.readBy) || !_n.readBy.includes(userSession.uid)) _unread++;
+      _out.push({ spaceUid: _sp.uid, spaceLabel: _sp.label, items: _vis });
+    }
+    ABV_NOTIFS = _out; ABV_NOTIF_UNREAD = _unread;
+    abvPaintNotifBadge();
+  } catch (e) { console.warn("Notifications :", e); }
+}
+function abvPaintNotifBadge() {
+  const _b = document.getElementById("sideNotifBadge");
+  if (_b) { if (ABV_NOTIF_UNREAD > 0) { _b.textContent = ABV_NOTIF_UNREAD > 99 ? "99+" : String(ABV_NOTIF_UNREAD); _b.style.display = "inline-flex"; } else _b.style.display = "none"; }
+}
+function abvStartNotifWatch() {
+  abvFetchNotifs();
+  if (_abvNotifTimer) return;
+  _abvNotifTimer = setInterval(() => { if (userSession.isLoggedIn && !ABV_SHARED) abvFetchNotifs(); else if (ABV_SHARED) abvFetchNotifs(); }, 60000);
+}
+async function abvMarkNotifsRead() {
+  let _changed = false;
+  for (const _sp of ABV_NOTIFS) {
+    for (const _n of _sp.items) {
+      if (Array.isArray(_n.readBy) && _n.readBy.includes(userSession.uid)) continue;
+      const _rb = Array.isArray(_n.readBy) ? _n.readBy.slice() : [];
+      _rb.push(userSession.uid); _n.readBy = _rb; _changed = true;
+      try { await fsSetUserDoc(_sp.spaceUid, "notifications", _n._docId, { authorUid: _n.authorUid, authorEmail: _n.authorEmail || "", text: _n.text || "", kind: _n.kind || "activite", at: _n.at || new Date().toISOString(), readBy: _rb }); } catch (e) {}
+    }
+  }
+  if (_changed) { ABV_NOTIF_UNREAD = 0; abvPaintNotifBadge(); }
+}
+function abvNotifModal() {
+  const _fmt = (iso) => { try { const _d = new Date(iso); return _d.toLocaleDateString("fr-FR", { day: "2-digit", month: "short" }) + " " + _d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }); } catch (e) { return ""; } };
+  let _h = `<p class="hint">Les modifications faites par les autres personnes qui gèrent le même élevage que vous. Vos propres modifications ne vous sont jamais notifiées.</p>`;
+  let _any = false;
+  for (const _sp of ABV_NOTIFS) {
+    if (!_sp.items.length) continue;
+    _any = true;
+    _h += `<h4 style="margin:14px 0 6px">${esc(_sp.spaceLabel)}</h4>` + _sp.items.map((_n) => `<div style="padding:8px 0;border-bottom:1px solid var(--line,#2a332d)"><div>${esc(_n.authorEmail || "Un collaborateur")} ${esc(_n.text || "")}</div><div class="hint">${_fmt(_n.at)}${Array.isArray(_n.readBy) && _n.readBy.includes(userSession.uid) ? "" : " • <b>nouveau</b>"}</div></div>`).join("");
+  }
+  if (!_any) _h += `<p>Aucune notification pour le moment. Quand un collaborateur modifiera un élevage que vous gérez ensemble, ce sera affiché ici.</p>`;
+  sheet("🔔 Notifications des collaborateurs", _h);
+  abvMarkNotifsRead();
+}
+
 const A = {
   close: closeModal,
   abvRefreshAccess: () => { ABV_ACC = null; render(); abvLoadAccess(true); },
@@ -6719,9 +6832,10 @@ const A = {
   abvToggleLevel: async (el) => { const _g = el.dataset.guest; const _row = ((ABV_ACC && ABV_ACC.myShares) || []).find((x) => x.guestEmail === _g); if (!_row) { toast("Partage introuvable : actualisez la page."); return; } const _nl = _row.level === "ecriture" ? "lecture" : "ecriture"; await fsSetDocRoot("partages", userSession.uid + "__" + _g, { ownerUid: userSession.uid, ownerEmail: abvMyEmail(), guestEmail: _g, level: _nl, createdAt: _row.createdAt || new Date().toISOString() }); toast("Partage avec " + _g + " : " + (_nl === "ecriture" ? "lecture + écriture" : "lecture seule") + "."); ABV_ACC = null; abvLoadAccess(true); },
   abvOpenShare: (el) => abvEnterShare(el.dataset.owner, el.dataset.email, el.dataset.level),
   abvExitShare: () => abvExitShare(),
+  abvNotifModal: () => { abvFetchNotifs().then(() => abvNotifModal()); },
 
   overlay: (el, e) => { if (e.target === el) closeModal(); },
-  more: () => sheet("Navigation", `<div class="morelist">${NAV.filter((n) => !BOTTOM.includes(n.id)).map((n) => `<a class="nav-a" href="#${n.id}" data-act="close">${ICON[n.icon]}<span>${n.label}</span></a>`).join("")}<a class="nav-a" href="#cages" data-act="close">${ICON.box}<span>Registre des cages</span></a><button class="btn ghost" data-act="alertsCenterModal" style="justify-content:flex-start;padding:10px 12px;font-size:1rem;color:var(--ink)">${ICON.bell}<span>Centre d'alertes & notifications</span></button><button class="btn ghost" data-act="themeModal" style="justify-content:flex-start;padding:10px 12px;font-size:1rem;color:var(--ink)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg><span>Changer de thème visuel</span></button><button class="btn ghost" data-act="accountModal" style="justify-content:flex-start;padding:10px 12px;font-size:1rem;color:var(--ink)">${ICON.cloud}<span>Compte Google & Synchronisation</span></button></div>`),
+  more: () => sheet("Navigation", `<div class="morelist">${NAV.filter((n) => !BOTTOM.includes(n.id)).map((n) => `<a class="nav-a" href="#${n.id}" data-act="close">${ICON[n.icon]}<span>${n.label}</span></a>`).join("")}<a class="nav-a" href="#cages" data-act="close">${ICON.box}<span>Registre des cages</span></a><button class="btn ghost" data-act="alertsCenterModal" style="justify-content:flex-start;padding:10px 12px;font-size:1rem;color:var(--ink)">${ICON.bell}<span>Centre d'alertes & notifications</span></button><button class="btn ghost" data-act="abvNotifModal" style="justify-content:flex-start;padding:10px 12px;font-size:1rem;color:var(--ink)">${ICON.users}<span>Notifications des collaborateurs</span></button><button class="btn ghost" data-act="themeModal" style="justify-content:flex-start;padding:10px 12px;font-size:1rem;color:var(--ink)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg><span>Changer de thème visuel</span></button><button class="btn ghost" data-act="accountModal" style="justify-content:flex-start;padding:10px 12px;font-size:1rem;color:var(--ink)">${ICON.cloud}<span>Compte Google & Synchronisation</span></button></div>`),
   ui: (el) => { if (el.dataset.k !== "rpage") ui.rpage = 1; if (el.dataset.k !== "txpage") ui.txpage = 1; if (el.dataset.k !== "spage") ui.spage = 1; ui[el.dataset.k] = el.dataset.v; render(); if (el.dataset.k === "q") $("#q")?.focus(); },
   resetTxDates: () => { ui.txFrom = ""; ui.txTo = ""; ui.txpage = 1; render(); }, /* M14 */
   budget: () => { let _b = {}; try { _b = JSON.parse(localStorage.getItem("abvfarm_budgets") || "{}"); } catch (e) {} form({ title: "Budgets mensuels par poste (FCFA)", fields: ["Aliment", "Santé", "Matériel", "Main-d'œuvre", "Autre dépense"].map((c) => ({ k: c, label: `Budget ${c}`, type: "number", min: 0, def: _b[c] || "" })), onSubmit: async (v) => { try { localStorage.setItem("abvfarm_budgets", JSON.stringify(v)); } catch (e) { toast("⛔ Budgets NON enregistrés : stockage local indisponible. Le formulaire reste ouvert."); return false; } closeModal(); toast("Budgets enregistrés"); render(); return true; } }); },

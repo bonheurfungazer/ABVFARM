@@ -961,6 +961,8 @@ if (!listenerLastError || typeof listenerLastError !== "object") listenerLastErr
 let listenerLastEarlyReturn = null;
 let listenerPersistenceError = null;
 let listenerAttempts = 0;
+let listenerPollPausedUntil = 0; /* Correctif 2026-11-16 (rest-429) : fin de la pause après un 429 (timestamp ms) — aucun sondage avant cette heure. */
+let listenerPollFn = null; /* Correctif 2026-11-16 (rest-429) : sondage courant, pour relancer une lecture au retour au premier plan (C4). */
 let listenerEmptySnapshotStreak = 0; /* Correctif 2026-11-16 (B1) : snapshots cloud vides consécutifs — voir processCloudSnapshotDocs. */
 let _persistWarned = false; /* Correctif 2026-11-16 (B5) : alerte de persistance locale, une fois par session. */
 let listenerStopped = false;
@@ -2010,6 +2012,7 @@ function probeLineText() {
 }
 async function probeServerContact() {
   const _now = () => new Date().toISOString();
+  if (listenerPollPausedUntil && Date.now() < listenerPollPausedUntil) return { ok: false, code: "rest-429 (pause 15 min)" }; /* Correctif 2026-11-16 (rest-429) : pas de lecture pendant la pause. */
   if (!userSession.isLoggedIn || !window.firebaseDb || !userSession.uid) {
     const _reason = !userSession.isLoggedIn ? "non connecté" : (!window.firebaseDb ? "base cloud indisponible" : "identifiant utilisateur manquant");
     const _state = { status: "unavailable", at: _now(), count: null, code: _reason };
@@ -2197,35 +2200,49 @@ function ensureCloudSyncListener(uid) {
     let _pollBusy = false;
     /* Sondage REST (2026-11-08) : remplace l'ancien écouteur temps réel du
        SDK, dont le canal est coupé par les réseaux intermédiaires. Cycle
-       immédiat à l'installation, puis toutes les 45 s tant que l'écoute est
-       installée. unsubscribeSnapshot conserve le contrat d'arrêt des
+       immédiat à l'installation, puis toutes les 5 min tant que l'écoute est
+       installée. Correctif 2026-11-16 (rest-429) : 45 s -> 5 min — à 45 s,
+       200 fiches relues à chaque sondage = ~16 000 lectures/heure, le quota
+       gratuit Spark (50 000 lectures/jour) était atteint en ~3 h d'appli
+       ouverte. Le sondage est aussi sauté quand l'appli est cachée
+       (document.hidden) et pendant 15 min après un 429, au lieu de
+       marteler le quota. unsubscribeSnapshot conserve le contrat d'arrêt des
        appelants : l'invoquer stoppe le sondage (clearInterval). */
     const _poll = async () => {
       if (_listenerGen !== listenerGeneration) return;
       if (_pollBusy) return;
+      if (document.hidden) return; /* Correctif rest-429 : pas de lecture quand l'appli n'est pas visible. */
+      if (listenerPollPausedUntil && Date.now() < listenerPollPausedUntil) return; /* Correctif rest-429 : pause après un 429. */
       _pollBusy = true;
       try {
         const _docs = await fsRunQueryCheptel(uid);
         if (_listenerGen !== listenerGeneration) return;
+        listenerPollPausedUntil = 0; /* Correctif rest-429 : un sondage réussi lève la pause. */
         processCloudSnapshotDocs(_docs, uid);
       } catch (err) {
         if (_listenerGen !== listenerGeneration) return;
         console.warn("Cloud poll notice:", err);
         /* Une erreur de sondage ne fait pas passer le jeu local pour
            synchronisé ; l'indicateur reste en erreur, comme avec l'ancien
-           gestionnaire d'erreur de l'écouteur. Le sondage n'est PAS arrêté
-           pour autant : les erreurs réseau sont transitoires et le cycle
-           suivant réessaie. */
+           gestionnaire d'erreur de l'écouteur. Les erreurs réseau restent
+           transitoires et le cycle suivant réessaie — SAUF le 429 (quota
+           dépassé) : réessayer aggraverait le blocage, on fait donc une
+           pause de 15 min avant la prochaine lecture. */
         cloudLoginError = (err && (err.code || err.message)) || "erreur de synchronisation cloud";
+        if (err && (err.status === 429 || err.code === "rest-429")) {
+          listenerPollPausedUntil = Date.now() + 15 * 60 * 1000;
+          cloudLoginError = "rest-429 (quota atteint — reprise dans 15 min)";
+        }
         try { localStorage.setItem(lastSyncErrorKey(), cloudLoginError); } catch (e2) {}
         setListenerLastError(cloudLoginError);
         listenerAttempts += 1;
         updateUserUI();
       } finally { _pollBusy = false; }
     };
-    unsubscribeSnapshot = () => { if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; } };
+    unsubscribeSnapshot = () => { if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; } listenerPollFn = null; };
+    listenerPollFn = _poll;
     _poll();
-    _pollTimer = setInterval(_poll, 45000);
+    _pollTimer = setInterval(_poll, 5 * 60 * 1000);
     listenerInstalledAt = Date.now();
     /* Volet C : chien de garde à 120 s après cette installation réussie (correctif 2026-11-16 : 30 s abandonnait les sondages lents). */
     armListenerWatchdog(_listenerGen, listenerLastServerAt, listenerCacheCount);
@@ -2461,6 +2478,8 @@ window.addEventListener("offline", () => {
    relançaient la synchro ; après une longue veille avec l'app ouverte, rien ne
    rejouait la file ni ne vérifiait l'écoute au retour. */
 document.addEventListener("visibilitychange", () => { if (!document.hidden) { isOnline = navigator.onLine; if (isOnline && !window.firebaseAuth) { try { initFirebaseSync(); } catch (e) {} } if (isOnline) retryPendingSync(); const _vUid = (userSession.isLoggedIn && userSession.uid) || null; if (_vUid && canReinstallListener(_vUid)) ensureCloudSyncListener(_vUid); } });
+/* Correctif 2026-11-16 (rest-429, C4) : retour au premier plan -> un sondage immédiat si une écoute est installée. Sans cela, l'intervalle de 5 min retarderait la synchro jusqu'à 5 min après chaque réouverture ; avec cela, elle revient dès le retour, comme avant. */
+document.addEventListener("visibilitychange", () => { if (!document.hidden && listenerPollFn) { try { listenerPollFn(); } catch (e) {} } });
 window.addEventListener("pageshow", () => { if (navigator.onLine) retryPendingSync(); });
 /* m98 : rejeu périodique de la file (5 min) — un échec transitoire en restant
    en ligne ne bloque plus la file jusqu'à la prochaine sauvegarde, bascule
@@ -4642,7 +4661,7 @@ function remRow(r) {
 }
 
 /* Version affichée sur l'écran Données (diagnostic) — à incrémenter à chaque correctif déployé. */
-const ABV_APP_VERSION = "2026-11-16";
+const ABV_APP_VERSION = "2026-11-16b";
 VIEWS.donnees = () => {
   afterHooks.push(() => { const _cq = $("#cageq"); if (_cq) _cq.addEventListener("input", () => { const _v = _cq.value; const _p = _cq.selectionStart; debounceSearch("cageq", () => { ui.cageq = _v; render(); const _nx = $("#cageq"); if (_nx) { _nx.focus(); try { _nx.setSelectionRange(_p, _p); } catch (e) {} } }); }); }); /* m53 : recherche dans le registre des cages */
   const n = Object.values(S).reduce((s, l) => s + l.length, 0);

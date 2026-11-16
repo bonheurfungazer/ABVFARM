@@ -961,6 +961,8 @@ if (!listenerLastError || typeof listenerLastError !== "object") listenerLastErr
 let listenerLastEarlyReturn = null;
 let listenerPersistenceError = null;
 let listenerAttempts = 0;
+let listenerEmptySnapshotStreak = 0; /* Correctif 2026-11-16 (B1) : snapshots cloud vides consécutifs — voir processCloudSnapshotDocs. */
+let _persistWarned = false; /* Correctif 2026-11-16 (B5) : alerte de persistance locale, une fois par session. */
 let listenerStopped = false;
 /* Volet C — réinstallation gardée + chien de garde (2026-11-04) : génération
    (invalide les rappels d'une ancienne installation), uid de l'écoute installée,
@@ -1052,7 +1054,7 @@ function armListenerWatchdog(gen, serverAtInstall, cacheAtInstall) {
     unsubscribeSnapshot = null;
     ensureCloudSyncListener(listenerUid);
     probeServerContact();
-  }, 30000);
+  }, 120000); /* Correctif 2026-11-16 : 30 s → 120 s. Sur LTE lente (~5 Ko/s), le cheptel complet (~150 Ko) met 30 à 60 s à descendre : le chien de garde à 30 s abandonnait le sondage en vol et invalidait son résultat, ce qui pouvait boucler sans jamais synchroniser. */
 }
 /* Section 3 : verrou retryPendingSync (voir retryPendingSync ci-dessous). */
 let retryPendingSyncRunning = false;
@@ -1782,9 +1784,18 @@ function fsDecode(fields) {
    comparaisons d'égalité — il ne pollue ni le local ni les renvois cloud). */
 async function fsRunQueryCheptel(uid) {
   const _res = await fsRest("POST", "/users/" + encodeURIComponent(uid) + ":runQuery", { structuredQuery: { from: [{ collectionId: "cheptel" }] } });
-  const _rows = await _res.json().catch(() => []);
+  /* Correctif 2026-11-16 (panne du 15 nov.) : une réponse illisible ou
+     incomplète n'est PLUS un cheptel vide — c'est une erreur. Avant,
+     `.json().catch(() => [])` transformait n'importe quelle réponse tronquée
+     (LTE lente) en snapshot vide « réussi », et le balayage de
+     processCloudSnapshotDocs effaçait alors tout le local et plantait un
+     tombstone par fiche (200 fiches invisibles pendant 90 jours). Un tableau
+     vide RÉEL (cheptel vraiment vide) reste un tableau : il passe. */
+  let _rows;
+  try { _rows = await _res.json(); } catch (e) { throw fsRestError("rest-reponse-illisible"); }
+  if (!Array.isArray(_rows)) throw fsRestError("rest-reponse-invalide");
   const _docs = [];
-  for (const _row of (Array.isArray(_rows) ? _rows : [])) {
+  for (const _row of _rows) {
     if (!_row || !_row.document || !_row.document.fields) continue;
     const _obj = fsDecode(_row.document.fields);
     try { Object.defineProperty(_obj, "_docId", { value: String(_row.document.name || "").split("/").pop(), enumerable: false }); } catch (e) {}
@@ -2068,6 +2079,25 @@ function processCloudSnapshotDocs(cloudDocs, uid) {
   let _pend = []; try { _pend = JSON.parse(localStorage.getItem(pendingSyncKey(uid)) || "[]"); } catch (e) {}
   const _pendKeys = new Set(_pend.map((x) => x.kind + "-" + x.id));
   const _pendMap = {}; _pend.forEach((x) => { _pendMap[x.kind + "-" + x.id] = x; });
+  /* Correctif 2026-11-16 (panne du 15 nov.) : un snapshot vide alors que des
+     fiches sont connues (cloudIds non vide) n'est JAMAIS une preuve de
+     suppression — c'est presque toujours une lecture incomplète ou un incident
+     serveur transitoire. Avant, ce cas balayait tout le local et plantait un
+     tombstone par fiche. On exige donc 2 snapshots vides CONSÉCUTIFS avant
+     d'accepter une disparition massive ; en attendant, on ne supprime rien,
+     on n'avance pas cloudIds, et on ne fait pas avancer « dernière synchro ». */
+  if (!cloudDocs.length && _seen.length) {
+    listenerEmptySnapshotStreak += 1;
+    console.warn("Listener : snapshot cloud vide alors que " + _seen.length + " fiche(s) connue(s) — balayage annulé (tentative " + listenerEmptySnapshotStreak + "/2).");
+    if (listenerEmptySnapshotStreak < 2) {
+      try { logActivity("Synchro", "Snapshot cloud vide ignoré — " + _seen.length + " fiche(s) conservée(s) en attendant confirmation"); } catch (e) {}
+      updateUserUI();
+      return;
+    }
+    try { toast("⚠️ Le cloud ne contient plus aucune fiche (confirmé par 2 lectures) : les fiches locales correspondantes seront retirées."); } catch (e) {}
+  } else {
+    listenerEmptySnapshotStreak = 0;
+  }
   for (const _key of _seen) {
     if (_cur.has(_key)) continue;
     const _kKind = _key.slice(0, _key.indexOf("-")); const _kId = _key.slice(_key.indexOf("-") + 1);
@@ -2094,11 +2124,21 @@ function processCloudSnapshotDocs(cloudDocs, uid) {
          plus récent, c'est un conflit conservé + signalé, et la version
          locale reste en place jusqu'à résolution explicite. */
       if (_pendKeys.has(_key)) { const _pl = _pendMap[_key]; const _localTs = (_pl && ((_pl.doc && _pl.doc.updatedAt) || _pl.deletedAt)) || (all[_key] && all[_key].updatedAt) || ""; /* m94 : pour une suppression en attente, _pl.doc est absent et la fiche locale est déjà effacée : sans deletedAt, la comparaison était vide et le conflit suppression-vs-édition restait invisible. */ if (_localTs && d.updatedAt && syncArbTs(d) > syncTs(_localTs)) queueSyncConflict(d.kind, d.id, _localTs, d.updatedAt, (_pl && _pl.action) || "set"); return; }
-      /* C17 : un tombstone local plus récent que la version cloud reçue
-         signifie que la suppression connue ici gagne : on ne réinsère pas
-         la fiche, le conflit est signalé. */
+      /* Correctif 2026-11-16 (panne du 15 nov.) : un tombstone ne bloque la
+         fiche cloud QUE s'il prouve une suppression réelle de l'utilisateur
+         (entrée « delete » en attente pour cette fiche). Sinon, le tombstone
+         vient du balayage (snapshot vide) ou d'une suppression déjà propagée
+         — et la fiche EXISTE dans le cloud : on lève le tombstone et on
+         accepte la fiche. Avant, chaque fiche était rejetée silencieusement
+         pendant 90 jours. Une suppression en attente n'atteint jamais ce
+         point : la branche ci-dessus (file d'attente) retourne avant. */
       const _tb = getTombstone(d.kind, d.id, uid);
-      if (_tb && syncArbTs(d) && syncTs(_tb.deletedAt) >= syncArbTs(d)) { queueSyncConflict(d.kind, d.id, _tb.deletedAt, d.updatedAt || "", "delete"); return; }
+      if (_tb && syncArbTs(d) && syncTs(_tb.deletedAt) >= syncArbTs(d)) {
+        const _plDel = _pendMap[d.kind + "-" + d.id];
+        if (_plDel && _plDel.action === "delete") { queueSyncConflict(d.kind, d.id, _tb.deletedAt, d.updatedAt || "", "delete"); return; }
+        clearTombstone(d.kind, d.id, uid);
+        try { logActivity("Synchro", "Tombstone levé pour " + d.kind + "-" + d.id + " — fiche cloud acceptée"); } catch (e) {}
+      }
       const _local = all[_key];
       /* C20 : supériorité STRICTE du cloud exigée (arbitrage sur le temps
          serveur quand il existe, C16) ; un horodatage absent d'un côté
@@ -2115,10 +2155,14 @@ function processCloudSnapshotDocs(cloudDocs, uid) {
      les suppressions cloud n'étaient plus ré-appliquées correctement. */
   if (updated) { /* M91 : avant, tout snapshot (même sans changement) ré-ingérait et re-rendait tout le cheptel. Aucun changement effectif = on avance seulement cloudIds (branche else). */
     if (setLocalData(all)) {
+      listenerPersistenceError = null; _persistWarned = false; /* Correctif 2026-11-16 (B5) : persistance revenue — on efface l'alerte. */
       try { localStorage.setItem(cloudIdsKey(uid), JSON.stringify([..._cur])); } catch (e) {}
       ingest(Object.values(all));
     } else {
       try { localStorage.setItem(lastSyncErrorKey(uid), "stockage local indisponible (quota)"); } catch (e) {}
+      /* Correctif 2026-11-16 (B5) : l'échec de persistance était invisible (console seule). Il est désormais affiché sur l'écran Données (via listenerPersistenceError) et signalé une fois par session. */
+      listenerPersistenceError = "stockage local indisponible (quota)";
+      if (!_persistWarned) { _persistWarned = true; try { toast("⚠️ Stockage local indisponible : les données cloud ne peuvent pas être enregistrées sur cet appareil — exportez une sauvegarde et libérez de l'espace."); } catch (e) {} }
       console.warn("Listener : persistance locale impossible — cloudIds non avancé, le snapshot sera rejoué.");
     }
   } else {
@@ -2183,7 +2227,7 @@ function ensureCloudSyncListener(uid) {
     _poll();
     _pollTimer = setInterval(_poll, 45000);
     listenerInstalledAt = Date.now();
-    /* Volet C : chien de garde à 30 s après cette installation réussie. */
+    /* Volet C : chien de garde à 120 s après cette installation réussie (correctif 2026-11-16 : 30 s abandonnait les sondages lents). */
     armListenerWatchdog(_listenerGen, listenerLastServerAt, listenerCacheCount);
   } catch (e) {
     console.warn("Cloud listener error:", e);
@@ -4597,6 +4641,8 @@ function remRow(r) {
   return `<div class="li rem-row"><button class="ico ${r.done ? "ok" : n < 0 ? "bad" : ""}" style="border:0;cursor:pointer" data-act="remtoggle" data-id="${esc(r.id)}" aria-label="${r.done ? "Marquer à faire" : "Marquer fait"}">${r.done ? ICON.check : ICON.bell}</button><div class="grow"><div class="t" style="${r.done ? "text-decoration:line-through;opacity:.6" : ""}">${esc(r.title)}</div><div class="d">${fmtDate(r.due)}${r.done ? "" : ` · ${relDay(n)}`}</div>${r.desc ? `<div class="d">${esc(r.desc)}</div>` : ""}</div><span class="actions">${prioChip(r.prio)}<button class="btn sm ghost" data-act="editrem" data-id="${esc(r.id)}" aria-label="Modifier le rappel ${esc(r.title || "")}">${ICON.edit}</button><button class="btn sm ghost" data-act="del" data-kind="reminder" data-id="${esc(r.id)}" aria-label="Supprimer le rappel ${esc(r.title || "")}">${ICON.trash}</button></span></div>`;
 }
 
+/* Version affichée sur l'écran Données (diagnostic) — à incrémenter à chaque correctif déployé. */
+const ABV_APP_VERSION = "2026-11-16";
 VIEWS.donnees = () => {
   afterHooks.push(() => { const _cq = $("#cageq"); if (_cq) _cq.addEventListener("input", () => { const _v = _cq.value; const _p = _cq.selectionStart; debounceSearch("cageq", () => { ui.cageq = _v; render(); const _nx = $("#cageq"); if (_nx) { _nx.focus(); try { _nx.setSelectionRange(_p, _p); } catch (e) {} } }); }); }); /* m53 : recherche dans le registre des cages */
   const n = Object.values(S).reduce((s, l) => s + l.length, 0);
@@ -4611,6 +4657,7 @@ VIEWS.donnees = () => {
     <div class="actions" style="margin:8px 0"><button class="btn sm" data-act="retrySync">Renvoyer maintenant</button></div>
     <p class="hint" style="margin-top:10px">Conflits de versions : résolus <b>automatiquement</b> — si la même fiche est modifiée sur deux appareils, <b>la version la plus récente gagne</b>, des deux côtés. Aucune action requise.${(() => { const _a = getAutoResolved().length; return _a ? ` ${_a} résolution(s) récente(s) : détail dans le Journal d'activité ci-dessous.` : ""; })()}</p>
     ${(() => { const _st = getSyncStatus(); return (_st.lastError ? `<p class="hint" style="margin-top:8px">Dernière erreur : ${esc(_st.lastError)}</p>` : "") + (_st.storagePct >= 80 ? `<p style="margin-top:8px"><b style="color:var(--warn)">⚠️ Stockage local à ${_st.storagePct} % : exportez une sauvegarde.</b></p>` : `<p class="hint" style="margin-top:8px">Stockage local : ${Math.round(_st.storageBytes / 1024)} Ko (${_st.storagePct} %).</p>`); })()}
+    <p class="hint" style="margin-top:8px">${(() => { let _nCloud = 0, _nTb = 0; try { const _ci = JSON.parse(localStorage.getItem(cloudIdsKey()) || "[]"); _nCloud = Array.isArray(_ci) ? _ci.length : 0; } catch (e) {} try { _nTb = getTombstones().length; } catch (e) {} return `Version de l'appli : ${ABV_APP_VERSION} · Fiches connues du cloud : ${_nCloud} · Suppressions mémorisées : ${_nTb}`; })()}</p>
     <p style="margin-top:12px"><span id="probeServerStatus">${esc(probeLineText())}</span></p>
     <div class="actions" style="margin:8px 0"><button class="btn sm" data-act="probeServer">Vérifier le contact serveur</button></div>
     <p style="margin-top:12px">Écoute cloud : ${esc(listenerStatusText())}</p>
@@ -5467,7 +5514,7 @@ function accountModal() {
           const _pendSet2 = new Set(getPendingSyncList().map((x) => x.kind + "-" + x.id));
           /* C17 : clés déjà vues dans le cloud (pour le push ci-dessous). */
           let _seenSync = new Set(); try { _seenSync = new Set(JSON.parse(localStorage.getItem(cloudIdsKey()) || "[]")); } catch (e) {}
-          for (const [_k, _cd] of Object.entries(_cloud)) { if (_pendDelKeys.has(_k)) continue; const _loc = _all2[_k]; if (_pendSet2.has(_k)) { const _pl2 = getPendingSyncList().find((x) => x.kind + "-" + x.id === _k); const _lt2 = (_pl2 && _pl2.doc && _pl2.doc.updatedAt) || (_loc && _loc.updatedAt) || ""; if (_lt2 && _cd.updatedAt && syncTs(_cd.updatedAt) > syncTs(_lt2)) { /* LWW : cloud plus récent -> l'entrée en attente est abandonnée et la version cloud est acceptée (pas de continue : la fusion ci-dessous l'applique). */ try { localStorage.setItem(pendingSyncKey(), JSON.stringify(getPendingSyncList().filter((x) => x.kind + "-" + x.id !== _k))); } catch (e) {} logAutoResolved(_cd.kind, _cd.id, "cloud", _lt2, _cd.updatedAt, (_pl2 && _pl2.action) || "set"); } else { continue; } } /* C17 : tombstone plus récent que la version cloud : la suppression gagne, on ne récupère pas la fiche. */ const _tbS = getTombstone(_cd.kind, _cd.id); if (_tbS && syncTs(_cd.updatedAt) && syncTs(_tbS.deletedAt) >= syncTs(_cd.updatedAt)) continue; /* C20 : supériorité STRICTE du cloud ; horodatage absent = conflit signalé, pas un blanc-seing. */ if (!_loc) { _all2[_k] = _cd; _pulled++; } else if (!_loc.updatedAt || !_cd.updatedAt) { /* Horodatages incomparables et rien en attente : on conserve le local ; la prochaine sauvegarde portera un horodatage complet. */ } else if (syncTs(_cd.updatedAt) > syncTs(_loc.updatedAt)) { _all2[_k] = _cd; _pulled++; } }
+          for (const [_k, _cd] of Object.entries(_cloud)) { if (_pendDelKeys.has(_k)) continue; const _loc = _all2[_k]; if (_pendSet2.has(_k)) { const _pl2 = getPendingSyncList().find((x) => x.kind + "-" + x.id === _k); const _lt2 = (_pl2 && _pl2.doc && _pl2.doc.updatedAt) || (_loc && _loc.updatedAt) || ""; if (_lt2 && _cd.updatedAt && syncTs(_cd.updatedAt) > syncTs(_lt2)) { /* LWW : cloud plus récent -> l'entrée en attente est abandonnée et la version cloud est acceptée (pas de continue : la fusion ci-dessous l'applique). */ try { localStorage.setItem(pendingSyncKey(), JSON.stringify(getPendingSyncList().filter((x) => x.kind + "-" + x.id !== _k))); } catch (e) {} logAutoResolved(_cd.kind, _cd.id, "cloud", _lt2, _cd.updatedAt, (_pl2 && _pl2.action) || "set"); } else { continue; } } /* Correctif 2026-11-16 (panne du 15 nov.) : même règle que dans le listener — un tombstone ne bloque la fiche cloud que s'il prouve une suppression réelle en attente. Sinon (tombstone issu du balayage), on le lève et on récupère la fiche. Une suppression en attente a déjà fait « continue » plus haut. */ const _tbS = getTombstone(_cd.kind, _cd.id); if (_tbS && syncTs(_cd.updatedAt) && syncTs(_tbS.deletedAt) >= syncTs(_cd.updatedAt)) { const _plDelS = getPendingSyncList().find((x) => x.kind === _cd.kind && String(x.id) === String(_cd.id) && x.action === "delete"); if (_plDelS) continue; clearTombstone(_cd.kind, _cd.id); try { logActivity("Synchro", "Tombstone levé pour " + _cd.kind + "-" + _cd.id + " — fiche cloud acceptée"); } catch (e) {} } /* C20 : supériorité STRICTE du cloud ; horodatage absent = conflit signalé, pas un blanc-seing. */ if (!_loc) { _all2[_k] = _cd; _pulled++; } else if (!_loc.updatedAt || !_cd.updatedAt) { /* Horodatages incomparables et rien en attente : on conserve le local ; la prochaine sauvegarde portera un horodatage complet. */ } else if (syncTs(_cd.updatedAt) > syncTs(_loc.updatedAt)) { _all2[_k] = _cd; _pulled++; } }
           if (setLocalData(_all2)) ingest(Object.values(_all2)); else console.warn("Synchroniser : pull non persiste (garde anti-corruption ou stockage indisponible), ingestion ignoree."); /* C23 */
           const _all3 = getLocalData();
           /* Correctif lenteur synchro : avant, ce bouton renvoyait les 159 fiches une
@@ -6593,7 +6640,7 @@ let ABV_ACC = null;
   if (document.getElementById("abvAccCss")) return;
   const _st = document.createElement("style");
   _st.id = "abvAccCss";
-  _st.textContent = ".abv-card-h{display:flex;gap:12px;align-items:flex-start;margin-bottom:10px}.abv-ico{flex:0 0 auto;width:44px;height:44px;border-radius:14px;display:grid;place-items:center;font-size:22px;background:var(--sage-soft);color:var(--sage-soft-ink)}.abv-ico.gold{background:var(--warn-soft);color:var(--warn)}.abv-ico.ok{background:var(--ok-soft);color:var(--ok)}.abv-card-h h3{margin:1px 0 2px;font-size:1.05rem}.abv-card-h .hint{margin:0}.abv-pill{display:inline-flex;align-items:center;padding:2px 9px;border-radius:999px;font-size:.72rem;font-weight:700;white-space:nowrap}.abv-pill.lecture{background:var(--sage-soft);color:var(--sage-soft-ink)}.abv-pill.ecriture{background:var(--ok-soft);color:var(--ok)}.abv-pill.admin{background:var(--warn-soft);color:var(--warn)}.abv-row{display:flex;gap:10px;align-items:center;padding:10px 2px;border-bottom:1px solid var(--line)}.abv-row:last-child{border-bottom:none}.abv-ava{flex:0 0 auto;width:38px;height:38px;border-radius:50%;display:grid;place-items:center;font-weight:800;background:var(--sage-soft);color:var(--sage-soft-ink);font-size:.95rem}.abv-ava.gold{background:var(--warn-soft);color:var(--warn)}.abv-row .grow,.abv-nrow .grow{flex:1;min-width:0}.abv-mail{font-weight:700;overflow-wrap:anywhere}.abv-sub{font-size:.8rem;color:var(--muted)}.abv-form{background:var(--surface-2);border-radius:12px;padding:12px;margin-top:12px}.abv-empty{border:1.5px dashed var(--line);border-radius:12px;padding:14px;text-align:center;color:var(--muted);margin-top:10px}.abv-err{background:var(--bad-soft);border:1px solid var(--bad);color:var(--bad);border-radius:12px;padding:12px 14px;margin-bottom:12px;font-weight:600}.abv-nrow{display:flex;gap:10px;padding:10px 2px;border-bottom:1px solid var(--line)}.abv-nrow:last-child{border-bottom:none}.abv-nrow .when{font-size:.78rem;color:var(--muted)}.abv-new{color:var(--bad);font-weight:800}.abv-acts{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}";
+  _st.textContent = ".abv-card-h{display:flex;gap:12px;align-items:flex-start;margin-bottom:10px}.abv-card-h>div{min-width:0} /* Correctif mobile 2026-11-16 : le texte de l'en-tête ne doit pas pousser la carte. */.abv-ico{flex:0 0 auto;width:44px;height:44px;border-radius:14px;display:grid;place-items:center;font-size:22px;background:var(--sage-soft);color:var(--sage-soft-ink)}.abv-ico.gold{background:var(--warn-soft);color:var(--warn)}.abv-ico.ok{background:var(--ok-soft);color:var(--ok)}.abv-card-h h3{margin:1px 0 2px;font-size:1.05rem}.abv-card-h .hint{margin:0}.abv-pill{display:inline-flex;align-items:center;padding:2px 9px;border-radius:999px;font-size:.72rem;font-weight:700;white-space:nowrap}.abv-pill.lecture{background:var(--sage-soft);color:var(--sage-soft-ink)}.abv-pill.ecriture{background:var(--ok-soft);color:var(--ok)}.abv-pill.admin{background:var(--warn-soft);color:var(--warn)}.abv-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:10px 2px;border-bottom:1px solid var(--line)} /* Correctif mobile 2026-11-16 : la rangée peut se replier, comme .li (M70/M74/M77). */.abv-row:last-child{border-bottom:none}.abv-ava{flex:0 0 auto;width:38px;height:38px;border-radius:50%;display:grid;place-items:center;font-weight:800;background:var(--sage-soft);color:var(--sage-soft-ink);font-size:.95rem}.abv-ava.gold{background:var(--warn-soft);color:var(--warn)}.abv-row .grow,.abv-nrow .grow{flex:1;min-width:0}.abv-mail{font-weight:700;overflow-wrap:anywhere}.abv-sub{font-size:.8rem;color:var(--muted)}.abv-form{background:var(--surface-2);border-radius:12px;padding:12px;margin-top:12px}.abv-empty{border:1.5px dashed var(--line);border-radius:12px;padding:14px;text-align:center;color:var(--muted);margin-top:10px}.abv-err{background:var(--bad-soft);border:1px solid var(--bad);color:var(--bad);border-radius:12px;padding:12px 14px;margin-bottom:12px;font-weight:600}.abv-nrow{display:flex;gap:10px;padding:10px 2px;border-bottom:1px solid var(--line)}.abv-nrow:last-child{border-bottom:none}.abv-nrow .when{font-size:.78rem;color:var(--muted)}.abv-new{color:var(--bad);font-weight:800}.abv-acts{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}@media (max-width:560px){.abv-row .grow{flex:1 1 170px}.abv-acts{flex:1 1 100%;justify-content:flex-start}.abv-row>.btn{flex:1 1 100%;justify-content:center}.abv-form .btn{flex:1 1 100%;justify-content:center}} /* Correctif mobile 2026-11-16 : sur téléphone, les actions passent sous l'e-mail au lieu de l'écraser (boutons « Passer en lecture… » / « Révoquer »). */";
   document.head.appendChild(_st);
 })();
 function abvAva(email, gold) { const _i = String(email || "?").trim().charAt(0).toUpperCase() || "?"; return `<span class="abv-ava${gold ? " gold" : ""}">${esc(_i)}</span>`; }
@@ -6932,7 +6979,7 @@ const A = {
   newweight: (el) => weightForm(el.dataset.id), newtreat: (el) => treatForm(el.dataset.id),
   newitem: () => itemForm(), edititem: (el) => { const i = byId(S.inventory, el.dataset.id); if (i) itemForm(i); },
   newcage: () => cageForm(), editcage: (el) => { const c = byId(S.cages || [], el.dataset.id); if (c) cageForm(c); },
-  retrySync: async () => { await retryPendingSync(); const _rsUid = (userSession.isLoggedIn && userSession.uid) || (window.firebaseAuth && window.firebaseAuth.currentUser && window.firebaseAuth.currentUser.uid); if (_rsUid && canReinstallListener(_rsUid)) ensureCloudSyncListener(_rsUid); toast("Synchronisation relancée"); render(); },
+  retrySync: async () => { await retryPendingSync(); const _rsUid = (userSession.isLoggedIn && userSession.uid) || (window.firebaseAuth && window.firebaseAuth.currentUser && window.firebaseAuth.currentUser.uid); let _rsOk = true; if (_rsUid) { /* Correctif 2026-11-16 : « Renvoyer maintenant » ne se contentait pas de rejouer la file — il relit désormais le cloud et fusionne (processCloudSnapshotDocs), sinon une fiche présente dans le cloud mais bloquée en local ne revenait jamais. */ try { const _rsDocs = await fsRunQueryCheptel(_rsUid); processCloudSnapshotDocs(_rsDocs, _rsUid); } catch (e) { _rsOk = false; console.warn("Renvoyer maintenant : relecture cloud impossible :", e); } if (canReinstallListener(_rsUid)) ensureCloudSyncListener(_rsUid); } toast(_rsOk ? "Synchronisation relancée" : "⚠️ Relecture cloud impossible — vérifiez la connexion, puis réessayez."); render(); },
   probeServer: async () => { try { await probeServerContact(); } finally { render(); } },
   retryListener: () => { const _cu = window.firebaseAuth && window.firebaseAuth.currentUser; if (!_cu || !_cu.uid) return; if (listenerUid && _cu.uid !== listenerUid) return; cancelListenerTimers(); listenerStopped = false; listenerAttempts = 0; ensureCloudSyncListener(_cu.uid); render(); },
   resolveConflictsLocal: async () => { await resolveSyncConflicts("local"); }, /* Anciens boutons manuels : la règle « la plus récente gagne » s'applique automatiquement. */
